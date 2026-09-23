@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 Ed25519 task envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload_b64", "signature_b64"],
+  "properties": {
+    "payload_b64": {"type": "string", "minLength": 1, "maxLength": 10923, "pattern": "^[A-Za-z0-9_-]+$"},
+    "signature_b64": {"type": "string", "minLength": 86, "maxLength": 86, "pattern": "^[A-Za-z0-9_-]+$"}
+  },
+  "$comment": "Go validation additionally requires canonical unpadded Base64URL, decoded-size limits, a valid fixed-domain Ed25519 signature, and a valid task-v1 payload."
+}

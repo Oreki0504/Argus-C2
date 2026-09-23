@@ -1,0 +1,8 @@
+/.cache/
+/.local/
+/bin/
+*.exe
+*.test
+*.out
+*.pem
+*.key

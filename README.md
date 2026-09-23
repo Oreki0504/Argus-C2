@@ -8,9 +8,11 @@ The central design goal is: **compromising the management server must not give a
 
 **Project status**
 
-Phase 1 architecture and security design is complete. This repository currently contains documentation only; server, probe, and CLI implementations and deployable releases are not yet available. The capabilities below are planned, and the security goals still require implementation and testing.
+Phases 1 and 2 are complete: the repository includes the architecture design and a Go foundation with strict protocol types, node identities, task-envelope signatures, and a loopback-only mTLS connection check. Task execution, enrollment, heartbeats, metrics collection, and the administration CLI are not implemented yet. This is a development prototype, not a production-ready release. The full capabilities below remain the roadmap.
 
 See the [Phase 1 architecture and security design](docs/phase-1-design.md) for the full specification.
+
+For implemented behavior, local run commands, and validation steps, see the [Phase 2 implementation guide](docs/phase-2-implementation.md). The toolchain baseline is Go 1.27.1; application code uses only the standard library.
 
 **Architecture**
 
@@ -89,7 +91,7 @@ The project is intended for machines you own or are explicitly authorized to adm
 | Phase | Deliverables | Status |
 | --- | --- | --- |
 | 1 | Threat model, architecture, protocol, trust boundaries, and MVP scope | Design documented |
-| 2 | Go module, shared protocol types, node identity, and mTLS | Not implemented |
+| 2 | Go module, shared protocol types, node identity, and mTLS | Implemented; local development only |
 | 3 | Enrollment, heartbeats, system information, and basic metrics | Not implemented |
 | 4 | Typed task dispatch, local policy, persistent deduplication, and auditing | Not implemented |
 | 5 | SSH configuration and authorized-key auditing, service status | Not implemented |
@@ -98,14 +100,19 @@ The project is intended for machines you own or are explicitly authorized to adm
 
 Each phase starts by explaining its scope, design rationale, and security risks before implementation and validation. Identity checks and input validation accompany the interfaces that need them. Management interfaces remain restricted to local or isolated development environments until authentication, authorization, and auditing are complete.
 
-Planned tests cover path traversal, symlink escape, malformed requests, replay, node identity mismatches, invalid or revoked certificates, role violations, resource exhaustion, and a malicious server holding a valid signing key attempting to bypass local policy.
+Current tests cover strict JSON parsing, task preflight, signature tampering, node identity mismatches, invalid certificates, disabled nodes on established connections, and bounded response handling. Linux/Windows CI and bounded fuzz smoke tests exercise the foundation. Later phases add remote-file traversal tests, persistent replay tests, RBAC, resource-exhaustion testing, and full malicious-server containment exercises.
 
 **Repository contents**
 
 ```text
-README.md                 Project overview, scope, and roadmap
+cmd/                      Server, probe, and local development PKI commands
+internal/                 Protocol, identity, TLS, transport, and validation
+schemas/                  Versioned task and envelope JSON Schemas
+test/integration/         Real mTLS connection tests
+.github/workflows/        Linux and Windows validation
 docs/
-  phase-1-design.md        Complete Phase 1 architecture and security design
+  phase-1-design.md        Target architecture and security design
+  phase-2-implementation.md Implemented scope and local development guide
 ```
 
-The proposed Go package layout, API, enrollment flow, task format, and security validation requirements are documented in the [design specification](docs/phase-1-design.md). Build, installation, and usage instructions will be added as the corresponding implementations become available.
+The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Start with the [local development guide](docs/phase-2-implementation.md) to generate temporary credentials and verify a probe connection. Production installation instructions will be added after the corresponding security gates are complete.

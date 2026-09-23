@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 Phase 2 task payload (no execution support)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "request_id", "agent_id", "enrollment_epoch", "created_at", "expires_at", "task_type", "task_version", "params", "actor_id", "policy_digest"],
+  "properties": {
+    "version": {"const": 1},
+    "request_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "agent_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "enrollment_epoch": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "created_at": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+    "expires_at": {"type": "integer", "minimum": 2, "maximum": 9223372036854775807},
+    "task_type": {"enum": ["system.info", "system.metrics"]},
+    "task_version": {"const": 1},
+    "params": {"type": "object", "additionalProperties": false, "maxProperties": 0},
+    "actor_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+    "policy_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "$comment": "Both task types have empty parameter objects. Go validation additionally enforces byte/depth bounds, exact integer encodings, duplicate-key and Unicode rejection, and the ordered validity window of at most 300 seconds. Target/time/policy preflight checks are separate. This schema does not authorize execution."
+}

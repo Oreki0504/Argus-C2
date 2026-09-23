@@ -1,0 +1,41 @@
+name: Go validation
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Build
+        run: go build ./...
+      - name: Static checks
+        run: go vet ./...
+      - name: Unit and TLS integration tests
+        run: go test ./... -count=1
+      - name: Race detector
+        if: runner.os == 'Linux'
+        run: go test -race ./... -count=1
+      - name: Vulnerability scan
+        if: runner.os == 'Linux'
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      - name: Fuzz smoke tests
+        if: runner.os == 'Linux'
+        run: |
+          go test ./internal/strictjson -run '^$' -fuzz '^FuzzDecode$' -fuzztime=10s -parallel=2
+          go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeTask$' -fuzztime=10s -parallel=2
+          go test ./internal/signing -run '^$' -fuzz '^FuzzVerify$' -fuzztime=10s -parallel=2
