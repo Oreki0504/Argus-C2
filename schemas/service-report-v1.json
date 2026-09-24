@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 read-only service observation",
+  "$comment": "Runtime also binds service_id to the signed task and observed_at to the result completion time. Unavailable does not mean stopped. Unit names come from local policy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["service_id", "observed_at", "available", "code", "unit", "load_state", "active_state", "sub_state"],
+  "properties": {
+    "service_id": {"$ref": "task-v1.json#/$defs/resource_id"},
+    "observed_at": {"type": "integer", "minimum": 1},
+    "available": {"type": "boolean"},
+    "code": {"type": "string"},
+    "unit": {"type": "string", "maxLength": 128},
+    "load_state": {"type": "string", "maxLength": 32},
+    "active_state": {"type": "string", "maxLength": 32},
+    "sub_state": {"type": "string", "maxLength": 32}
+  },
+  "if": {"properties": {"available": {"const": true}}},
+  "then": {"properties": {
+    "code": {"const": ""}, "unit": {"pattern": "\\.service$"},
+    "load_state": {"pattern": "^[a-z-]{1,32}$"}, "active_state": {"pattern": "^[a-z-]{1,32}$"}, "sub_state": {"pattern": "^[a-z-]{1,32}$"}
+  }},
+  "else": {"properties": {
+    "code": {"enum": ["unsupported", "bus_unavailable", "permission_denied", "unit_not_loaded", "alias_mismatch", "invalid_response"]},
+    "unit": {"const": ""}, "load_state": {"const": ""}, "active_state": {"const": ""}, "sub_state": {"const": ""}
+  }}
+}

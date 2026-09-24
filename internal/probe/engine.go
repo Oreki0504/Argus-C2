@@ -72,7 +72,7 @@ func (e *Engine) Process(ctx context.Context, envelope []byte) ([]byte, error) {
 		}
 	}
 	r.FinishedAt = max(r.StartedAt, time.Now().Unix())
-	if err := r.Validate(); err != nil {
+	if err := errors.Join(r.Validate(), r.CheckAssignment(t)); err != nil {
 		r.Status = protocol.Failed
 		r.ErrorCode = "collector_failed"
 		r.Data = json.RawMessage(`{}`)

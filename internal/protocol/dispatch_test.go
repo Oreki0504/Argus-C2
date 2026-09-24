@@ -38,6 +38,10 @@ func TestHeartbeatVersionsAreStrict(t *testing.T) {
 }
 func FuzzDecodeResult(f *testing.F) {
 	f.Add(resultSeed())
+	for _, kind := range []TaskType{SSHAudit, ServiceStatus} {
+		b, _ := json.Marshal(inspectionResult(kind))
+		f.Add(b)
+	}
 	f.Add([]byte(`{}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		r, err := DecodeResult(data)

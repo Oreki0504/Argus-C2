@@ -25,6 +25,8 @@ type TaskType string
 const (
 	SystemInfo    TaskType = "system.info"
 	SystemMetrics TaskType = "system.metrics"
+	SSHAudit      TaskType = "ssh.audit"
+	ServiceStatus TaskType = "service.status"
 )
 
 type Task struct {
@@ -70,10 +72,53 @@ func (t Task) Validate() error {
 		if err := strictjson.Decode(t.Params, &params, MaxParamsBytes); err != nil {
 			return err
 		}
+	case SSHAudit, ServiceStatus:
+		if _, err := t.Resource(); err != nil {
+			return err
+		}
 	default:
 		return errors.New("unsupported task type")
 	}
 	return nil
+}
+
+func KnownTask(t TaskType) bool {
+	return t == SystemInfo || t == SystemMetrics || t == SSHAudit || t == ServiceStatus
+}
+func ResourceID(s string) bool {
+	if len(s) < 1 || len(s) > 32 || s[0] == '_' || s[0] == '-' {
+		return false
+	}
+	return identifier(s)
+}
+
+// Resource parses the only remotely selectable value for an audit/status task.
+func (t Task) Resource() (string, error) {
+	if t.Type == SSHAudit {
+		var p struct {
+			ID string `json:"profile_id"`
+		}
+		if err := strictjson.Decode(t.Params, &p, 256, "profile_id"); err != nil {
+			return "", err
+		}
+		if !ResourceID(p.ID) {
+			return "", errors.New("invalid profile ID")
+		}
+		return p.ID, nil
+	}
+	if t.Type == ServiceStatus {
+		var p struct {
+			ID string `json:"service_id"`
+		}
+		if err := strictjson.Decode(t.Params, &p, 256, "service_id"); err != nil {
+			return "", err
+		}
+		if !ResourceID(p.ID) {
+			return "", errors.New("invalid service ID")
+		}
+		return p.ID, nil
+	}
+	return "", errors.New("task has no resource selector")
 }
 
 // CheckTarget is preflight only; the probe's policy and durable acceptance gate

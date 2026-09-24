@@ -8,11 +8,11 @@ The central design goal is: **compromising the management server must not give a
 
 **Project status**
 
-Phases 1 through 4 are implemented: architecture and protocol foundations, explicit one-time enrollment, persistent node identities, mTLS heartbeats, and signed dispatch of the read-only `system.info` and `system.metrics` tasks. Probes enforce local policy, persistent replay protection, execution limits, and durable result delivery. Both ends keep bounded hash-chained audit records. Administrator authentication, broader auditing tasks, and deployment hardening remain later phases. This is a loopback-only development prototype, not a production-ready release. The full capabilities below remain the roadmap.
+Phases 1 through 5 are implemented: architecture and protocol foundations, explicit one-time enrollment, persistent node identities, mTLS heartbeats, and signed dispatch of four read-only tasks: `system.info`, `system.metrics`, `ssh.audit`, and `service.status`. SSH and service inspection require explicit opt-in and local resource mappings. Probes enforce local policy, persistent replay protection, execution limits, and durable result delivery. Both ends keep bounded hash-chained audit records. Administrator authentication and deployment hardening remain later phases. This is a loopback-only development prototype, not a production-ready release. The full capabilities below remain the roadmap.
 
 See the [Phase 1 architecture and security design](docs/phase-1-design.md) for the full specification.
 
-Start with the [Phase 4 task and local-policy guide](docs/phase-4-implementation.md) for the complete local run flow, limits, recovery behavior, and validation. The [Phase 3 guide](docs/phase-3-implementation.md) explains enrollment and telemetry; the [Phase 2 guide](docs/phase-2-implementation.md) retains the simpler static-registry connection check. The toolchain baseline is Go 1.27.1, with pinned pure-Go SQLite and operating-system dependencies in go.mod/go.sum.
+Start with the [Phase 5 inspection guide](docs/phase-5-implementation.md) for SSH coverage, safe file reads, service queries, and local resource policy. It builds on the [Phase 4 task guide](docs/phase-4-implementation.md), which provides the complete enrollment/dispatch run flow and recovery behavior. The [Phase 3 guide](docs/phase-3-implementation.md) explains enrollment and telemetry; the [Phase 2 guide](docs/phase-2-implementation.md) retains the simpler static-registry connection check. The toolchain baseline is Go 1.27.1, with pinned SQLite, SSH, D-Bus, and operating-system dependencies in go.mod/go.sum.
 
 **Architecture**
 
@@ -60,7 +60,7 @@ The MVP focuses on read-only queries and auditing. Each node locally defines whi
 | `service.restart` | Restart an explicitly allowed service | Post-MVP; disabled by default and subject to a separate security review |
 | `package.updates` | Inspect update availability using local package metadata | Post-MVP, with distribution-specific adapters |
 
-SSH auditing does not modify `authorized_keys`. Results must identify coverage gaps when permissions are insufficient or configuration cannot be fully interpreted. Reads requiring additional privilege belong in a separately reviewed, narrowly scoped helper; the main probe remains non-root.
+SSH auditing does not modify `authorized_keys`. Implemented reports contain bounded fingerprints, metadata, local baseline comparisons, and selected static configuration observations. They identify coverage gaps and do not claim to resolve effective sshd configuration. Service queries inspect only locally mapped, already loaded units. Reads requiring additional privilege remain unavailable; a [separate helper design](docs/phase-5-helper-design.md) records future review requirements, and no privileged helper is implemented.
 
 **Security design**
 
@@ -94,13 +94,13 @@ The project is intended for machines you own or are explicitly authorized to adm
 | 2 | Go module, shared protocol types, node identity, and mTLS | Implemented; local development only |
 | 3 | Enrollment, heartbeats, system information, and basic metrics | Implemented; local development only |
 | 4 | Typed task dispatch, local policy, persistent deduplication, and auditing | Implemented for two read-only task types; local development only |
-| 5 | SSH configuration and authorized-key auditing, service status | Not implemented |
+| 5 | SSH configuration and authorized-key auditing, service status | Implemented with explicit local opt-in, bounded observations, and coverage gaps; local development only |
 | 6 | Administration CLI, administrator authentication, and RBAC | Not implemented |
 | 7 | Linux deployment hardening, security tests, fuzzing, and documentation | Not implemented |
 
 Each phase starts by explaining its scope, design rationale, and security risks before implementation and validation. Identity checks and input validation accompany the interfaces that need them. Management interfaces remain restricted to local or isolated development environments until authentication, authorization, and auditing are complete.
 
-Current tests cover strict parsing and signatures, certificate/enrollment boundaries, heartbeat identity binding, real mTLS task delivery, persistent replay protection, concurrent duplicates, interrupted-task recovery, local policy rejection, audit tampering and write failures, result limits and acknowledgments, and disabled nodes on established connections. Linux/Windows CI, the Linux race detector, a vulnerability scan, and bounded fuzz smoke tests exercise the implementation. Later phases add remote-file traversal tests, RBAC, deployment resource controls, and broader malicious-server containment exercises.
+Current tests cover strict parsing and signatures, certificate/enrollment boundaries, heartbeat identity binding, real mTLS task delivery, persistent replay protection, concurrent duplicates, interrupted-task recovery, local policy rejection, audit tampering and write failures, result limits and acknowledgments, and disabled nodes on established connections. Inspection tests add hostile resource selectors, file traversal/link/rotation boundaries, redacted SSH observations, baseline drift, bounded D-Bus decoding, and a real Linux systemd query. Linux/Windows CI, the Linux race detector, a vulnerability scan, and bounded fuzz smoke tests exercise the implementation. Later phases add RBAC, deployment resource controls, and broader malicious-server containment exercises.
 
 **Repository contents**
 
@@ -116,6 +116,8 @@ docs/
   phase-2-implementation.md Implemented scope and local development guide
   phase-3-implementation.md Enrollment, heartbeat, storage, and telemetry guide
   phase-4-implementation.md Typed tasks, local policy, replay state, and audit guide
+  phase-5-implementation.md SSH observations, local resource mappings, and service status
+  phase-5-helper-design.md Privileged helper constraints; no helper implemented
 ```
 
-The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Follow the [current local development guide](docs/phase-4-implementation.md) to enroll a probe, submit a read-only task, and inspect its result and audits. Production installation instructions will be added after the corresponding security gates are complete.
+The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Follow the [current local development guide](docs/phase-5-implementation.md) to configure inspection resources, submit read-only tasks, and inspect results and audits. Production installation instructions will be added after the corresponding security gates are complete.

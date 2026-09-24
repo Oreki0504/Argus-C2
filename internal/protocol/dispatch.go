@@ -56,7 +56,7 @@ func (r Result) Validate() error {
 	if !identity.Hex(r.RequestID, 32) || !identity.Hex(r.AgentID, 32) || !identity.Hex(r.Epoch, 32) || !identity.Hex(r.PolicyDigest, 64) || r.StartedAt <= 0 || r.FinishedAt < r.StartedAt || r.Truncated {
 		return bad
 	}
-	if r.Type != SystemInfo && r.Type != SystemMetrics {
+	if !KnownTask(r.Type) {
 		return bad
 	}
 	if r.Status == Succeeded {
@@ -70,13 +70,23 @@ func (r Result) Validate() error {
 			}
 			return i.Validate(r.FinishedAt)
 		}
-		_, err := DecodeMeasurements(r.Data)
-		return err
+		switch r.Type {
+		case SystemMetrics:
+			_, err := DecodeMeasurements(r.Data)
+			return err
+		case SSHAudit:
+			_, err := DecodeSSHReport(r.Data, r.FinishedAt)
+			return err
+		case ServiceStatus:
+			_, err := DecodeServiceReport(r.Data, r.FinishedAt)
+			return err
+		}
+		return bad
 	}
 	valid := false
 	switch r.Status {
 	case Rejected:
-		valid = r.ErrorCode == "paused" || r.ErrorCode == "task_disabled" || r.ErrorCode == "policy_mismatch" || r.ErrorCode == "rate_limited" || r.ErrorCode == "future"
+		valid = r.ErrorCode == "paused" || r.ErrorCode == "task_disabled" || r.ErrorCode == "policy_mismatch" || r.ErrorCode == "rate_limited" || r.ErrorCode == "future" || r.ErrorCode == "resource_denied"
 	case Expired:
 		valid = r.ErrorCode == "expired"
 	case Failed:

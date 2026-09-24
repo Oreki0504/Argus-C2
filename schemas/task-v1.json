@@ -11,11 +11,17 @@
     "enrollment_epoch": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
     "created_at": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
     "expires_at": {"type": "integer", "minimum": 2, "maximum": 9223372036854775807},
-    "task_type": {"enum": ["system.info", "system.metrics"]},
+    "task_type": {"enum": ["system.info", "system.metrics", "ssh.audit", "service.status"]},
     "task_version": {"const": 1},
-    "params": {"type": "object", "additionalProperties": false, "maxProperties": 0},
+    "params": {"type": "object"},
     "actor_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
     "policy_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
   },
-  "$comment": "Both task types have empty parameter objects. Go validation additionally enforces byte/depth bounds, exact integer encodings, duplicate-key and Unicode rejection, and the ordered validity window of at most 300 seconds. Target/time/policy preflight checks are separate. This schema does not authorize execution."
+  "allOf": [
+    {"if": {"properties": {"task_type": {"enum": ["system.info", "system.metrics"]}}}, "then": {"properties": {"params": {"maxProperties": 0}}}},
+    {"if": {"properties": {"task_type": {"const": "ssh.audit"}}}, "then": {"properties": {"params": {"additionalProperties": false, "required": ["profile_id"], "properties": {"profile_id": {"$ref": "#/$defs/resource_id"}}}}}},
+    {"if": {"properties": {"task_type": {"const": "service.status"}}}, "then": {"properties": {"params": {"additionalProperties": false, "required": ["service_id"], "properties": {"service_id": {"$ref": "#/$defs/resource_id"}}}}}}
+  ],
+  "$defs": {"resource_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$"}},
+  "$comment": "System tasks have empty params. Inspection tasks select one locally mapped ID; no paths or unit names travel in tasks. Go validation additionally enforces byte/depth bounds, exact integers, duplicate-key and Unicode rejection, and a validity window of at most 300 seconds. Target/time/policy checks are separate. This schema does not authorize execution."
 }

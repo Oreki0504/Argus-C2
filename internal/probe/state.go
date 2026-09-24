@@ -386,6 +386,9 @@ func (s *State) prepare(ctx context.Context, t protocol.Task, payload []byte, p 
 	case !p.Allows(t.Type):
 		status = protocol.Rejected
 		code = "task_disabled"
+	case !p.AllowsResource(t):
+		status = protocol.Rejected
+		code = "resource_denied"
 	case minute >= p.MaxPerMinute || burst >= p.Burst:
 		status = protocol.Rejected
 		code = "rate_limited"
@@ -422,8 +425,8 @@ func finishTx(ctx context.Context, tx *sql.Tx, t protocol.Task, r protocol.Resul
 	if err := r.Validate(); err != nil {
 		return err
 	}
-	if r.AgentID != t.AgentID || r.Epoch != t.EnrollmentEpoch || r.RequestID != t.RequestID || r.Type != t.Type {
-		return errors.New("completion target mismatch")
+	if err := r.CheckAssignment(t); err != nil {
+		return err
 	}
 	data, err := json.Marshal(r)
 	if err != nil {

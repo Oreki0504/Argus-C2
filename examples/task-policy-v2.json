@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "paused": false,
+  "allow_system_info": true,
+  "allow_system_metrics": true,
+  "poll_seconds": 5,
+  "timeout_seconds": 5,
+  "max_per_minute": 30,
+  "burst": 5,
+  "max_result_bytes": 16384,
+  "pending_bytes": 33554432,
+  "telemetry": {
+    "interval_seconds": 30,
+    "sample_milliseconds": 1000,
+    "disk_paths": ["/"],
+    "network_interfaces": ["lo"]
+  },
+  "allow_ssh_audit": false,
+  "allow_service_status": false,
+  "ssh_profiles": [],
+  "services": []
+}

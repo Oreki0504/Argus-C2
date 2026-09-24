@@ -83,7 +83,7 @@ func (e Event) validate() error {
 			return errors.New("invalid audit digest")
 		}
 	}
-	if e.TaskType != "" && e.TaskType != protocol.SystemInfo && e.TaskType != protocol.SystemMetrics {
+	if e.TaskType != "" && !protocol.KnownTask(e.TaskType) {
 		return errors.New("invalid audited task")
 	}
 	return nil

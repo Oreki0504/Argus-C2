@@ -61,7 +61,10 @@ func (s *Store) ConfigureSigner(ctx context.Context, key ed25519.PrivateKey) err
 
 // Enqueue is local administration only. It commits exact payload bytes and the
 // intent before the polling path is allowed to sign anything.
-func (s *Store) Enqueue(ctx context.Context, id string, kind protocol.TaskType, actor string, ttl time.Duration) (protocol.Task, error) {
+func (s *Store) Enqueue(ctx context.Context, id string, kind protocol.TaskType, actor string, ttl time.Duration, params ...json.RawMessage) (protocol.Task, error) {
+	if len(params) > 1 {
+		return protocol.Task{}, errors.New("expected one typed parameter object")
+	}
 	if !identity.Hex(id, 32) || ttl < time.Second || ttl > protocol.MaxLifetime*time.Second {
 		return protocol.Task{}, errors.New("invalid task target or lifetime")
 	}
@@ -96,6 +99,9 @@ func (s *Store) Enqueue(ctx context.Context, id string, kind protocol.TaskType, 
 	}
 	now := time.Now().Unix()
 	t := protocol.Task{Version: 1, RequestID: identity.RandomID(), AgentID: id, EnrollmentEpoch: epoch, CreatedAt: now, ExpiresAt: now + int64(ttl/time.Second), Type: kind, TaskVersion: 1, Params: json.RawMessage(`{}`), ActorID: actor, PolicyDigest: digest}
+	if len(params) == 1 {
+		t.Params = append(json.RawMessage{}, params[0]...)
+	}
 	if err := t.Validate(); err != nil {
 		return protocol.Task{}, err
 	}
@@ -291,7 +297,7 @@ func (s *Store) SubmitResult(ctx context.Context, cert *x509.Certificate, data [
 		return protocol.ResultAck{}, errors.New("result has no matching assignment")
 	}
 	t, err := protocol.DecodeTask(payload)
-	if err != nil || r.Type != t.Type {
+	if err != nil || r.CheckAssignment(t) != nil {
 		return protocol.ResultAck{}, errors.New("result type mismatch")
 	}
 	if r.Status != protocol.Rejected && r.Status != protocol.Expired && r.PolicyDigest != t.PolicyDigest {
@@ -357,7 +363,7 @@ func (s *Store) Tasks(ctx context.Context, after int64, limit int) ([]TaskRecord
 		}
 		if len(data) > 0 {
 			decoded, err := protocol.DecodeResult(data)
-			if err != nil || audit.Digest(data) != resultDigest || decoded.RequestID != r.Task.RequestID || decoded.AgentID != r.Task.AgentID || decoded.Epoch != r.Task.EnrollmentEpoch || decoded.Type != r.Task.Type {
+			if err != nil || audit.Digest(data) != resultDigest || decoded.CheckAssignment(r.Task) != nil {
 				rows.Close()
 				return nil, errors.New("stored task result is corrupt")
 			}

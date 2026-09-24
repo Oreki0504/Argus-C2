@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 bounded SSH file observations",
+  "$comment": "Coverage describes only selected files and this limited parser, never effective sshd policy. Runtime also checks unique file IDs/findings, coverage consistency, absent metadata, canonical SHA256 fingerprints, kind-specific observations, and observation timestamps <= result completion.",
+  "type": "object", "additionalProperties": false,
+  "required": ["profile_id", "observed_at", "coverage", "files"],
+  "properties": {
+    "profile_id": {"$ref": "task-v1.json#/$defs/resource_id"},
+    "observed_at": {"type": "integer", "minimum": 1},
+    "coverage": {"enum": ["complete", "partial", "unavailable"]},
+    "files": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/$defs/file"}}
+  },
+  "$defs": {
+    "file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "kind", "status", "metadata_available", "metadata", "sha256", "baseline", "keys", "directives", "findings"],
+      "properties": {
+        "id": {"$ref": "task-v1.json#/$defs/resource_id"},
+        "kind": {"enum": ["sshd_config", "authorized_keys"]},
+        "status": {"enum": ["ok", "partial", "missing", "permission_denied", "unsafe_path", "unsafe_type", "owner_mismatch", "too_large", "changed_during_read", "unsupported", "io_error", "parse_error", "sensitive_content"]},
+        "metadata_available": {"type": "boolean"},
+        "metadata": {
+          "type": "object", "additionalProperties": false, "required": ["uid", "gid", "mode", "size"],
+          "properties": {
+            "uid": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+            "gid": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+            "mode": {"type": "integer", "minimum": 0, "maximum": 4095},
+            "size": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807}
+          }
+        },
+        "sha256": {"type": "string"}, "baseline": {"type": "string"},
+        "keys": {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/key"}},
+        "directives": {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/directive"}},
+        "findings": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"enum": ["group_or_other_writable", "match_not_evaluated", "include_not_expanded", "dynamic_auth_not_evaluated", "other_directives_not_evaluated", "invalid_line", "key_options_not_evaluated", "key_certificate_not_evaluated", "key_limit", "line_limit", "duplicate_directive", "empty_key_file", "baseline_changed", "invalid_value", "directive_limit"]}}
+      },
+      "if": {"properties": {"status": {"enum": ["ok", "partial"]}}},
+      "then": {"properties": {"metadata_available": {"const": true}, "sha256": {"pattern": "^[a-f0-9]{64}$"}, "baseline": {"enum": ["unconfigured", "match", "changed"]}}},
+      "else": {"properties": {"sha256": {"const": ""}, "baseline": {"const": "unavailable"}, "keys": {"maxItems": 0}, "directives": {"maxItems": 0}}}
+    },
+    "key": {
+      "type": "object", "additionalProperties": false, "required": ["line", "type", "fingerprint", "has_options"],
+      "properties": {
+        "line": {"type": "integer", "minimum": 1, "maximum": 512},
+        "type": {"type": "string", "minLength": 1, "maxLength": 64},
+        "fingerprint": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"},
+        "has_options": {"type": "boolean"}
+      }
+    },
+    "directive": {
+      "type": "object", "additionalProperties": false, "required": ["line", "name", "value"],
+      "properties": {
+        "line": {"type": "integer", "minimum": 1, "maximum": 512},
+        "name": {"enum": ["permitrootlogin", "passwordauthentication", "pubkeyauthentication", "kbdinteractiveauthentication", "permitemptypasswords", "strictmodes", "usepam"]},
+        "value": {"type": "string"}
+      },
+      "if": {"properties": {"name": {"const": "permitrootlogin"}}},
+      "then": {"properties": {"value": {"enum": ["yes", "no", "prohibit-password", "without-password", "forced-commands-only"]}}},
+      "else": {"properties": {"value": {"enum": ["yes", "no"]}}}
+    }
+  }
+}

@@ -30,6 +30,11 @@ jobs:
       - name: Race detector
         if: runner.os == 'Linux'
         run: go test -race ./... -count=1
+      - name: Native systemd read-only query
+        if: runner.os == 'Linux'
+        env:
+          ARGUS_REQUIRE_SYSTEMD: '1'
+        run: go test ./internal/service -run '^TestLiveSystemdReadOnly$' -count=1 -v
       - name: Vulnerability scan
         if: runner.os == 'Linux'
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
@@ -42,3 +47,5 @@ jobs:
           go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeHeartbeat$' -fuzztime=10s -parallel=2
           go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeResult$' -fuzztime=10s -parallel=2
           go test ./internal/enrollment -run '^$' -fuzz '^FuzzParseCSR$' -fuzztime=10s -parallel=2
+          go test ./internal/sshaudit -run '^$' -fuzz '^FuzzSSHParsers$' -fuzztime=10s -parallel=2
+          go test ./internal/service -run '^$' -fuzz '^FuzzDBusResponseGuard$' -fuzztime=10s -parallel=2

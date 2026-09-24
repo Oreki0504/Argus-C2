@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 locally administered inspection policy",
+  "$comment": "Runtime also checks canonical paths, restricted basenames, forbidden pseudo-filesystem bases, unique resource IDs/paths, exact unit syntax, byte limits, and Phase 4 quota relationships. This policy is installed locally, never through a task.",
+  "type": "object", "additionalProperties": false,
+  "required": ["version", "paused", "allow_system_info", "allow_system_metrics", "poll_seconds", "timeout_seconds", "max_per_minute", "burst", "max_result_bytes", "pending_bytes", "telemetry", "allow_ssh_audit", "allow_service_status", "ssh_profiles", "services"],
+  "properties": {
+    "version": {"const": 2},
+    "paused": {"type": "boolean"}, "allow_system_info": {"type": "boolean"}, "allow_system_metrics": {"type": "boolean"},
+    "poll_seconds": {"$ref": "task-policy-v1.json#/properties/poll_seconds"},
+    "timeout_seconds": {"$ref": "task-policy-v1.json#/properties/timeout_seconds"},
+    "max_per_minute": {"$ref": "task-policy-v1.json#/properties/max_per_minute"},
+    "burst": {"$ref": "task-policy-v1.json#/properties/burst"},
+    "max_result_bytes": {"$ref": "task-policy-v1.json#/properties/max_result_bytes"},
+    "pending_bytes": {"$ref": "task-policy-v1.json#/properties/pending_bytes"},
+    "telemetry": {"$ref": "task-policy-v1.json#/properties/telemetry"},
+    "allow_ssh_audit": {"type": "boolean", "default": false},
+    "allow_service_status": {"type": "boolean", "default": false},
+    "ssh_profiles": {
+      "type": "array", "maxItems": 4,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "files"],
+        "properties": {
+          "id": {"$ref": "task-v1.json#/$defs/resource_id"},
+          "files": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/$defs/file"}}
+        }
+      }
+    },
+    "services": {
+      "type": "array", "maxItems": 16,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "unit"],
+        "properties": {
+          "id": {"$ref": "task-v1.json#/$defs/resource_id"},
+          "unit": {"type": "string", "maxLength": 128, "pattern": "^[A-Za-z0-9_@-][A-Za-z0-9_.@-]*\\.service$"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "kind", "base_dir", "relative_path", "owner_uid", "owner_gid", "max_bytes", "baseline_sha256"],
+      "properties": {
+        "id": {"$ref": "task-v1.json#/$defs/resource_id"},
+        "kind": {"enum": ["sshd_config", "authorized_keys"]},
+        "base_dir": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^/"},
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^/]"},
+        "owner_uid": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+        "owner_gid": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+        "max_bytes": {"type": "integer", "minimum": 1024, "maximum": 65536},
+        "baseline_sha256": {"type": "string", "pattern": "^([a-f0-9]{64})?$"}
+      }
+    }
+  }
+}

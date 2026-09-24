@@ -86,6 +86,16 @@ func TestTaskPreflight(t *testing.T) {
 func FuzzDecodeTask(f *testing.F) {
 	data, _ := json.Marshal(testTask())
 	f.Add(data)
+	for _, kind := range []TaskType{SSHAudit, ServiceStatus} {
+		task := testTask()
+		task.Type = kind
+		task.Params = json.RawMessage(`{"profile_id":"host"}`)
+		if kind == ServiceStatus {
+			task.Params = json.RawMessage(`{"service_id":"ssh"}`)
+		}
+		b, _ := json.Marshal(task)
+		f.Add(b)
+	}
 	f.Add([]byte(`{}`))
 	f.Fuzz(func(t *testing.T, b []byte) {
 		task, err := DecodeTask(b)

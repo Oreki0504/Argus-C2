@@ -28,7 +28,9 @@ func run() error {
 	action := flag.String("action", "nodes", "token, nodes, disable, submit, tasks, or audit")
 	ttl := flag.Duration("ttl", 10*time.Minute, "enrollment token lifetime, at most 15 minutes")
 	id := flag.String("agent-id", "", "node to disable or submit to")
-	kind := flag.String("type", "", "system.info or system.metrics (submit only)")
+	kind := flag.String("type", "", "system.info, system.metrics, ssh.audit, or service.status (submit only)")
+	profileID := flag.String("profile-id", "", "local SSH profile ID for ssh.audit")
+	serviceID := flag.String("service-id", "", "local service ID for service.status")
 	actor := flag.String("actor-id", "local-operator", "local audit label; not an authenticated administrator identity")
 	taskTTL := flag.Duration("task-ttl", 2*time.Minute, "task lifetime, 1 second through 5 minutes")
 	after := flag.Int64("after", 0, "task or audit sequence cursor")
@@ -48,6 +50,20 @@ func run() error {
 	}
 	if (*action == "submit") != (*kind != "") {
 		return errors.New("-type is required only for submit")
+	}
+	params := json.RawMessage(`{}`)
+	if *action == "submit" && *kind == string(protocol.SSHAudit) {
+		if !protocol.ResourceID(*profileID) || *serviceID != "" {
+			return errors.New("ssh.audit requires only -profile-id")
+		}
+		params, _ = json.Marshal(map[string]string{"profile_id": *profileID})
+	} else if *action == "submit" && *kind == string(protocol.ServiceStatus) {
+		if !protocol.ResourceID(*serviceID) || *profileID != "" {
+			return errors.New("service.status requires only -service-id")
+		}
+		params, _ = json.Marshal(map[string]string{"service_id": *serviceID})
+	} else if *profileID != "" || *serviceID != "" {
+		return errors.New("resource flags apply only to their matching task type")
 	}
 	s, err := state.Open(*dir)
 	if err != nil {
@@ -73,7 +89,7 @@ func run() error {
 	case "disable":
 		return s.Disable(ctx, *id)
 	case "submit":
-		task, err := s.Enqueue(ctx, *id, protocol.TaskType(*kind), *actor, *taskTTL)
+		task, err := s.Enqueue(ctx, *id, protocol.TaskType(*kind), *actor, *taskTTL, params)
 		if err != nil {
 			return err
 		}
