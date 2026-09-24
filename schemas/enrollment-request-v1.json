@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 enrollment request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "token", "csr_b64"],
+  "properties": {
+    "version": {"const": 1},
+    "token": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "csr_b64": {"type": "string", "minLength": 1, "maxLength": 2731, "pattern": "^[A-Za-z0-9_-]+$"}
+  },
+  "$comment": "The request is limited to 8192 bytes. Go additionally requires canonical unpadded Base64URL, a DER CSR of at most 2048 bytes, Ed25519 proof of possession, and no caller-supplied subject, SAN, attributes, or extensions. Tokens are secrets, never URLs, command-line arguments, or log fields."
+}

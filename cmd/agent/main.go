@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"log"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/Oreki0504/Argus-C2/internal/agent"
+	"github.com/Oreki0504/Argus-C2/internal/collector"
 	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/tlsconfig"
 )
@@ -21,12 +25,17 @@ func main() {
 	key := flag.String("key", "", "probe private key PEM file")
 	ca := flag.String("ca", "", "server CA bundle PEM file")
 	identityFile := flag.String("identity", "", "local node identity JSON file")
+	telemetry := flag.String("config", "", "local telemetry JSON configuration; omission checks identity once")
+	once := flag.Bool("once", false, "collect and upload one heartbeat, then exit (requires -config)")
 	flag.Parse()
 	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
 		log.Fatal("the probe must run as a non-root user")
 	}
 	if flag.NArg() != 0 || *cert == "" || *key == "" || *ca == "" || *identityFile == "" {
 		log.Fatal("required: -cert, -key, -ca, -identity; no positional arguments")
+	}
+	if *once && *telemetry == "" {
+		log.Fatal("-once requires -config")
 	}
 	u, err := agent.ServerURL(*address)
 	if err != nil {
@@ -45,6 +54,25 @@ func main() {
 		log.Fatal(err)
 	}
 	defer client.Close()
+	if *telemetry != "" {
+		cfg, err := collector.LoadConfig(*telemetry)
+		if err != nil {
+			log.Fatal(err)
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		err = client.Run(ctx, cfg, *once, func(err error) {
+			if err != nil {
+				log.Println("Heartbeat failed; next attempt uses local backoff")
+			} else {
+				log.Println("Heartbeat accepted")
+			}
+		})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			log.Fatal(err)
+		}
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	info, err := client.Connect(ctx)

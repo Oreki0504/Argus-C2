@@ -1,9 +1,11 @@
-// Package agent implements a one-shot authenticated connection check.
+// Package agent implements explicit enrollment and outbound authenticated telemetry.
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"mime"
 	"net"
@@ -43,6 +45,10 @@ func NewClient(raw string, config *tls.Config, node identity.Node) (*Client, err
 	if err != nil || actual != node {
 		return nil, errors.New("TLS certificate identity mismatch")
 	}
+	return &Client{http: newHTTP(config), origin: u.String(), node: node}, nil
+}
+
+func newHTTP(config *tls.Config) *http.Client {
 	transport := &http.Transport{
 		Proxy: nil, TLSClientConfig: config.Clone(), DisableCompression: true,
 		DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
@@ -50,7 +56,7 @@ func NewClient(raw string, config *tls.Config, node identity.Node) (*Client, err
 		IdleConnTimeout: 30 * time.Second, MaxConnsPerHost: 2, MaxIdleConnsPerHost: 1,
 		MaxResponseHeaderBytes: 8192,
 	}
-	return &Client{http: &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirects are forbidden") }}, origin: u.String(), node: node}, nil
+	return &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirects are forbidden") }}
 }
 func (c *Client) Close() { c.http.CloseIdleConnections() }
 func (c *Client) Connect(ctx context.Context) (protocol.ConnectionInfo, error) {
@@ -58,13 +64,40 @@ func (c *Client) Connect(ctx context.Context) (protocol.ConnectionInfo, error) {
 	if err != nil {
 		return protocol.ConnectionInfo{}, err
 	}
+	return c.identityResponse(req)
+}
+
+func (c *Client) Heartbeat(ctx context.Context, h protocol.Heartbeat) error {
+	if err := h.Validate(); err != nil {
+		return err
+	}
+	if h.AgentID != c.node.AgentID || h.EnrollmentEpoch != c.node.EnrollmentEpoch {
+		return errors.New("local heartbeat identity mismatch")
+	}
+	data, err := json.Marshal(h)
+	if err != nil {
+		return err
+	}
+	if len(data) > protocol.MaxHeartbeatBytes {
+		return errors.New("heartbeat exceeds size limit")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.origin+"/api/v1/agent/heartbeat", bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	_, err = c.identityResponse(req)
+	return err
+}
+
+func (c *Client) identityResponse(req *http.Request) (protocol.ConnectionInfo, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return protocol.ConnectionInfo{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return protocol.ConnectionInfo{}, errors.New("server rejected identity check")
+		return protocol.ConnectionInfo{}, errors.New("server rejected probe request")
 	}
 	media, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {

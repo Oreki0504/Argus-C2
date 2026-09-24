@@ -8,11 +8,11 @@ The central design goal is: **compromising the management server must not give a
 
 **Project status**
 
-Phases 1 and 2 are complete: the repository includes the architecture design and a Go foundation with strict protocol types, node identities, task-envelope signatures, and a loopback-only mTLS connection check. Task execution, enrollment, heartbeats, metrics collection, and the administration CLI are not implemented yet. This is a development prototype, not a production-ready release. The full capabilities below remain the roadmap.
+Phases 1 through 3 are implemented: architecture and protocol foundations, explicit one-time enrollment, persistent node identities, mTLS heartbeats, and locally configured Linux system information and basic metrics. SQLite stores registrations, disablement, and each node's latest report. Remote task dispatch, execution policy, persistent task replay protection, auditing, and administrator authentication remain later phases. This is a loopback-only development prototype, not a production-ready release. The full capabilities below remain the roadmap.
 
 See the [Phase 1 architecture and security design](docs/phase-1-design.md) for the full specification.
 
-For implemented behavior, local run commands, and validation steps, see the [Phase 2 implementation guide](docs/phase-2-implementation.md). The toolchain baseline is Go 1.27.1; application code uses only the standard library.
+Start with the [Phase 3 enrollment and telemetry guide](docs/phase-3-implementation.md) for current behavior, local run commands, and validation. The [Phase 2 guide](docs/phase-2-implementation.md) retains the simpler static-registry connection check. The toolchain baseline is Go 1.27.1; Phase 3 adds pinned pure-Go SQLite and Linux system-call dependencies in go.mod/go.sum.
 
 **Architecture**
 
@@ -92,7 +92,7 @@ The project is intended for machines you own or are explicitly authorized to adm
 | --- | --- | --- |
 | 1 | Threat model, architecture, protocol, trust boundaries, and MVP scope | Design documented |
 | 2 | Go module, shared protocol types, node identity, and mTLS | Implemented; local development only |
-| 3 | Enrollment, heartbeats, system information, and basic metrics | Not implemented |
+| 3 | Enrollment, heartbeats, system information, and basic metrics | Implemented; local development only |
 | 4 | Typed task dispatch, local policy, persistent deduplication, and auditing | Not implemented |
 | 5 | SSH configuration and authorized-key auditing, service status | Not implemented |
 | 6 | Administration CLI, administrator authentication, and RBAC | Not implemented |
@@ -100,19 +100,21 @@ The project is intended for machines you own or are explicitly authorized to adm
 
 Each phase starts by explaining its scope, design rationale, and security risks before implementation and validation. Identity checks and input validation accompany the interfaces that need them. Management interfaces remain restricted to local or isolated development environments until authentication, authorization, and auditing are complete.
 
-Current tests cover strict JSON parsing, task preflight, signature tampering, node identity mismatches, invalid certificates, disabled nodes on established connections, and bounded response handling. Linux/Windows CI and bounded fuzz smoke tests exercise the foundation. Later phases add remote-file traversal tests, persistent replay tests, RBAC, resource-exhaustion testing, and full malicious-server containment exercises.
+Current tests cover strict JSON parsing, task preflight, signature tampering, invalid certificates, atomic token consumption across database connections, persistence after restart, CSR proof of possession, heartbeat identity binding, disabled nodes on established connections, local collection scope, and hostile enrollment responses. Linux/Windows CI, the Linux race detector, a vulnerability scan, and bounded fuzz smoke tests exercise the implementation. Later phases add remote-file traversal tests, persistent task replay tests, RBAC, resource-exhaustion testing, and full malicious-server containment exercises.
 
 **Repository contents**
 
 ```text
-cmd/                      Server, probe, and local development PKI commands
-internal/                 Protocol, identity, TLS, transport, and validation
-schemas/                  Versioned task and envelope JSON Schemas
+cmd/                      Server, probe, enrollment, development PKI, local operator tool
+internal/                 Protocol, identity, TLS, enrollment, SQLite, collectors
+schemas/                  Versioned protocol JSON Schemas
+examples/                 Explicit local telemetry configuration
 test/integration/         Real mTLS connection tests
 .github/workflows/        Linux and Windows validation
 docs/
   phase-1-design.md        Target architecture and security design
   phase-2-implementation.md Implemented scope and local development guide
+  phase-3-implementation.md Enrollment, heartbeat, storage, and telemetry guide
 ```
 
-The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Start with the [local development guide](docs/phase-2-implementation.md) to generate temporary credentials and verify a probe connection. Production installation instructions will be added after the corresponding security gates are complete.
+The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Follow the [current local development guide](docs/phase-3-implementation.md) to enroll a probe and inspect its first heartbeat. Production installation instructions will be added after the corresponding security gates are complete.

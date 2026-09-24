@@ -1,0 +1,6 @@
+{
+  "interval_seconds": 30,
+  "sample_milliseconds": 1000,
+  "disk_paths": ["/"],
+  "network_interfaces": ["lo"]
+}

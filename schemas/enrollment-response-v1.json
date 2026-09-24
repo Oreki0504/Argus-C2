@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 enrollment response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "agent_id", "enrollment_epoch", "certificate_pem"],
+  "properties": {
+    "version": {"const": 1},
+    "agent_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "enrollment_epoch": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "certificate_pem": {"type": "string", "minLength": 1, "maxLength": 6000}
+  },
+  "$comment": "The response is limited to 8192 bytes. The probe verifies its locally generated key, certificate identity and usages, validity, and chain to the preinstalled root. No trust anchors, configuration, endpoints, or private keys are accepted from this response."
+}

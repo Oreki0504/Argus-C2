@@ -89,7 +89,12 @@ type Registration struct {
 	Enabled           bool   `json:"enabled"`
 }
 
-// Registry is locally provisioned in Phase 2; no network enrollment API exists.
+// Authorizer checks the current registration on every connection and request.
+type Authorizer interface {
+	Authorize(*x509.Certificate) (Node, error)
+}
+
+// Registry retains the static development registrations from Phase 2.
 type Registry struct {
 	mu    sync.RWMutex
 	nodes map[string]Registration

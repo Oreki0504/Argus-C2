@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 locally sampled heartbeat",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "agent_id", "enrollment_epoch", "sent_at", "system_info", "system_metrics"],
+  "properties": {
+    "version": {"const": 1},
+    "agent_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "enrollment_epoch": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "sent_at": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+    "system_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available", "os", "architecture", "hostname", "kernel", "boot_time"],
+      "properties": {
+        "available": {"type": "boolean"},
+        "os": {"type": "string", "minLength": 1, "maxLength": 32},
+        "architecture": {"type": "string", "minLength": 1, "maxLength": 32},
+        "hostname": {"type": "string", "maxLength": 255},
+        "kernel": {"type": "string", "maxLength": 255},
+        "boot_time": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807}
+      }
+    },
+    "system_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "memory", "disks", "networks"],
+      "properties": {
+        "cpu": {
+          "type": "object", "additionalProperties": false,
+          "required": ["available", "busy_percent", "window_ms"],
+          "properties": {
+            "available": {"type": "boolean"},
+            "busy_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "window_ms": {"type": "integer", "minimum": 0, "maximum": 10000}
+          }
+        },
+        "memory": {
+          "type": "object", "additionalProperties": false,
+          "required": ["available", "total_bytes", "available_bytes"],
+          "properties": {
+            "available": {"type": "boolean"},
+            "total_bytes": {"$ref": "#/$defs/counter"},
+            "available_bytes": {"$ref": "#/$defs/counter"}
+          }
+        },
+        "disks": {
+          "type": "array", "maxItems": 8,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["path", "available", "total_bytes", "available_bytes"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^/"},
+              "available": {"type": "boolean"},
+              "total_bytes": {"$ref": "#/$defs/counter"},
+              "available_bytes": {"$ref": "#/$defs/counter"}
+            }
+          }
+        },
+        "networks": {
+          "type": "array", "maxItems": 16,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["interface", "available", "rx_bytes", "tx_bytes"],
+            "properties": {
+              "interface": {"type": "string", "minLength": 1, "maxLength": 15},
+              "available": {"type": "boolean"},
+              "rx_bytes": {"$ref": "#/$defs/counter"},
+              "tx_bytes": {"$ref": "#/$defs/counter"}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "counter": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615}
+  },
+  "$comment": "Go enforces 16384 bytes, exact nested fields, byte-based text limits, no control characters, unique resource names, unavailable/zero consistency, counter relationships, and integer encodings. The server additionally checks the live certificate identity and accepts sent_at from 300 seconds in the past through 30 seconds in the future. These are untrusted node observations, not signed task results."
+}

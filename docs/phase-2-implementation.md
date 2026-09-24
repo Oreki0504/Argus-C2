@@ -2,9 +2,11 @@
 
 Phase 2 provides an executable, loopback-only development foundation: a Go module, strict shared protocol types, task-envelope signatures, locally provisioned node identities, and a mutually authenticated TLS connection check. It does not yet execute or collect tasks. The [Phase 1 design](phase-1-design.md) remains the target architecture; this document distinguishes the implemented subset from later work.
 
+This document describes the Phase 2 baseline. Phase 3 preserves these static-registry commands and adds enrollment, persistent state, and telemetry; see the [current implementation guide](phase-3-implementation.md).
+
 **Toolchain and layout**
 
-The module is `github.com/Oreki0504/Argus-C2`. The baseline and CI toolchain is Go 1.27.1, selected from the [official release history](https://go.dev/doc/devel/release). Application code uses only the standard library; there are no external runtime modules and no go.sum is required. To reproduce the exact local toolchain, set `GOTOOLCHAIN=go1.27.1` in your shell; otherwise Go's toolchain selection may use a newer installed version.
+The module is `github.com/Oreki0504/Argus-C2`. The baseline and CI toolchain is Go 1.27.1, selected from the [official release history](https://go.dev/doc/devel/release). At the Phase 2 commit, application code used only the standard library. Phase 3 adds pinned runtime dependencies and go.sum. To reproduce the exact local toolchain, set `GOTOOLCHAIN=go1.27.1` in your shell; otherwise Go's toolchain selection may use a newer installed version.
 
 | Path | Implemented responsibility |
 | --- | --- |
@@ -108,4 +110,4 @@ go test ./internal/signing -run '^$' -fuzz '^FuzzVerify$' -fuzztime=10s -paralle
 
 Coverage includes missing/untrusted/expired/future client certificates, invalid usages and identities, same-CA unregistered certificates, wrong epochs, disabled nodes on reused connections, rejected TLS 1.2, invalid server certificates and hostnames, redirects, oversized or mismatched identity responses, strict task parsing, signature tampering, and noncanonical encodings. Unix-specific tests additionally check private-key permissions and symlink rejection. Test credentials are generated at runtime; no fixture private keys are committed.
 
-The next stage adds explicit one-time enrollment, heartbeats, and system information/metric collection. Production service installation, privileged helpers, live administrator authentication, durable audit storage, and deployment hardening are not implemented here.
+The [Phase 3 implementation](phase-3-implementation.md) adds explicit one-time enrollment, heartbeats, and system information/metric collection. Production service installation, privileged helpers, live administrator authentication, durable audit storage, and deployment hardening remain later work.

@@ -1,22 +1,37 @@
-// Package server exposes only a loopback identity-check endpoint in Phase 2.
+// Package server exposes loopback-only development APIs with live authorization.
 package server
 
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"mime"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
+	"github.com/Oreki0504/Argus-C2/internal/state"
+	"github.com/Oreki0504/Argus-C2/internal/strictjson"
 )
 
 const IdentityPath = "/api/v1/agent/identity"
+const HeartbeatPath = "/api/v1/agent/heartbeat"
 
-func Handler(registry *identity.Registry) http.Handler {
+type TelemetryStore interface {
+	SaveHeartbeat(context.Context, *x509.Certificate, protocol.Heartbeat) error
+}
+
+// The optional sink enables telemetry only for the persistent Phase 3 registry.
+func Handler(registry identity.Authorizer, sinks ...TelemetryStore) http.Handler {
+	var sink TelemetryStore
+	if len(sinks) == 1 {
+		sink = sinks[0]
+	}
+	slots := make(chan struct{}, 32)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
@@ -25,7 +40,14 @@ func Handler(registry *identity.Registry) http.Handler {
 			w.WriteHeader(status)
 			_ = json.NewEncoder(w).Encode(protocol.ErrorResponse{Code: code})
 		}
-		if r.TLS == nil || len(r.TLS.VerifiedChains) == 0 || len(r.TLS.PeerCertificates) == 0 {
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		default:
+			fail(http.StatusTooManyRequests, protocol.ErrorCode("rate_limited"))
+			return
+		}
+		if registry == nil || r.TLS == nil || len(r.TLS.VerifiedChains) == 0 || len(r.TLS.PeerCertificates) == 0 {
 			fail(http.StatusUnauthorized, protocol.Unauthorized)
 			return
 		}
@@ -44,7 +66,43 @@ func Handler(registry *identity.Registry) http.Handler {
 			fail(http.StatusUnauthorized, protocol.Unauthorized)
 			return
 		}
-		if r.URL.Path != IdentityPath || r.URL.RawPath != "" {
+		if r.URL.RawPath != "" || r.URL.RawQuery != "" || r.URL.ForceQuery {
+			fail(http.StatusBadRequest, protocol.InvalidRequest)
+			return
+		}
+		if r.URL.Path == HeartbeatPath && sink != nil {
+			if r.Method != http.MethodPost {
+				w.Header().Set("Allow", "POST")
+				fail(http.StatusMethodNotAllowed, protocol.MethodNotAllowed)
+				return
+			}
+			media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if err != nil || media != "application/json" || r.Header.Get("Content-Encoding") != "" || r.ContentLength <= 0 || r.ContentLength > protocol.MaxHeartbeatBytes || len(r.TransferEncoding) != 0 {
+				fail(http.StatusBadRequest, protocol.InvalidRequest)
+				return
+			}
+			data, err := strictjson.Read(r.Body, protocol.MaxHeartbeatBytes)
+			if err != nil {
+				fail(http.StatusBadRequest, protocol.InvalidRequest)
+				return
+			}
+			h, err := protocol.DecodeHeartbeat(data)
+			if err != nil || h.AgentID != node.AgentID || h.EnrollmentEpoch != node.EnrollmentEpoch || h.SentAt < now.Unix()-300 || h.SentAt > now.Unix()+30 {
+				fail(http.StatusBadRequest, protocol.InvalidRequest)
+				return
+			}
+			if err := sink.SaveHeartbeat(r.Context(), r.TLS.PeerCertificates[0], h); err != nil {
+				if errors.Is(err, state.ErrRateLimited) {
+					fail(http.StatusTooManyRequests, protocol.ErrorCode("rate_limited"))
+				} else {
+					fail(http.StatusServiceUnavailable, protocol.ErrorCode("unavailable"))
+				}
+				return
+			}
+			_ = json.NewEncoder(w).Encode(protocol.ConnectionInfo{Version: protocol.Version, AgentID: node.AgentID, EnrollmentEpoch: node.EnrollmentEpoch})
+			return
+		}
+		if r.URL.Path != IdentityPath {
 			fail(http.StatusNotFound, protocol.NotFound)
 			return
 		}
@@ -68,26 +126,41 @@ func LoopbackAddress(addr string) error {
 	}
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
-		return errors.New("Phase 2 requires a literal loopback listening address")
+		return errors.New("development APIs require a literal loopback listening address")
 	}
 	return nil
 }
 
-func Run(ctx context.Context, addr string, config *tls.Config, registry *identity.Registry) error {
+func Run(ctx context.Context, addr string, config *tls.Config, registry identity.Authorizer, sinks ...TelemetryStore) error {
 	if err := LoopbackAddress(addr); err != nil {
 		return err
 	}
 	if config == nil || config.MinVersion < tls.VersionTLS13 || config.ClientAuth != tls.RequireAndVerifyClientCert || config.VerifyConnection == nil || config.ClientCAs == nil || registry == nil {
 		return errors.New("verified mTLS configuration and registry are required")
 	}
+	return runHTTP(ctx, addr, config, Handler(registry, sinks...))
+}
+
+func RunEnrollment(ctx context.Context, addr string, config *tls.Config, handler http.Handler) error {
+	if err := LoopbackAddress(addr); err != nil {
+		return err
+	}
+	if config == nil || config.MinVersion < tls.VersionTLS13 || config.ClientAuth != tls.NoClientCert || handler == nil {
+		return errors.New("separate verified TLS enrollment listener is required")
+	}
+	return runHTTP(ctx, addr, config, handler)
+}
+
+func runHTTP(ctx context.Context, addr string, config *tls.Config, handler http.Handler) error {
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
-	s := &http.Server{Handler: Handler(registry), TLSConfig: config.Clone(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
+	s := &http.Server{Handler: handler, TLSConfig: config.Clone(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
 	stopped := make(chan struct{})
-	defer close(stopped)
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		select {
 		case <-ctx.Done():
 			shutdown, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -99,6 +172,10 @@ func Run(ctx context.Context, addr string, config *tls.Config, registry *identit
 		}
 	}()
 	err = s.ServeTLS(l, "", "")
+	close(stopped)
+	// ServeTLS returns as soon as listeners close. Wait for active handlers to
+	// drain before callers close the SQLite store used by those handlers.
+	<-shutdownDone
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
