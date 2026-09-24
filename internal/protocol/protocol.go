@@ -1,4 +1,4 @@
-// Package protocol defines data contracts, not an executable task registry.
+// Package protocol defines strict versioned messages for the fixed task registry.
 package protocol
 
 import (
@@ -76,8 +76,8 @@ func (t Task) Validate() error {
 	return nil
 }
 
-// CheckTarget is only a preflight check. It does not enforce local permissions,
-// persist replay state, or authorize execution; those belong to Phase 4.
+// CheckTarget is preflight only; the probe's policy and durable acceptance gate
+// are still required before any handler may run.
 func (t Task) CheckTarget(node identity.Node, policyDigest string, now time.Time) error {
 	if err := t.Validate(); err != nil {
 		return err
@@ -147,8 +147,8 @@ const (
 	Indeterminate TaskStatus = "indeterminate"
 )
 
-// Result reserves the shared result shape. Task-specific data validators and
-// result ingestion will be added with collectors/dispatch; no API accepts it yet.
+// Result carries a terminal outcome; actual policy and assignment are checked
+// independently by the probe and server.
 type Result struct {
 	RequestID    string          `json:"request_id"`
 	AgentID      string          `json:"agent_id"`

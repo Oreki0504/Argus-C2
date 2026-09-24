@@ -11,10 +11,12 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/Oreki0504/Argus-C2/internal/enrollment"
 	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/server"
+	"github.com/Oreki0504/Argus-C2/internal/signing"
 	"github.com/Oreki0504/Argus-C2/internal/state"
 	"github.com/Oreki0504/Argus-C2/internal/tlsconfig"
 )
@@ -36,6 +38,7 @@ func run() error {
 	enrollAddr := flag.String("enroll-listen", "", "enable a separate loopback enrollment listener")
 	issuerCert := flag.String("issuer-cert", "", "client-auth-only intermediate CA certificate")
 	issuerKey := flag.String("issuer-key", "", "intermediate CA private key")
+	taskKey := flag.String("task-signing-key", "", "separate Ed25519 task key; enables dispatch with -state")
 	flag.Parse()
 	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
 		return errors.New("the server must run as a non-root user")
@@ -91,6 +94,30 @@ func run() error {
 		}
 	} else if *issuerCert != "" || *issuerKey != "" {
 		return errors.New("issuer credentials require explicit -enroll-listen")
+	}
+	if *taskKey != "" {
+		if store == nil {
+			return errors.New("task dispatch requires -state")
+		}
+		private, err := signing.LoadPrivate(*taskKey)
+		if err != nil {
+			return err
+		}
+		if err := signing.Distinct(private, config.Certificates[0].Leaf); err != nil {
+			return err
+		}
+		if issuer != nil {
+			if err := issuer.CheckTaskKey(private); err != nil {
+				return err
+			}
+		}
+		setupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		service, err := server.NewTaskService(setupCtx, store, private)
+		cancel()
+		if err != nil {
+			return err
+		}
+		sinks = []server.TelemetryStore{service}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

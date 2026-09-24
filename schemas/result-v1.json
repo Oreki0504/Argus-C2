@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 Phase 4 terminal task result",
+  "$comment": "The fixed v1 task result has no version field. Runtime checks additionally enforce byte limits, clean text, ordered timestamps, typed measurement consistency, and assignment/identity binding.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "agent_id", "epoch", "task_type", "started_at", "finished_at", "status", "data", "error_code", "truncated", "policy_digest"],
+  "properties": {
+    "request_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "agent_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "epoch": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "task_type": {"enum": ["system.info", "system.metrics"]},
+    "started_at": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+    "finished_at": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+    "status": {"enum": ["succeeded", "rejected", "expired", "failed", "indeterminate"]},
+    "data": {"type": "object"},
+    "error_code": {"type": "string"},
+    "truncated": {"const": false},
+    "policy_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "succeeded"}}},
+      "then": {
+        "properties": {"error_code": {"const": ""}},
+        "if": {"properties": {"task_type": {"const": "system.info"}}},
+        "then": {"properties": {"data": {"$ref": "heartbeat-v1.json#/properties/system_info"}}},
+        "else": {"properties": {"data": {"$ref": "heartbeat-v1.json#/properties/system_metrics"}}}
+      },
+      "else": {"properties": {"data": {"maxProperties": 0}}}
+    },
+    {"if": {"properties": {"status": {"const": "rejected"}}}, "then": {"properties": {"error_code": {"enum": ["paused", "task_disabled", "policy_mismatch", "rate_limited", "future"]}}}},
+    {"if": {"properties": {"status": {"const": "expired"}}}, "then": {"properties": {"error_code": {"const": "expired"}}}},
+    {"if": {"properties": {"status": {"const": "failed"}}}, "then": {"properties": {"error_code": {"enum": ["deadline", "collector_failed", "result_limit"]}}}},
+    {"if": {"properties": {"status": {"const": "indeterminate"}}}, "then": {"properties": {"error_code": {"const": "recovered_after_restart"}}}}
+  ]
+}

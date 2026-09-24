@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Oreki0504/Argus-C2/internal/audit"
 	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
 	"github.com/Oreki0504/Argus-C2/internal/state"
@@ -97,7 +98,7 @@ func Handler(store *state.Store, issuer *Issuer) http.Handler {
 			return
 		}
 		registration := identity.Registration{AgentID: node.AgentID, EnrollmentEpoch: node.EnrollmentEpoch, CertificateSHA256: identity.Fingerprint(cert), Enabled: true}
-		if err := store.Register(r.Context(), req.Token, registration); err != nil {
+		if err := store.RegisterFrom(r.Context(), req.Token, registration, audit.Peer(r.RemoteAddr)); err != nil {
 			fail(403, "enrollment_rejected")
 			return
 		}

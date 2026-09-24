@@ -33,25 +33,35 @@ func Sign(payload []byte, key ed25519.PrivateKey) ([]byte, error) {
 // Verify verifies original bytes before interpreting the payload. Success does
 // not authorize execution or provide replay protection.
 func Verify(data []byte, key ed25519.PublicKey) (protocol.Task, error) {
+	t, _, err := VerifyPayload(data, key)
+	return t, err
+}
+
+// VerifyPayload returns the original signed bytes for persistent replay hashing.
+func VerifyPayload(data []byte, key ed25519.PublicKey) (protocol.Task, []byte, error) {
 	if len(key) != ed25519.PublicKeySize {
-		return protocol.Task{}, errors.New("invalid verification key")
+		return protocol.Task{}, nil, errors.New("invalid verification key")
 	}
 	var e envelope
 	if err := strictjson.Decode(data, &e, protocol.MaxEnvelopeBytes, "payload_b64", "signature_b64"); err != nil {
-		return protocol.Task{}, err
+		return protocol.Task{}, nil, err
 	}
 	payload, err := decode(e.Payload, protocol.MaxPayloadBytes)
 	if err != nil {
-		return protocol.Task{}, err
+		return protocol.Task{}, nil, err
 	}
 	sig, err := decode(e.Signature, ed25519.SignatureSize)
 	if err != nil || len(sig) != ed25519.SignatureSize {
-		return protocol.Task{}, errors.New("invalid signature encoding")
+		return protocol.Task{}, nil, errors.New("invalid signature encoding")
 	}
 	if !ed25519.Verify(key, message(payload), sig) {
-		return protocol.Task{}, errors.New("invalid signature")
+		return protocol.Task{}, nil, errors.New("invalid signature")
 	}
-	return protocol.DecodeTask(payload)
+	t, err := protocol.DecodeTask(payload)
+	if err != nil {
+		return protocol.Task{}, nil, err
+	}
+	return t, payload, nil
 }
 func decode(s string, limit int) ([]byte, error) {
 	if len(s) > base64.RawURLEncoding.EncodedLen(limit) {

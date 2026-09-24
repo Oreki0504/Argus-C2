@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 task readiness and telemetry heartbeat",
+  "$comment": "Runtime validation additionally enforces byte limits, clean text, measurement consistency, timestamps, and the authenticated identity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "agent_id", "enrollment_epoch", "sent_at", "system_info", "system_metrics", "policy_digest", "task_state"],
+  "properties": {
+    "version": {"const": 2},
+    "agent_id": {"$ref": "heartbeat-v1.json#/properties/agent_id"},
+    "enrollment_epoch": {"$ref": "heartbeat-v1.json#/properties/enrollment_epoch"},
+    "sent_at": {"$ref": "heartbeat-v1.json#/properties/sent_at"},
+    "system_info": {"$ref": "heartbeat-v1.json#/properties/system_info"},
+    "system_metrics": {"$ref": "heartbeat-v1.json#/properties/system_metrics"},
+    "policy_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "task_state": {"enum": ["ready", "paused", "blocked"]}
+  }
+}

@@ -40,4 +40,5 @@ jobs:
           go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeTask$' -fuzztime=10s -parallel=2
           go test ./internal/signing -run '^$' -fuzz '^FuzzVerify$' -fuzztime=10s -parallel=2
           go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeHeartbeat$' -fuzztime=10s -parallel=2
+          go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeResult$' -fuzztime=10s -parallel=2
           go test ./internal/enrollment -run '^$' -fuzz '^FuzzParseCSR$' -fuzztime=10s -parallel=2

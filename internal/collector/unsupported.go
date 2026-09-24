@@ -9,8 +9,11 @@ import (
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
 )
 
-func collect(ctx context.Context, c Config) (protocol.SystemInformation, protocol.SystemMeasurements, error) {
+func information(ctx context.Context) (protocol.SystemInformation, error) {
 	i := protocol.SystemInformation{OS: runtime.GOOS, Architecture: runtime.GOARCH}
+	return i, ctx.Err()
+}
+func measurements(ctx context.Context, c Config) (protocol.SystemMeasurements, error) {
 	m := protocol.SystemMeasurements{Disks: []protocol.DiskStats{}, Networks: []protocol.NetworkStats{}}
 	for _, p := range c.DiskPaths {
 		m.Disks = append(m.Disks, protocol.DiskStats{Path: p})
@@ -18,5 +21,5 @@ func collect(ctx context.Context, c Config) (protocol.SystemInformation, protoco
 	for _, n := range c.NetworkInterfaces {
 		m.Networks = append(m.Networks, protocol.NetworkStats{Interface: n})
 	}
-	return i, m, ctx.Err()
+	return m, ctx.Err()
 }

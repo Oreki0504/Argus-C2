@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Argus-C2 Phase 2 task payload (no execution support)",
+  "title": "Argus-C2 signed read-only task payload",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "request_id", "agent_id", "enrollment_epoch", "created_at", "expires_at", "task_type", "task_version", "params", "actor_id", "policy_digest"],

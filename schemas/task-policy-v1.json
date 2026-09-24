@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 locally administered Phase 4 task policy",
+  "$comment": "Runtime validation also requires burst <= max_per_minute, pending_bytes >= max_result_bytes, canonical absolute Linux disk paths, valid interface names, and byte limits.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "paused", "allow_system_info", "allow_system_metrics", "poll_seconds", "timeout_seconds", "max_per_minute", "burst", "max_result_bytes", "pending_bytes", "telemetry"],
+  "properties": {
+    "version": {"const": 1},
+    "paused": {"type": "boolean"},
+    "allow_system_info": {"type": "boolean"},
+    "allow_system_metrics": {"type": "boolean"},
+    "poll_seconds": {"type": "integer", "minimum": 5, "maximum": 60},
+    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 30},
+    "max_per_minute": {"type": "integer", "minimum": 1, "maximum": 30},
+    "burst": {"type": "integer", "minimum": 1, "maximum": 5},
+    "max_result_bytes": {"type": "integer", "minimum": 1024, "maximum": 16384},
+    "pending_bytes": {"type": "integer", "minimum": 1024, "maximum": 33554432},
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interval_seconds", "sample_milliseconds", "disk_paths", "network_interfaces"],
+      "properties": {
+        "interval_seconds": {"type": "integer", "minimum": 10, "maximum": 300},
+        "sample_milliseconds": {"type": "integer", "minimum": 100, "maximum": 5000},
+        "disk_paths": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "maxLength": 256, "pattern": "^/"}},
+        "network_interfaces": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 15}}
+      }
+    }
+  }
+}

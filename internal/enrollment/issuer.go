@@ -16,6 +16,7 @@ import (
 
 	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/localfile"
+	"github.com/Oreki0504/Argus-C2/internal/signing"
 	"github.com/Oreki0504/Argus-C2/internal/tlsconfig"
 )
 
@@ -24,6 +25,8 @@ type Issuer struct {
 	key  ed25519.PrivateKey
 	pem  []byte
 }
+
+func (i *Issuer) CheckTaskKey(key ed25519.PrivateKey) error { return signing.Distinct(key, i.cert) }
 
 func LoadIssuer(certPath, keyPath, caPath string) (*Issuer, error) {
 	certPEM, err := localfile.Read(certPath, 16384, false)

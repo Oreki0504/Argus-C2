@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Oreki0504/Argus-C2/internal/audit"
 	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
 	"github.com/Oreki0504/Argus-C2/internal/state"
@@ -25,7 +26,7 @@ type TelemetryStore interface {
 	SaveHeartbeat(context.Context, *x509.Certificate, protocol.Heartbeat) error
 }
 
-// The optional sink enables telemetry only for the persistent Phase 3 registry.
+// A persistent sink enables telemetry; a Dispatcher also enables typed tasks.
 func Handler(registry identity.Authorizer, sinks ...TelemetryStore) http.Handler {
 	var sink TelemetryStore
 	if len(sinks) == 1 {
@@ -68,6 +69,52 @@ func Handler(registry identity.Authorizer, sinks ...TelemetryStore) http.Handler
 		}
 		if r.URL.RawPath != "" || r.URL.RawQuery != "" || r.URL.ForceQuery {
 			fail(http.StatusBadRequest, protocol.InvalidRequest)
+			return
+		}
+		if dispatcher, ok := sink.(Dispatcher); ok && (r.URL.Path == PollPath || r.URL.Path == ResultsPath) {
+			if r.Method != http.MethodPost {
+				w.Header().Set("Allow", "POST")
+				fail(405, protocol.MethodNotAllowed)
+				return
+			}
+			limit := 256
+			if r.URL.Path == ResultsPath {
+				limit = protocol.MaxDispatchResultBytes
+			}
+			media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if err != nil || media != "application/json" || r.Header.Get("Content-Encoding") != "" || r.ContentLength <= 0 || r.ContentLength > int64(limit) || len(r.TransferEncoding) != 0 {
+				fail(400, protocol.InvalidRequest)
+				return
+			}
+			data, err := strictjson.Read(r.Body, limit)
+			if err != nil {
+				fail(400, protocol.InvalidRequest)
+				return
+			}
+			if r.URL.Path == PollPath {
+				request, err := protocol.DecodePoll(data)
+				if err != nil {
+					fail(400, protocol.InvalidRequest)
+					return
+				}
+				envelope, err := dispatcher.PollTask(r.Context(), r.TLS.PeerCertificates[0], request.PolicyDigest, audit.Peer(r.RemoteAddr))
+				if err != nil {
+					fail(503, protocol.ErrorCode("dispatch_unavailable"))
+					return
+				}
+				if len(envelope) == 0 {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				_, _ = w.Write(envelope)
+				return
+			}
+			ack, err := dispatcher.SubmitResult(r.Context(), r.TLS.PeerCertificates[0], data, audit.Peer(r.RemoteAddr))
+			if err != nil {
+				fail(409, protocol.ErrorCode("result_rejected"))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(ack)
 			return
 		}
 		if r.URL.Path == HeartbeatPath && sink != nil {

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 authenticated task poll",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "policy_digest"],
+  "properties": {
+    "version": {"const": 1},
+    "policy_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

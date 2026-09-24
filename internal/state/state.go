@@ -9,15 +9,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"net/url"
-	"os"
-	"path/filepath"
-	"runtime"
 	"time"
 
+	"github.com/Oreki0504/Argus-C2/internal/audit"
 	"github.com/Oreki0504/Argus-C2/internal/identity"
+	"github.com/Oreki0504/Argus-C2/internal/localdb"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
-	_ "modernc.org/sqlite"
 )
 
 var ErrUnauthorized = errors.New("invalid, expired, or consumed enrollment token")
@@ -30,55 +27,12 @@ type Store struct{ db *sql.DB }
 // Open requires an operator-controlled parent and a private state directory.
 // The application never accepts a database path from the network.
 func Open(dir string) (*Store, error) {
-	dir, err := filepath.Abs(dir)
+	db, err := localdb.Open(dir, "argus.db", true)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Mkdir(dir, 0700); err != nil && !os.IsExist(err) {
-		return nil, err
-	}
-	st, err := os.Lstat(dir)
-	if err != nil {
-		return nil, err
-	}
-	if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 || (runtime.GOOS != "windows" && st.Mode().Perm()&0077 != 0) {
-		return nil, errors.New("state directory must be private, real, and operator-controlled")
-	}
-	path := filepath.Join(dir, "argus.db")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err == nil {
-		err = f.Close()
-	}
-	if err != nil && !os.IsExist(err) {
-		return nil, err
-	}
-	for _, name := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
-		st, err := os.Lstat(name)
-		if os.IsNotExist(err) && name != path {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if !st.Mode().IsRegular() || (runtime.GOOS != "windows" && st.Mode().Perm()&0077 != 0) {
-			return nil, errors.New("database and sidecars must be private regular files")
-		}
-	}
-	p := filepath.ToSlash(path)
-	if runtime.GOOS == "windows" {
-		p = "/" + p
-	}
-	u := url.URL{Scheme: "file", Path: p}
-	q := url.Values{"_pragma": {"busy_timeout(2000)", "foreign_keys(1)", "journal_mode(WAL)", "synchronous(FULL)"}, "_txlock": {"immediate"}}
-	u.RawQuery = q.Encode()
-	db, err := sql.Open("sqlite", u.String())
-	if err != nil {
-		return nil, err
-	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
 	s := &Store{db: db}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := s.migrate(ctx); err != nil {
 		_ = db.Close()
@@ -99,7 +53,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version != 0 && version != 1 {
+	if version < 0 || version > 2 {
 		return errors.New("unsupported database schema version")
 	}
 	if version == 0 {
@@ -116,6 +70,37 @@ PRAGMA user_version=1;`)
 		if err != nil {
 			return err
 		}
+	}
+	if version < 2 {
+		if err := migrateTasks(ctx, tx); err != nil {
+			return err
+		}
+		if err := audit.Initialize(ctx, tx); err != nil {
+			return err
+		}
+		var enabled int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM nodes WHERE enabled=1").Scan(&enabled); err != nil {
+			return err
+		}
+		if err := audit.Append(ctx, tx, audit.Event{Kind: "state_initialized", ActorID: "local-operator", Source: "local", Status: "succeeded", Code: "server_schema_2"}, enabled); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version=2"); err != nil {
+			return err
+		}
+	}
+	if err := audit.Verify(ctx, tx); err != nil {
+		return err
+	}
+	var reserved, expected int
+	if err := tx.QueryRowContext(ctx, "SELECT reserved FROM audit_head WHERE id=1").Scan(&reserved); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM nodes WHERE enabled=1)+COALESCE(SUM(CASE state WHEN 'queued' THEN 2 WHEN 'dispatched' THEN 1 ELSE 0 END),0) FROM tasks").Scan(&expected); err != nil {
+		return err
+	}
+	if reserved != expected {
+		return errors.New("inconsistent server audit reservations")
 	}
 	return tx.Commit()
 }
@@ -154,6 +139,9 @@ func (s *Store) IssueToken(ctx context.Context, ttl time.Duration) (string, erro
 	if _, err := tx.ExecContext(ctx, "INSERT INTO enrollment_tokens(token_hash,expires_at) VALUES(?,?)", hash, now.Add(ttl).Unix()); err != nil {
 		return "", err
 	}
+	if err := audit.Append(ctx, tx, audit.Event{Kind: "token_issued", ActorID: "local-operator", Source: "local", Status: "succeeded"}, 0); err != nil {
+		return "", err
+	}
 	if err := tx.Commit(); err != nil {
 		return "", err
 	}
@@ -163,6 +151,9 @@ func (s *Store) IssueToken(ctx context.Context, ttl time.Duration) (string, erro
 // Register atomically consumes a token and inserts exactly one identity.
 // A failed commit or registration leaves the token available for a valid retry.
 func (s *Store) Register(ctx context.Context, token string, r identity.Registration) error {
+	return s.RegisterFrom(ctx, token, r, "local")
+}
+func (s *Store) RegisterFrom(ctx context.Context, token string, r identity.Registration, source string) error {
 	hash, err := tokenHash(token)
 	if err != nil {
 		return err
@@ -197,6 +188,9 @@ func (s *Store) Register(ctx context.Context, token string, r identity.Registrat
 	if err != nil {
 		return err
 	}
+	if err := audit.Append(ctx, tx, audit.Event{Kind: "node_enrolled", AgentID: r.AgentID, Epoch: r.EnrollmentEpoch, Source: source, Status: "succeeded"}, 1); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -222,7 +216,19 @@ func (s *Store) Disable(ctx context.Context, id string) error {
 	if !identity.Hex(id, 32) {
 		return errors.New("invalid node ID")
 	}
-	res, err := s.db.ExecContext(ctx, "UPDATE nodes SET enabled=0 WHERE agent_id=?", id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var enabled bool
+	if err := tx.QueryRowContext(ctx, "SELECT enabled FROM nodes WHERE agent_id=?", id).Scan(&enabled); err != nil {
+		return errors.New("node not found")
+	}
+	if !enabled {
+		return tx.Commit()
+	}
+	res, err := tx.ExecContext(ctx, "UPDATE nodes SET enabled=0 WHERE agent_id=?", id)
 	if err != nil {
 		return err
 	}
@@ -233,7 +239,13 @@ func (s *Store) Disable(ctx context.Context, id string) error {
 	if n != 1 {
 		return errors.New("node not found")
 	}
-	return nil
+	if err := cancelNodeTasks(ctx, tx, id); err != nil {
+		return err
+	}
+	if err := audit.Append(ctx, tx, audit.Event{Kind: "node_disabled", AgentID: id, ActorID: "local-operator", Source: "local", Status: "succeeded"}, -1); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SaveHeartbeat derives identity from the verified certificate, then checks the
@@ -267,7 +279,7 @@ func (s *Store) SaveHeartbeat(ctx context.Context, cert *x509.Certificate, h pro
 	if now-last < int64(5*time.Second) {
 		return ErrRateLimited
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET heartbeat=?,received_at=? WHERE agent_id=?", data, now, n.AgentID); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET heartbeat=?,received_at=?,policy_digest=?,task_state=? WHERE agent_id=?", data, now, h.PolicyDigest, h.TaskState, n.AgentID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -280,11 +292,18 @@ type Snapshot struct {
 	EnrolledAt      int64           `json:"enrolled_at"`
 	ReceivedAt      int64           `json:"received_at_unix_nano"`
 	Heartbeat       json.RawMessage `json:"heartbeat"`
+	PolicyDigest    string          `json:"policy_digest"`
+	TaskState       string          `json:"task_state"`
 }
 
 // Snapshots is a local operator API, never an unauthenticated HTTP route.
 func (s *Store) Snapshots(ctx context.Context) ([]Snapshot, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT agent_id,enrollment_epoch,enabled,enrolled_at,received_at,heartbeat FROM nodes ORDER BY agent_id LIMIT ?", MaxNodes)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, "SELECT agent_id,enrollment_epoch,enabled,enrolled_at,received_at,heartbeat,policy_digest,task_state FROM nodes ORDER BY agent_id LIMIT ?", MaxNodes)
 	if err != nil {
 		return nil, err
 	}
@@ -293,11 +312,19 @@ func (s *Store) Snapshots(ctx context.Context) ([]Snapshot, error) {
 	for rows.Next() {
 		var v Snapshot
 		var heartbeat []byte
-		if err := rows.Scan(&v.AgentID, &v.EnrollmentEpoch, &v.Enabled, &v.EnrolledAt, &v.ReceivedAt, &heartbeat); err != nil {
+		if err := rows.Scan(&v.AgentID, &v.EnrollmentEpoch, &v.Enabled, &v.EnrolledAt, &v.ReceivedAt, &heartbeat, &v.PolicyDigest, &v.TaskState); err != nil {
 			return nil, err
 		}
 		v.Heartbeat = json.RawMessage(heartbeat)
 		result = append(result, v)
 	}
-	return result, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err := audit.Append(ctx, tx, audit.Event{Kind: "nodes_read", ActorID: "local-operator", Source: "local", Status: "succeeded"}, 0); err != nil {
+		return nil, err
+	}
+	return result, tx.Commit()
 }

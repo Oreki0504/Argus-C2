@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 durable result acknowledgment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "agent_id", "epoch", "request_id", "result_digest"],
+  "properties": {
+    "version": {"const": 1},
+    "agent_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "epoch": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "request_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "result_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

@@ -1,5 +1,7 @@
 **Argus-C2: Phase 3 Enrollment and Telemetry**
 
+This document describes the Phase 3 milestone and its telemetry-only commands. The current implementation also supports the explicitly enabled [Phase 4 task pipeline](phase-4-implementation.md), upgrades server state to schema 2, and audits local operator actions. Statements below about work remaining in Phase 4 describe the earlier milestone; use the Phase 4 guide for current task, audit, and recovery behavior.
+
 Phase 3 implements explicit registration, persistent identity authorization, outbound heartbeats, and native Linux collectors for `system.info` and `system.metrics`. Collection is initiated by the probe's local configuration. There is no remote task dispatch or command-execution endpoint. Both server listeners remain restricted to literal loopback addresses until the later administrator authentication, audit, and deployment phases are complete.
 
 The [Phase 1 design](phase-1-design.md) remains the target architecture. The [Phase 2 static-registry connection check](phase-2-implementation.md) remains available without enabling telemetry or enrollment.

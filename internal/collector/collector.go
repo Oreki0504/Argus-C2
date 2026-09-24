@@ -47,6 +47,9 @@ func LoadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	return DecodeConfig(b)
+}
+func DecodeConfig(b []byte) (Config, error) {
 	var c Config
 	if err := strictjson.Decode(b, &c, 4096, "interval_seconds", "sample_milliseconds", "disk_paths", "network_interfaces"); err != nil {
 		return Config{}, err
@@ -60,10 +63,22 @@ func Collect(ctx context.Context, n identity.Node, c Config) (protocol.Heartbeat
 	if err := c.Validate(); err != nil {
 		return protocol.Heartbeat{}, err
 	}
-	info, metrics, err := collect(ctx, c)
+	info, err := Information(ctx)
+	if err != nil {
+		return protocol.Heartbeat{}, err
+	}
+	metrics, err := Measurements(ctx, c)
 	if err != nil {
 		return protocol.Heartbeat{}, err
 	}
 	h := protocol.Heartbeat{Version: protocol.Version, AgentID: n.AgentID, EnrollmentEpoch: n.EnrollmentEpoch, SentAt: time.Now().Unix(), Info: info, Metrics: metrics}
 	return h, h.Validate()
+}
+
+func Information(ctx context.Context) (protocol.SystemInformation, error) { return information(ctx) }
+func Measurements(ctx context.Context, c Config) (protocol.SystemMeasurements, error) {
+	if err := c.Validate(); err != nil {
+		return protocol.SystemMeasurements{}, err
+	}
+	return measurements(ctx, c)
 }

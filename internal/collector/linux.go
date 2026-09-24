@@ -92,9 +92,11 @@ func network(s, name string) protocol.NetworkStats {
 	return n
 }
 
-func collect(ctx context.Context, c Config) (protocol.SystemInformation, protocol.SystemMeasurements, error) {
+func information(ctx context.Context) (protocol.SystemInformation, error) {
 	i := protocol.SystemInformation{OS: runtime.GOOS, Architecture: runtime.GOARCH}
-	m := protocol.SystemMeasurements{Disks: []protocol.DiskStats{}, Networks: []protocol.NetworkStats{}}
+	if err := ctx.Err(); err != nil {
+		return i, err
+	}
 	stat := readFixed("/proc/stat", 256*1024)
 	host, err := os.Hostname()
 	kernel := strings.TrimSpace(readFixed("/proc/sys/kernel/osrelease", 4096))
@@ -111,13 +113,21 @@ func collect(ctx context.Context, c Config) (protocol.SystemInformation, protoco
 		i.Kernel = kernel
 		i.BootTime = boot
 	}
+	return i, ctx.Err()
+}
+func measurements(ctx context.Context, c Config) (protocol.SystemMeasurements, error) {
+	m := protocol.SystemMeasurements{Disks: []protocol.DiskStats{}, Networks: []protocol.NetworkStats{}}
+	if err := ctx.Err(); err != nil {
+		return m, err
+	}
+	stat := readFixed("/proc/stat", 256*1024)
 	total, idle, e1 := cpuTicks(stat)
 	start := time.Now()
 	timer := time.NewTimer(time.Duration(c.SampleMilliseconds) * time.Millisecond)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return i, m, ctx.Err()
+		return m, ctx.Err()
 	case <-timer.C:
 	}
 	next, nextIdle, e2 := cpuTicks(readFixed("/proc/stat", 256*1024))
@@ -128,7 +138,7 @@ func collect(ctx context.Context, c Config) (protocol.SystemInformation, protoco
 	m.Memory = memory(readFixed("/proc/meminfo", 64*1024))
 	for _, p := range c.DiskPaths {
 		if err := ctx.Err(); err != nil {
-			return i, m, err
+			return m, err
 		}
 		d := protocol.DiskStats{Path: p}
 		var fs unix.Statfs_t
@@ -143,5 +153,5 @@ func collect(ctx context.Context, c Config) (protocol.SystemInformation, protoco
 	for _, name := range c.NetworkInterfaces {
 		m.Networks = append(m.Networks, network(dev, name))
 	}
-	return i, m, ctx.Err()
+	return m, ctx.Err()
 }
