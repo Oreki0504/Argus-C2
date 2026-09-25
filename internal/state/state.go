@@ -11,6 +11,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Oreki0504/Argus-C2/internal/adminauth"
 	"github.com/Oreki0504/Argus-C2/internal/audit"
 	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/localdb"
@@ -22,7 +23,10 @@ var ErrRateLimited = errors.New("heartbeat received too soon")
 
 const MaxNodes = 1000
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db             *sql.DB
+	verifyPassword func(string, string) (bool, error)
+}
 
 // Open requires an operator-controlled parent and a private state directory.
 // The application never accepts a database path from the network.
@@ -31,7 +35,7 @@ func Open(dir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, verifyPassword: adminauth.Verify}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := s.migrate(ctx); err != nil {
@@ -53,7 +57,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version < 0 || version > 2 {
+	if version < 0 || version > 3 {
 		return errors.New("unsupported database schema version")
 	}
 	if version == 0 {
@@ -89,6 +93,11 @@ PRAGMA user_version=1;`)
 			return err
 		}
 	}
+	if version < 3 {
+		if err := migrateAdmins(ctx, tx); err != nil {
+			return err
+		}
+	}
 	if err := audit.Verify(ctx, tx); err != nil {
 		return err
 	}
@@ -96,7 +105,7 @@ PRAGMA user_version=1;`)
 	if err := tx.QueryRowContext(ctx, "SELECT reserved FROM audit_head WHERE id=1").Scan(&reserved); err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM nodes WHERE enabled=1)+COALESCE(SUM(CASE state WHEN 'queued' THEN 2 WHEN 'dispatched' THEN 1 ELSE 0 END),0) FROM tasks").Scan(&expected); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM nodes WHERE enabled=1)+(SELECT COUNT(*) FROM admin_sessions)+COALESCE(SUM(CASE state WHEN 'queued' THEN 2 WHEN 'dispatched' THEN 1 ELSE 0 END),0) FROM tasks").Scan(&expected); err != nil {
 		return err
 	}
 	if reserved != expected {
@@ -115,16 +124,23 @@ func tokenHash(token string) (string, error) {
 
 // IssueToken returns the secret once. Only its SHA-256 digest is persisted.
 func (s *Store) IssueToken(ctx context.Context, ttl time.Duration) (string, error) {
-	if ttl < time.Second || ttl > 15*time.Minute {
-		return "", errors.New("token lifetime must be between 1 second and 15 minutes")
-	}
-	token := identity.RandomID() + identity.RandomID()
-	hash, _ := tokenHash(token)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
+	token, err := issueTokenTx(ctx, tx, ttl, "local-operator", "local")
+	if err != nil {
+		return "", err
+	}
+	return token, tx.Commit()
+}
+func issueTokenTx(ctx context.Context, tx *sql.Tx, ttl time.Duration, actor, source string) (string, error) {
+	if ttl < time.Second || ttl > 15*time.Minute {
+		return "", errors.New("token lifetime must be between 1 second and 15 minutes")
+	}
+	token := identity.RandomID() + identity.RandomID()
+	hash, _ := tokenHash(token)
 	now := time.Now()
 	if _, err := tx.ExecContext(ctx, "DELETE FROM enrollment_tokens WHERE expires_at <= ? OR consumed=1", now.Unix()); err != nil {
 		return "", err
@@ -139,10 +155,7 @@ func (s *Store) IssueToken(ctx context.Context, ttl time.Duration) (string, erro
 	if _, err := tx.ExecContext(ctx, "INSERT INTO enrollment_tokens(token_hash,expires_at) VALUES(?,?)", hash, now.Add(ttl).Unix()); err != nil {
 		return "", err
 	}
-	if err := audit.Append(ctx, tx, audit.Event{Kind: "token_issued", ActorID: "local-operator", Source: "local", Status: "succeeded"}, 0); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Append(ctx, tx, audit.Event{Kind: "token_issued", ActorID: actor, Source: source, Status: "succeeded"}, 0); err != nil {
 		return "", err
 	}
 	return token, nil
@@ -213,20 +226,26 @@ func (s *Store) Authorize(cert *x509.Certificate) (identity.Node, error) {
 }
 
 func (s *Store) Disable(ctx context.Context, id string) error {
-	if !identity.Hex(id, 32) {
-		return errors.New("invalid node ID")
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := disableTx(ctx, tx, id, "local-operator", "local"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func disableTx(ctx context.Context, tx *sql.Tx, id, actor, source string) error {
+	if !identity.Hex(id, 32) {
+		return errors.New("invalid node ID")
+	}
 	var enabled bool
 	if err := tx.QueryRowContext(ctx, "SELECT enabled FROM nodes WHERE agent_id=?", id).Scan(&enabled); err != nil {
 		return errors.New("node not found")
 	}
 	if !enabled {
-		return tx.Commit()
+		return audit.Append(ctx, tx, audit.Event{Kind: "node_disable_unchanged", AgentID: id, ActorID: actor, Source: source, Status: "succeeded"}, 0)
 	}
 	res, err := tx.ExecContext(ctx, "UPDATE nodes SET enabled=0 WHERE agent_id=?", id)
 	if err != nil {
@@ -242,10 +261,10 @@ func (s *Store) Disable(ctx context.Context, id string) error {
 	if err := cancelNodeTasks(ctx, tx, id); err != nil {
 		return err
 	}
-	if err := audit.Append(ctx, tx, audit.Event{Kind: "node_disabled", AgentID: id, ActorID: "local-operator", Source: "local", Status: "succeeded"}, -1); err != nil {
+	if err := audit.Append(ctx, tx, audit.Event{Kind: "node_disabled", AgentID: id, ActorID: actor, Source: source, Status: "succeeded"}, -1); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // SaveHeartbeat derives identity from the verified certificate, then checks the
@@ -303,7 +322,14 @@ func (s *Store) Snapshots(ctx context.Context) ([]Snapshot, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, "SELECT agent_id,enrollment_epoch,enabled,enrolled_at,received_at,heartbeat,policy_digest,task_state FROM nodes ORDER BY agent_id LIMIT ?", MaxNodes)
+	result, err := snapshotsTx(ctx, tx, "", "", MaxNodes, "local-operator", "local")
+	if err != nil {
+		return nil, err
+	}
+	return result, tx.Commit()
+}
+func snapshotsTx(ctx context.Context, tx *sql.Tx, after, id string, limit int, actor, source string) ([]Snapshot, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT agent_id,enrollment_epoch,enabled,enrolled_at,received_at,heartbeat,policy_digest,task_state FROM nodes WHERE agent_id>? AND (?='' OR agent_id=?) ORDER BY agent_id LIMIT ?", after, id, id, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -323,8 +349,8 @@ func (s *Store) Snapshots(ctx context.Context) ([]Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := audit.Append(ctx, tx, audit.Event{Kind: "nodes_read", ActorID: "local-operator", Source: "local", Status: "succeeded"}, 0); err != nil {
+	if err := audit.Append(ctx, tx, audit.Event{Kind: "nodes_read", ActorID: actor, Source: source, Status: "succeeded", Code: pageScope(after, id, limit)}, 0); err != nil {
 		return nil, err
 	}
-	return result, tx.Commit()
+	return result, nil
 }

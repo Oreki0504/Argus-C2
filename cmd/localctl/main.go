@@ -1,5 +1,5 @@
 // localctl is a development-only operator tool requiring direct state access.
-// It is not the authenticated administration CLI planned for Phase 6.
+// cmd/cli provides authenticated network administration; localctl retains direct local authority.
 package main
 
 import (
@@ -13,7 +13,9 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/Oreki0504/Argus-C2/internal/adminauth"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
+	"github.com/Oreki0504/Argus-C2/internal/secretinput"
 	"github.com/Oreki0504/Argus-C2/internal/state"
 )
 
@@ -25,7 +27,9 @@ func main() {
 }
 func run() error {
 	dir := flag.String("state", "", "private server state directory")
-	action := flag.String("action", "nodes", "token, nodes, disable, submit, tasks, or audit")
+	action := flag.String("action", "nodes", "token, nodes, disable, submit, tasks, audit, users, user-add, user-password, user-role, user-disable, user-revoke, or sessions-revoke-all")
+	username := flag.String("username", "", "immutable administrator user name for local account actions")
+	role := flag.String("role", "", "Admin or ReadOnly; user-add and user-role only")
 	ttl := flag.Duration("ttl", 10*time.Minute, "enrollment token lifetime, at most 15 minutes")
 	id := flag.String("agent-id", "", "node to disable or submit to")
 	kind := flag.String("type", "", "system.info, system.metrics, ssh.audit, or service.status (submit only)")
@@ -42,8 +46,16 @@ func run() error {
 	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
 		return errors.New("run localctl as the non-root server user")
 	}
-	if *action != "token" && *action != "nodes" && *action != "disable" && *action != "submit" && *action != "tasks" && *action != "audit" {
+	userAction := *action == "user-add" || *action == "user-password" || *action == "user-role" || *action == "user-disable" || *action == "user-revoke"
+	if *action != "token" && *action != "nodes" && *action != "disable" && *action != "submit" && *action != "tasks" && *action != "audit" && *action != "users" && *action != "sessions-revoke-all" && !userAction {
 		return errors.New("unknown local action")
+	}
+	if userAction != (*username != "") || (userAction && !adminauth.Username(*username)) {
+		return errors.New("-username is required only for local user actions")
+	}
+	needsRole := *action == "user-add" || *action == "user-role"
+	if needsRole != (*role != "") || (needsRole && !adminauth.Role(*role)) {
+		return errors.New("-role Admin or ReadOnly is required only for user-add or user-role")
 	}
 	if (*action == "disable" || *action == "submit") != (*id != "") {
 		return errors.New("-agent-id is required only for disable or submit")
@@ -65,6 +77,14 @@ func run() error {
 	} else if *profileID != "" || *serviceID != "" {
 		return errors.New("resource flags apply only to their matching task type")
 	}
+	var password string
+	if *action == "user-add" || *action == "user-password" {
+		value, err := secretinput.Password(true)
+		if err != nil {
+			return err
+		}
+		password = value
+	}
 	s, err := state.Open(*dir)
 	if err != nil {
 		return err
@@ -73,6 +93,28 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	switch *action {
+	case "sessions-revoke-all":
+		return s.RevokeAllSessions(ctx)
+	case "users":
+		users, err := s.Users(ctx)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(users)
+	case "user-add":
+		user, err := s.CreateUser(ctx, *username, *role, password)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(user)
+	case "user-password":
+		return s.ChangeUser(ctx, *username, "password", password)
+	case "user-role":
+		return s.ChangeUser(ctx, *username, "role", *role)
+	case "user-disable":
+		return s.ChangeUser(ctx, *username, "disable", "")
+	case "user-revoke":
+		return s.ChangeUser(ctx, *username, "revoke", "")
 	case "token":
 		token, err := s.IssueToken(ctx, *ttl)
 		if err != nil {

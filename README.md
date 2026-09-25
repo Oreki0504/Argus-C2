@@ -8,11 +8,11 @@ The central design goal is: **compromising the management server must not give a
 
 **Project status**
 
-Phases 1 through 5 are implemented: architecture and protocol foundations, explicit one-time enrollment, persistent node identities, mTLS heartbeats, and signed dispatch of four read-only tasks: `system.info`, `system.metrics`, `ssh.audit`, and `service.status`. SSH and service inspection require explicit opt-in and local resource mappings. Probes enforce local policy, persistent replay protection, execution limits, and durable result delivery. Both ends keep bounded hash-chained audit records. Administrator authentication and deployment hardening remain later phases. This is a loopback-only development prototype, not a production-ready release. The full capabilities below remain the roadmap.
+Phases 1 through 6 are implemented: architecture and protocol foundations, explicit enrollment, persistent identities, mTLS heartbeats, and signed dispatch of four read-only tasks: `system.info`, `system.metrics`, `ssh.audit`, and `service.status`. A separate HTTPS management API and CLI now use Argon2id passwords, revocable sessions, and Admin/ReadOnly roles. SSH and service inspection require explicit local opt-in and resource mappings. Probes enforce local policy, persistent replay protection, execution limits, and durable result delivery. Both ends keep bounded hash-chained audit records. Deployment hardening remains Phase 7 work. This is a loopback-only development prototype, not a production-ready release. The full capabilities below remain the roadmap.
 
 See the [Phase 1 architecture and security design](docs/phase-1-design.md) for the full specification.
 
-Start with the [Phase 5 inspection guide](docs/phase-5-implementation.md) for SSH coverage, safe file reads, service queries, and local resource policy. It builds on the [Phase 4 task guide](docs/phase-4-implementation.md), which provides the complete enrollment/dispatch run flow and recovery behavior. The [Phase 3 guide](docs/phase-3-implementation.md) explains enrollment and telemetry; the [Phase 2 guide](docs/phase-2-implementation.md) retains the simpler static-registry connection check. The toolchain baseline is Go 1.27.1, with pinned SQLite, SSH, D-Bus, and operating-system dependencies in go.mod/go.sum.
+Start with the [Phase 6 administration guide](docs/phase-6-implementation.md) for account bootstrap, CLI login, roles, sessions, and recovery. The [Phase 5 guide](docs/phase-5-implementation.md) covers SSH observations and service queries, and the [Phase 4 guide](docs/phase-4-implementation.md) provides enrollment/dispatch setup and replay recovery. Earlier guides retain their historical scope. The toolchain baseline is Go 1.27.1, with pinned dependencies in go.mod/go.sum.
 
 **Architecture**
 
@@ -68,7 +68,7 @@ SSH auditing does not modify `authorized_keys`. Implemented reports contain boun
 - **Locally controlled authority.** Tasks have predefined types and strict parameter schemas. Unknown types, extra arguments, unauthorized resources, and oversized requests must be rejected. The server cannot remotely expand allowlists or replace trust anchors.
 - **Least privilege.** Probes run under a dedicated non-root account with systemd hardening. Local administrators control program files and security policy. Privileged helpers expose only explicitly defined operations.
 - **Signatures and replay protection.** Tasks bind a node identity, enrollment epoch, request ID, and validity window. Signature verification and persistent deduplication prevent repeated execution; tasks left in an uncertain state after a crash are not automatically rerun.
-- **Separated administrator roles.** The planned roles are Admin and ReadOnly. ReadOnly can inspect existing data but cannot initiate tasks. Authentication uses strong password hashing, revocable sessions, and optional TOTP.
+- **Separated administrator roles.** Admin can submit existing tasks and perform node/token administration. ReadOnly can inspect existing data but cannot initiate tasks. Authentication uses Argon2id password hashing and revocable sessions, with live authorization and mutations in the same transaction. Account provisioning stays local; optional TOTP remains unimplemented.
 - **Independent auditing and limits.** Both server and probe record operations and outcomes. Probes independently limit execution time, concurrency, read volume, and response size. Audit logs exclude passwords, tokens, and private keys.
 
 A task signature proves that a trusted key signed the message. If the server and signing key are compromised, containment still depends on the probe's local policy. An attacker may obtain data already authorized for upload, falsify the central view, or affect availability. The design does not claim protection when node root, the kernel, or the probe itself is already compromised.
@@ -95,12 +95,12 @@ The project is intended for machines you own or are explicitly authorized to adm
 | 3 | Enrollment, heartbeats, system information, and basic metrics | Implemented; local development only |
 | 4 | Typed task dispatch, local policy, persistent deduplication, and auditing | Implemented for two read-only task types; local development only |
 | 5 | SSH configuration and authorized-key auditing, service status | Implemented with explicit local opt-in, bounded observations, and coverage gaps; local development only |
-| 6 | Administration CLI, administrator authentication, and RBAC | Not implemented |
+| 6 | Administration CLI, administrator authentication, and RBAC | Implemented with local account provisioning and revocable sessions; optional TOTP deferred |
 | 7 | Linux deployment hardening, security tests, fuzzing, and documentation | Not implemented |
 
 Each phase starts by explaining its scope, design rationale, and security risks before implementation and validation. Identity checks and input validation accompany the interfaces that need them. Management interfaces remain restricted to local or isolated development environments until authentication, authorization, and auditing are complete.
 
-Current tests cover strict parsing and signatures, certificate/enrollment boundaries, heartbeat identity binding, real mTLS task delivery, persistent replay protection, concurrent duplicates, interrupted-task recovery, local policy rejection, audit tampering and write failures, result limits and acknowledgments, and disabled nodes on established connections. Inspection tests add hostile resource selectors, file traversal/link/rotation boundaries, redacted SSH observations, baseline drift, bounded D-Bus decoding, and a real Linux systemd query. Linux/Windows CI, the Linux race detector, a vulnerability scan, and bounded fuzz smoke tests exercise the implementation. Later phases add RBAC, deployment resource controls, and broader malicious-server containment exercises.
+Current tests cover strict parsing and signatures, certificate/enrollment boundaries, heartbeat identity binding, real mTLS task delivery, persistent replay protection, concurrent duplicates, interrupted-task recovery, local policy rejection, audit tampering and write failures, result limits and acknowledgments, and disabled nodes on established connections. Inspection tests cover file/link/rotation boundaries, redacted observations, baseline drift, bounded D-Bus decoding, and a real Linux systemd query. Administration tests add real TLS, backend RBAC, session revocation/expiry, persistent login limits, credential storage, and audit transaction failures. Linux/Windows CI, the Linux race detector, a vulnerability scan, and bounded fuzz tests exercise the implementation. Phase 7 adds deployment resource controls and broader compromise/recovery exercises.
 
 **Repository contents**
 
@@ -118,6 +118,7 @@ docs/
   phase-4-implementation.md Typed tasks, local policy, replay state, and audit guide
   phase-5-implementation.md SSH observations, local resource mappings, and service status
   phase-5-helper-design.md Privileged helper constraints; no helper implemented
+  phase-6-implementation.md Administrator CLI, authentication, sessions, and RBAC
 ```
 
-The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Follow the [current local development guide](docs/phase-5-implementation.md) to configure inspection resources, submit read-only tasks, and inspect results and audits. Production installation instructions will be added after the corresponding security gates are complete.
+The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Follow the [current administration guide](docs/phase-6-implementation.md) to create local accounts, authenticate the CLI, and manage the existing read-only task flow. Production installation instructions will be added after the corresponding security gates are complete.

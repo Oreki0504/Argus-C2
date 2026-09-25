@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 administrator task submission",
+  "$comment": "Admin only. The server derives actor_id from the live session and takes node epoch/policy digest from registered state. No client-supplied actor, role, request ID, signature, or policy update is accepted. Runtime enforces byte limits and strict JSON before the probe independently checks local authority.",
+  "type": "object", "additionalProperties": false,
+  "required": ["agent_id", "task_type", "params", "ttl_seconds"],
+  "properties": {
+    "agent_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "task_type": {"enum": ["system.info", "system.metrics", "ssh.audit", "service.status"]},
+    "params": {"type": "object"},
+    "ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 300}
+  },
+  "allOf": [
+    {"if": {"properties": {"task_type": {"enum": ["system.info", "system.metrics"]}}}, "then": {"properties": {"params": {"maxProperties": 0}}}},
+    {"if": {"properties": {"task_type": {"const": "ssh.audit"}}}, "then": {"properties": {"params": {"additionalProperties": false, "required": ["profile_id"], "properties": {"profile_id": {"$ref": "task-v1.json#/$defs/resource_id"}}}}}},
+    {"if": {"properties": {"task_type": {"const": "service.status"}}}, "then": {"properties": {"params": {"additionalProperties": false, "required": ["service_id"], "properties": {"service_id": {"$ref": "task-v1.json#/$defs/resource_id"}}}}}}
+  ]
+}

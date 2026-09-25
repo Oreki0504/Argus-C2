@@ -133,3 +133,9 @@ func EnrollmentClient(ca, serverName string) (*tls.Config, error) {
 	return &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13,
 		RootCAs: roots, ServerName: serverName, NextProtos: []string{"http/1.1"}}, nil
 }
+
+// Administrator TLS is deliberately separate from mandatory probe mTLS.
+func AdministrationServer(files Files) (*tls.Config, error) { return EnrollmentServer(files) }
+func AdministrationClient(ca, serverName string) (*tls.Config, error) {
+	return EnrollmentClient(ca, serverName)
+}

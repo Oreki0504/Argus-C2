@@ -2,6 +2,8 @@
 
 This guide records the Phase 4 baseline and remains the enrollment/dispatch setup reference. [Phase 5](phase-5-implementation.md) adds `ssh.audit` and `service.status` through explicit version 2 local resource policy. Version 1 policy authority and digests remain unchanged.
 
+[Phase 6](phase-6-implementation.md) adds the separate authenticated management API and CLI. Its server schema 3 migration preserves the task and audit state described here.
+
 Phase 4 connects the existing `system.info` and `system.metrics` collectors to a signed, persistent task queue. A probe pulls tasks over mTLS, checks its locally installed signing key and policy, records an execution intent before collecting, and returns a durable result. A task cannot contain a command, path, interface, deadline override, URL, or policy update. Both task types require `params: {}`.
 
 This is still a loopback-only development prototype. `localctl` requires direct access to the private server database; its actor label is not authenticated administrator identity. Network administrator authentication and RBAC are Phase 6 work. Linux installation hardening is Phase 7 work. Read the [design](phase-1-design.md) for the target architecture and the [Phase 3 guide](phase-3-implementation.md) for enrollment and collector details.

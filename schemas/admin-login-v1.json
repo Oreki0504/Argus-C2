@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 administrator login request",
+  "$comment": "POST /api/v1/auth/login. Go validation additionally rejects duplicates, case variants, nulls, invalid Unicode, control characters, and input over 1024 bytes. Password creation requires at least 15 Unicode characters; login accepts shorter incorrect credentials without revealing account existence.",
+  "type": "object", "additionalProperties": false,
+  "required": ["username", "password"],
+  "properties": {
+    "username": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{2,31}$"},
+    "password": {"type": "string", "minLength": 1, "maxLength": 256, "description": "At most 256 UTF-8 bytes; no control characters. Never log this field."}
+  }
+}

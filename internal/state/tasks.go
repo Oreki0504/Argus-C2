@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/Oreki0504/Argus-C2/internal/audit"
@@ -62,17 +63,24 @@ func (s *Store) ConfigureSigner(ctx context.Context, key ed25519.PrivateKey) err
 // Enqueue is local administration only. It commits exact payload bytes and the
 // intent before the polling path is allowed to sign anything.
 func (s *Store) Enqueue(ctx context.Context, id string, kind protocol.TaskType, actor string, ttl time.Duration, params ...json.RawMessage) (protocol.Task, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return protocol.Task{}, err
+	}
+	defer tx.Rollback()
+	task, err := enqueueTx(ctx, tx, id, kind, actor, "local", ttl, params...)
+	if err != nil {
+		return protocol.Task{}, err
+	}
+	return task, tx.Commit()
+}
+func enqueueTx(ctx context.Context, tx *sql.Tx, id string, kind protocol.TaskType, actor, source string, ttl time.Duration, params ...json.RawMessage) (protocol.Task, error) {
 	if len(params) > 1 {
 		return protocol.Task{}, errors.New("expected one typed parameter object")
 	}
 	if !identity.Hex(id, 32) || ttl < time.Second || ttl > protocol.MaxLifetime*time.Second {
 		return protocol.Task{}, errors.New("invalid task target or lifetime")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return protocol.Task{}, err
-	}
-	defer tx.Rollback()
 	var epoch, digest, keyDigest, worker string
 	var received int64
 	if err := tx.QueryRowContext(ctx, "SELECT enrollment_epoch,policy_digest,task_state,received_at FROM nodes WHERE agent_id=? AND enabled=1", id).Scan(&epoch, &digest, &worker, &received); err != nil {
@@ -112,10 +120,10 @@ func (s *Store) Enqueue(ctx context.Context, id string, kind protocol.TaskType, 
 	if _, err := tx.ExecContext(ctx, "INSERT INTO tasks(request_id,agent_id,epoch,payload,state,expires_at) VALUES(?,?,?,?,'queued',?)", t.RequestID, id, epoch, data, t.ExpiresAt); err != nil {
 		return protocol.Task{}, err
 	}
-	if err := audit.Append(ctx, tx, audit.TaskEvent("task_queued", t, "local", "queued", "", audit.Digest(data)), 2); err != nil {
+	if err := audit.Append(ctx, tx, audit.TaskEvent("task_queued", t, source, "queued", "", audit.Digest(data)), 2); err != nil {
 		return protocol.Task{}, err
 	}
-	return t, tx.Commit()
+	return t, nil
 }
 
 func authorizeTx(ctx context.Context, tx *sql.Tx, cert *x509.Certificate) (identity.Node, error) {
@@ -343,7 +351,14 @@ func (s *Store) Tasks(ctx context.Context, after int64, limit int) ([]TaskRecord
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, "SELECT sequence,payload,state,code,result,result_digest FROM tasks WHERE sequence>? ORDER BY sequence LIMIT ?", after, limit)
+	result, err := tasksTx(ctx, tx, after, limit, "", "local-operator", "local")
+	if err != nil {
+		return nil, err
+	}
+	return result, tx.Commit()
+}
+func tasksTx(ctx context.Context, tx *sql.Tx, after int64, limit int, id, actor, source string) ([]TaskRecord, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT sequence,payload,state,code,result,result_digest FROM tasks WHERE sequence>? AND (?='' OR request_id=?) ORDER BY sequence LIMIT ?", after, id, id, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -376,10 +391,10 @@ func (s *Store) Tasks(ctx context.Context, after int64, limit int) ([]TaskRecord
 	if err != nil {
 		return nil, err
 	}
-	if err := audit.Append(ctx, tx, audit.Event{Kind: "tasks_read", ActorID: "local-operator", Source: "local", Status: "succeeded"}, 0); err != nil {
+	if err := audit.Append(ctx, tx, audit.Event{Kind: "tasks_read", ActorID: actor, Source: source, Status: "succeeded", Code: pageScope(strconv.FormatInt(after, 10), id, limit)}, 0); err != nil {
 		return nil, err
 	}
-	return result, tx.Commit()
+	return result, nil
 }
 func (s *Store) Audit(ctx context.Context, after int64, limit int) (audit.Page, error) {
 	return audit.Read(ctx, s.db, after, limit)

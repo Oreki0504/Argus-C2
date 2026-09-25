@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 successful administrator login response",
+  "$comment": "Only the login response carries the raw bearer token. The server stores its domain-separated SHA-256 digest. The CLI saves the token locally and prints only the user and absolute expiration. Expiration and revocation are enforced by the server on every request.",
+  "type": "object", "additionalProperties": false,
+  "required": ["token", "user", "expires_at", "idle_seconds"],
+  "properties": {
+    "token": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "user": {"allOf": [{"$ref": "admin-user-v1.json"}, {"properties": {"enabled": {"const": true}}}]},
+    "expires_at": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+    "idle_seconds": {"const": 1800}
+  }
+}

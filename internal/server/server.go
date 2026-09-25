@@ -198,6 +198,16 @@ func RunEnrollment(ctx context.Context, addr string, config *tls.Config, handler
 	return runHTTP(ctx, addr, config, handler)
 }
 
+func RunAdministration(ctx context.Context, addr string, config *tls.Config, handler http.Handler) error {
+	if err := LoopbackAddress(addr); err != nil {
+		return err
+	}
+	if config == nil || config.MinVersion < tls.VersionTLS13 || config.ClientAuth != tls.NoClientCert || handler == nil {
+		return errors.New("separate TLS administrator listener is required")
+	}
+	return runHTTP(ctx, addr, config, handler)
+}
+
 func runHTTP(ctx context.Context, addr string, config *tls.Config, handler http.Handler) error {
 	l, err := net.Listen("tcp", addr)
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Oreki0504/Argus-C2/internal/enrollment"
 	"github.com/Oreki0504/Argus-C2/internal/identity"
+	"github.com/Oreki0504/Argus-C2/internal/management"
 	"github.com/Oreki0504/Argus-C2/internal/server"
 	"github.com/Oreki0504/Argus-C2/internal/signing"
 	"github.com/Oreki0504/Argus-C2/internal/state"
@@ -39,6 +40,7 @@ func run() error {
 	issuerCert := flag.String("issuer-cert", "", "client-auth-only intermediate CA certificate")
 	issuerKey := flag.String("issuer-key", "", "intermediate CA private key")
 	taskKey := flag.String("task-signing-key", "", "separate Ed25519 task key; enables dispatch with -state")
+	adminAddr := flag.String("admin-listen", "", "enable separate loopback HTTPS administrator API with -state")
 	flag.Parse()
 	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
 		return errors.New("the server must run as a non-root user")
@@ -71,6 +73,19 @@ func run() error {
 	config, err := tlsconfig.Server(files, registry)
 	if err != nil {
 		return err
+	}
+	var adminTLS *tls.Config
+	if *adminAddr != "" {
+		if store == nil {
+			return errors.New("administrator API requires -state")
+		}
+		if err := server.LoopbackAddress(*adminAddr); err != nil {
+			return err
+		}
+		adminTLS, err = tlsconfig.AdministrationServer(files)
+		if err != nil {
+			return err
+		}
 	}
 	var issuer *enrollment.Issuer
 	var enrollmentTLS *tls.Config
@@ -123,10 +138,15 @@ func run() error {
 	defer stop()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	results := make(chan error, 2)
+	results := make(chan error, 3)
 	count := 1
 	log.Printf("Starting mTLS probe endpoint on %s", *addr)
 	go func() { results <- server.Run(ctx, *addr, config, registry, sinks...) }()
+	if adminTLS != nil {
+		count++
+		log.Printf("Starting HTTPS administrator endpoint on %s", *adminAddr)
+		go func() { results <- server.RunAdministration(ctx, *adminAddr, adminTLS, management.Handler(store)) }()
+	}
 	if issuer != nil {
 		count++
 		log.Printf("Starting development enrollment endpoint on %s", *enrollAddr)

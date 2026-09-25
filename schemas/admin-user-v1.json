@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 administrator identity",
+  "type": "object", "additionalProperties": false,
+  "required": ["id", "username", "role", "enabled"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "username": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{2,31}$"},
+    "role": {"enum": ["Admin", "ReadOnly"]},
+    "enabled": {"type": "boolean"}
+  }
+}

@@ -1,5 +1,7 @@
 # Argus-C2 Phase 5: SSH Auditing and Service Status
 
+This guide records the Phase 5 collector scope. [Phase 6](phase-6-implementation.md) adds authenticated administration and RBAC; the local resource policy and collector boundaries below remain unchanged.
+
 Phase 5 adds two fixed read-only tasks to the Phase 4 dispatch and audit flow. `ssh.audit` accepts only `{"profile_id":"host"}`. `service.status` accepts only `{"service_id":"ssh"}`. Those IDs resolve through a policy installed by a local administrator on the probe. A task cannot supply a path, unit name, command, glob, user name, read limit, or baseline update.
 
 The probe remains non-root. These collectors run natively on Linux; other operating systems return explicit `unsupported` observations. This remains a loopback-only development prototype. Administrator authentication and RBAC are Phase 6 work, and production installation hardening is Phase 7 work. No privileged helper is installed or implemented; see the [helper design and review gate](phase-5-helper-design.md).

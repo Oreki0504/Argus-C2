@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -189,6 +190,19 @@ func Read(ctx context.Context, db *sql.DB, after int64, limit int) (Page, error)
 		return Page{}, err
 	}
 	defer tx.Rollback()
+	p, err := ReadTx(ctx, tx, after, limit, "local-operator", "local")
+	if err != nil {
+		return Page{}, err
+	}
+	return p, tx.Commit()
+}
+
+// ReadTx lets management bind live authorization and access auditing to the
+// same transaction as the returned page. It never commits the caller's work.
+func ReadTx(ctx context.Context, tx *sql.Tx, after int64, limit int, actor, source string) (Page, error) {
+	if after < 0 || limit < 1 || limit > 200 {
+		return Page{}, errors.New("invalid audit page")
+	}
 	if err := Verify(ctx, tx); err != nil {
 		return Page{}, err
 	}
@@ -215,13 +229,13 @@ func Read(ctx context.Context, db *sql.DB, after int64, limit int) (Page, error)
 	if err != nil {
 		return Page{}, err
 	}
-	if err := Append(ctx, tx, Event{Kind: "audit_read", ActorID: "local-operator", Source: "local", Status: "succeeded"}, 0); err != nil {
+	if err := Append(ctx, tx, Event{Kind: "audit_read", ActorID: actor, Source: source, Status: "succeeded", Code: "after_" + strconv.FormatInt(after, 10) + "_limit_" + strconv.Itoa(limit)}, 0); err != nil {
 		return Page{}, err
 	}
 	if err := tx.QueryRowContext(ctx, "SELECT sequence,hash FROM audit_head WHERE id=1").Scan(&p.HeadSequence, &p.HeadHash); err != nil {
 		return Page{}, err
 	}
-	return p, tx.Commit()
+	return p, nil
 }
 func Peer(remote string) string {
 	host, _, err := net.SplitHostPort(remote)

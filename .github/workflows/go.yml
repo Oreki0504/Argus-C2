@@ -49,3 +49,5 @@ jobs:
           go test ./internal/enrollment -run '^$' -fuzz '^FuzzParseCSR$' -fuzztime=10s -parallel=2
           go test ./internal/sshaudit -run '^$' -fuzz '^FuzzSSHParsers$' -fuzztime=10s -parallel=2
           go test ./internal/service -run '^$' -fuzz '^FuzzDBusResponseGuard$' -fuzztime=10s -parallel=2
+          go test ./internal/management -run '^$' -fuzz '^FuzzManagementRequests$' -fuzztime=10s -parallel=2
+          go test ./internal/adminauth -run '^$' -fuzz '^FuzzPasswordHashParsing$' -fuzztime=10s -parallel=2
