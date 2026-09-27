@@ -8,11 +8,11 @@ The central design goal is: **compromising the management server must not give a
 
 **Project status**
 
-Phases 1 through 6 are implemented: architecture and protocol foundations, explicit enrollment, persistent identities, mTLS heartbeats, and signed dispatch of four read-only tasks: `system.info`, `system.metrics`, `ssh.audit`, and `service.status`. A separate HTTPS management API and CLI now use Argon2id passwords, revocable sessions, and Admin/ReadOnly roles. SSH and service inspection require explicit local opt-in and resource mappings. Probes enforce local policy, persistent replay protection, execution limits, and durable result delivery. Both ends keep bounded hash-chained audit records. Deployment hardening remains Phase 7 work. This is a loopback-only development prototype, not a production-ready release. The full capabilities below remain the roadmap.
+Phases 1 through 7 establish a tested local deployment baseline: explicit enrollment, persistent identities, mTLS heartbeats, and signed dispatch of four read-only tasks: `system.info`, `system.metrics`, `ssh.audit`, and `service.status`. A separate HTTPS management API and CLI use Argon2id passwords, revocable sessions, and Admin/ReadOnly roles. Root-controlled systemd units add separate non-root accounts, credentials, resource limits, and native recovery exercises. Probes enforce local opt-in, policy, replay protection, execution limits, and durable results. Both ends keep bounded hash-chained audit records. This remains a loopback-only development prototype, not a production-ready multi-VPS release. The full capabilities below remain the roadmap.
 
 See the [Phase 1 architecture and security design](docs/phase-1-design.md) for the full specification.
 
-Start with the [Phase 6 administration guide](docs/phase-6-implementation.md) for account bootstrap, CLI login, roles, sessions, and recovery. The [Phase 5 guide](docs/phase-5-implementation.md) covers SSH observations and service queries, and the [Phase 4 guide](docs/phase-4-implementation.md) provides enrollment/dispatch setup and replay recovery. Earlier guides retain their historical scope. The toolchain baseline is Go 1.27.1, with pinned dependencies in go.mod/go.sum.
+Start with the [Phase 7 Linux service guide](docs/phase-7-implementation.md) for installation permissions, systemd restrictions, and restore quarantine. The [Phase 6 guide](docs/phase-6-implementation.md) covers CLI authentication and roles; [Phase 5](docs/phase-5-implementation.md) covers inspection, and [Phase 4](docs/phase-4-implementation.md) provides enrollment/dispatch setup. Earlier guides retain their historical scope. The toolchain baseline is Go 1.27.1, with pinned dependencies in go.mod/go.sum.
 
 **Architecture**
 
@@ -96,11 +96,11 @@ The project is intended for machines you own or are explicitly authorized to adm
 | 4 | Typed task dispatch, local policy, persistent deduplication, and auditing | Implemented for two read-only task types; local development only |
 | 5 | SSH configuration and authorized-key auditing, service status | Implemented with explicit local opt-in, bounded observations, and coverage gaps; local development only |
 | 6 | Administration CLI, administrator authentication, and RBAC | Implemented with local account provisioning and revocable sessions; optional TOTP deferred |
-| 7 | Linux deployment hardening, security tests, fuzzing, and documentation | Not implemented |
+| 7 | Linux deployment hardening, security tests, fuzzing, and documentation | Local systemd baseline and recovery exercises implemented; production rollout remains out of scope |
 
 Each phase starts by explaining its scope, design rationale, and security risks before implementation and validation. Identity checks and input validation accompany the interfaces that need them. Management interfaces remain restricted to local or isolated development environments until authentication, authorization, and auditing are complete.
 
-Current tests cover strict parsing and signatures, certificate/enrollment boundaries, heartbeat identity binding, real mTLS task delivery, persistent replay protection, concurrent duplicates, interrupted-task recovery, local policy rejection, audit tampering and write failures, result limits and acknowledgments, and disabled nodes on established connections. Inspection tests cover file/link/rotation boundaries, redacted observations, baseline drift, bounded D-Bus decoding, and a real Linux systemd query. Administration tests add real TLS, backend RBAC, session revocation/expiry, persistent login limits, credential storage, and audit transaction failures. Linux/Windows CI, the Linux race detector, a vulnerability scan, and bounded fuzz tests exercise the implementation. Phase 7 adds deployment resource controls and broader compromise/recovery exercises.
+Current tests cover strict parsing and signatures, certificate/enrollment boundaries, heartbeat identity binding, real mTLS task delivery, persistent replay protection, concurrent duplicates, interrupted-task recovery, local policy rejection, audit tampering and write failures, result limits and acknowledgments, and disabled nodes on established connections. Inspection tests cover file/link/rotation boundaries, redacted observations, baseline drift, bounded D-Bus decoding, and a real Linux systemd query. Administration tests add backend RBAC, session revocation/expiry, persistent login limits, credential storage, and audit transaction failures. Native Ubuntu deployment CI verifies effective service isolation, cgroup limits, all four tasks, cold restore quarantine, and fresh enrollment. Linux/Windows tests, the Linux race detector, vulnerability checks, and bounded fuzz tests remain enabled.
 
 **Repository contents**
 
@@ -109,7 +109,9 @@ cmd/                      Server, probe, enrollment, development keys, local ope
 internal/                 Protocol, TLS, enrollment, SQLite, policy, task engine, audit, collectors
 schemas/                  Versioned protocol JSON Schemas
 examples/                 Explicit local telemetry and task policy
+deploy/linux/             Reviewed systemd units, sysusers definitions, enrollment drop-in
 test/integration/         Real mTLS connection tests
+test/deployment/          Disposable-VM service isolation and recovery exercises
 .github/workflows/        Linux and Windows validation
 docs/
   phase-1-design.md        Target architecture and security design
@@ -119,6 +121,7 @@ docs/
   phase-5-implementation.md SSH observations, local resource mappings, and service status
   phase-5-helper-design.md Privileged helper constraints; no helper implemented
   phase-6-implementation.md Administrator CLI, authentication, sessions, and RBAC
+  phase-7-implementation.md Linux service hardening, installation, and restore quarantine
 ```
 
-The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Follow the [current administration guide](docs/phase-6-implementation.md) to create local accounts, authenticate the CLI, and manage the existing read-only task flow. Production installation instructions will be added after the corresponding security gates are complete.
+The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Follow the [Linux service guide](docs/phase-7-implementation.md) to qualify an isolated deployment and the [administration guide](docs/phase-6-implementation.md) to manage the existing read-only task flow. Certificate renewal, automatic retention, off-host auditing, and multi-host deployment remain future work.

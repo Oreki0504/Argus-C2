@@ -1,0 +1,6 @@
+# Install temporarily as /etc/systemd/system/argus-c2-server.service.d/enrollment.conf.
+# Remove this drop-in and restart the server when enrollment is complete.
+[Service]
+LoadCredential=issuer-key:/etc/argus-c2/server/secrets/issuer-key.pem
+ExecStart=
+ExecStart=/usr/local/libexec/argus-c2/server -listen 127.0.0.1:8443 -admin-listen 127.0.0.1:8445 -enroll-listen 127.0.0.1:8444 -issuer-cert /etc/argus-c2/server/issuer-cert.pem -issuer-key %d/issuer-key -cert /etc/argus-c2/server/server-cert.pem -key %d/server-key -ca /etc/argus-c2/server/ca.pem -state /var/lib/argus-c2-server -task-signing-key %d/task-key

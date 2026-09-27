@@ -463,3 +463,51 @@ func (s *Store) RevokeAllSessions(ctx context.Context) error {
 	}
 	return tx.Commit()
 }
+
+// QuarantineRestore is a trusted local maintenance operation before exposing a
+// restored server. A coherent backup may resurrect revoked node identities,
+// consumed enrollment tokens, and sessions. Preserve task and audit evidence,
+// but require explicit fresh node enrollment after a restore.
+func (s *Store) QuarantineRestore(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, "SELECT agent_id FROM nodes WHERE enabled=1 ORDER BY agent_id")
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := disableTx(ctx, tx, id, "local-operator", "local-restore"); err != nil {
+			return err
+		}
+	}
+	var sessions int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM admin_sessions").Scan(&sessions); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM admin_sessions;
+UPDATE admin_users SET generation=generation+1;
+UPDATE enrollment_tokens SET consumed=1;`); err != nil {
+		return err
+	}
+	if err := audit.Append(ctx, tx, audit.Event{Kind: "restore_quarantined", ActorID: "local-operator", Source: "local", Status: "succeeded"}, -sessions); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

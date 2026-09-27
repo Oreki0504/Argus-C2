@@ -1,5 +1,7 @@
 # Argus-C2 Phase 6: Administrator Authentication, CLI, and RBAC
 
+This guide records the Phase 6 milestone. The [Phase 7 guide](phase-7-implementation.md) adds Linux service hardening and the stronger local `restore-quarantine` procedure. Use that procedure after a server backup restore; session revocation alone does not address resurrected node identities or enrollment tokens.
+
 Phase 6 adds a separate HTTPS administration listener, a network CLI, locally provisioned administrator accounts, Argon2id password verification, opaque revocable sessions, and backend role enforcement. An Admin can submit the existing four read-only task types, issue enrollment tokens, and disable nodes. ReadOnly can inspect existing data. Reading or refreshing a result never dispatches work.
 
 Management, enrollment, and probe traffic use separate listeners. The probe listener still requires its registered client certificate; an administrator session cannot replace mTLS. A probe certificate cannot authenticate an administrator. All listeners remain restricted to literal loopback addresses while Linux deployment hardening and operational recovery are developed in Phase 7. This remains a development prototype.

@@ -6,6 +6,26 @@ permissions:
   contents: read
 
 jobs:
+  deployment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Build deployment fixture
+        run: |
+          mkdir -p .cache/deployment-bin
+          for command in server agent localctl probectl enroll cli devpki devsign; do
+            CGO_ENABLED=0 go build -trimpath -o ".cache/deployment-bin/$command" "./cmd/$command"
+          done
+          python3 -m py_compile test/deployment/check_service.py test/deployment/systemd_smoke.py
+      - name: Native systemd isolation and recovery exercises
+        run: sudo env GITHUB_ACTIONS=true python3 test/deployment/systemd_smoke.py --disposable-ci
   test:
     strategy:
       fail-fast: false

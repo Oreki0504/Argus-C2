@@ -27,7 +27,7 @@ func main() {
 }
 func run() error {
 	dir := flag.String("state", "", "private server state directory")
-	action := flag.String("action", "nodes", "token, nodes, disable, submit, tasks, audit, users, user-add, user-password, user-role, user-disable, user-revoke, or sessions-revoke-all")
+	action := flag.String("action", "nodes", "token, nodes, disable, submit, tasks, audit, users, user-add, user-password, user-role, user-disable, user-revoke, sessions-revoke-all, or restore-quarantine")
 	username := flag.String("username", "", "immutable administrator user name for local account actions")
 	role := flag.String("role", "", "Admin or ReadOnly; user-add and user-role only")
 	ttl := flag.Duration("ttl", 10*time.Minute, "enrollment token lifetime, at most 15 minutes")
@@ -47,7 +47,7 @@ func run() error {
 		return errors.New("run localctl as the non-root server user")
 	}
 	userAction := *action == "user-add" || *action == "user-password" || *action == "user-role" || *action == "user-disable" || *action == "user-revoke"
-	if *action != "token" && *action != "nodes" && *action != "disable" && *action != "submit" && *action != "tasks" && *action != "audit" && *action != "users" && *action != "sessions-revoke-all" && !userAction {
+	if *action != "token" && *action != "nodes" && *action != "disable" && *action != "submit" && *action != "tasks" && *action != "audit" && *action != "users" && *action != "sessions-revoke-all" && *action != "restore-quarantine" && !userAction {
 		return errors.New("unknown local action")
 	}
 	if userAction != (*username != "") || (userAction && !adminauth.Username(*username)) {
@@ -93,6 +93,8 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	switch *action {
+	case "restore-quarantine":
+		return s.QuarantineRestore(ctx)
 	case "sessions-revoke-all":
 		return s.RevokeAllSessions(ctx)
 	case "users":
