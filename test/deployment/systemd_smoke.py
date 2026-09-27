@@ -14,6 +14,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import traceback
 
 if sys.argv[1:] != ["--disposable-ci"] or os.environ.get("GITHUB_ACTIONS") != "true" or os.geteuid() != 0:
     sys.exit("Requires an explicitly selected disposable GitHub Actions VM and root fixture setup")
@@ -184,18 +185,20 @@ try:
     node = enroll()
     run("systemctl", "start", units[1])
     eventually(lambda: ready(node), "probe did not advertise readiness")
-    assert submit(node, "system.info")["data"]["available"]
-    assert submit(node, "system.metrics")["data"]["memory"]["available"]
-    assert submit(node, "service.status", "-service-id", "journal")["data"]["load_state"] == "loaded"
-    assert submit(node, "ssh.audit", "-profile-id", "fixture")["data"]["files"][0]["status"] == "ok"
+    assert submit(node, "system.info")["data"]["available"], "system information unavailable"
+    assert submit(node, "system.metrics")["data"]["memory"]["available"], "memory metrics unavailable"
+    service = submit(node, "service.status", "-service-id", "journal")["data"]
+    assert service["load_state"] == "loaded", service
+    observation = submit(node, "ssh.audit", "-profile-id", "fixture")["data"]["files"][0]
+    assert observation["status"] == "ok", observation
     for role in states:
         group = run("systemctl", "show", "--property=ControlGroup", "--value", "argus-c2-" + role).stdout.strip()
         cg = Path("/sys/fs/cgroup") / group.lstrip("/")
-        assert (cg / "memory.max").read_text().strip() == str((512 if role == "server" else 192) * 1024 * 1024)
-        assert (cg / "pids.max").read_text().strip() == "128"
-        assert (cg / "memory.swap.max").read_text().strip() == "0"
+        assert (cg / "memory.max").read_text().strip() == str((512 if role == "server" else 192) * 1024 * 1024), (role, "memory.max", (cg / "memory.max").read_text())
+        assert (cg / "pids.max").read_text().strip() == "128", (role, "pids.max", (cg / "pids.max").read_text())
+        assert (cg / "memory.swap.max").read_text().strip() == "0", (role, "memory.swap.max", (cg / "memory.swap.max").read_text())
         quota, period = map(int, (cg / "cpu.max").read_text().split())
-        assert quota / period == (1 if role == "server" else 0.5)
+        assert quota / period == (1 if role == "server" else 0.5), (role, "cpu.max", quota, period)
     print("PASS: effective isolation, credentials, cgroups, HTTPS, mTLS, metrics, systemd query", flush=True)
     # Cold backup: stop every database writer; copy the entire directory.
     run("systemctl", "stop", *units)
@@ -237,8 +240,8 @@ try:
     with socket.socket() as connection:
         assert connection.connect_ex(("127.0.0.1", 8444)) != 0
     print("PASS: cold restore, session revocation, lost replay state, disable and fresh enrollment", flush=True)
-except Exception as error:
-    message = str(error).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+except Exception:
+    message = traceback.format_exc().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print("::error title=Deployment exercise::" + message, flush=True)
     for unit in units:
         log = run("journalctl", "-u", unit, "--no-pager", "-n", "25", ok=False).stdout
