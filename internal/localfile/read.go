@@ -30,7 +30,7 @@ func Read(path string, limit int, secret bool) ([]byte, error) {
 	if !after.Mode().IsRegular() || !os.SameFile(before, after) {
 		return nil, errors.New("configuration changed while opening")
 	}
-	if secret && runtime.GOOS != "windows" && after.Mode().Perm()&0077 != 0 {
+	if secret && runtime.GOOS != "windows" && after.Mode().Perm()&0077 != 0 && !privateCredentialACL(f) {
 		return nil, errors.New("private key must not be accessible by group or others")
 	}
 	return strictjson.Read(f, limit)

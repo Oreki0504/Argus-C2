@@ -21,6 +21,8 @@ The units use `LoadCredential=` and `%d` to provide private, read-only runtime k
 
 Both units clear effective/bounding/ambient capabilities, enable `NoNewPrivileges`, restrict namespaces and address families, apply `@system-service` syscall filtering, disable writable-executable memory, protect kernel/control-group settings, and set a private umask. `/proc` remains sufficient for fixed system metrics; unrelated processes are hidden. Home-directory SSH inspection remains unavailable. Do not weaken `ProtectHome` or add privileged groups to eliminate a coverage gap.
 
+On Linux, systemd can express credential access with a named-user ACL whose read mask appears in the group mode bits. Argus accepts only the exact root-owned, read-only ACL granting this service UID read access, with no owning-group or other access. It checks the opened file descriptor and bounded ACL bytes; an environment variable or credential-looking path cannot bypass the normal private-file rule. Ordinary group-readable keys remain rejected. This accommodates [systemd's credential implementation](https://github.com/systemd/systemd/blob/v255/src/core/exec-credential.c).
+
 | Setting | Server | Probe |
 | --- | --- | --- |
 | CPU quota, as a fraction of one CPU | 100% | 50% |
