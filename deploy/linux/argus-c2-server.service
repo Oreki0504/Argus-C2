@@ -10,6 +10,7 @@ User=argus-server
 Group=argus-server
 WorkingDirectory=/var/lib/argus-c2-server
 ReadWritePaths=/var/lib/argus-c2-server
+NoExecPaths=/var/lib/argus-c2-server /tmp /var/tmp
 LoadCredential=server-key:/etc/argus-c2/server/secrets/server-key.pem
 LoadCredential=task-key:/etc/argus-c2/server/secrets/task-private.pem
 ExecStartPre=/usr/bin/test -f /var/lib/argus-c2-server/argus.db

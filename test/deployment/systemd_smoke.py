@@ -192,6 +192,8 @@ try:
     observation = submit(node, "ssh.audit", "-profile-id", "fixture")["data"]["files"][0]
     assert observation["status"] == "ok", observation
     for role in states:
+        restrict_suid = run("systemctl", "show", "--property=RestrictSUIDSGID", "--value", "argus-c2-" + role).stdout.strip()
+        assert restrict_suid == ("yes" if role == "server" else "no"), (role, "RestrictSUIDSGID", restrict_suid)
         group = run("systemctl", "show", "--property=ControlGroup", "--value", "argus-c2-" + role).stdout.strip()
         cg = Path("/sys/fs/cgroup") / group.lstrip("/")
         assert (cg / "memory.max").read_text().strip() == str((512 if role == "server" else 192) * 1024 * 1024), (role, "memory.max", (cg / "memory.max").read_text())

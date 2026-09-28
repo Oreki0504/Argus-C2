@@ -10,6 +10,7 @@ User=argus-probe
 Group=argus-probe
 WorkingDirectory=/var/lib/argus-c2-probe
 ReadWritePaths=/var/lib/argus-c2-probe
+NoExecPaths=/var/lib/argus-c2-probe /tmp /var/tmp
 LoadCredential=probe-key:/etc/argus-c2/probe/secrets/probe-key.pem
 ExecStartPre=/usr/bin/test -f /var/lib/argus-c2-probe/replay/probe.db
 ExecStart=/usr/local/libexec/argus-c2/agent -server https://127.0.0.1:8443 -cert /etc/argus-c2/probe/probe-cert.pem -key %d/probe-key -ca /etc/argus-c2/probe/ca.pem -identity /etc/argus-c2/probe/identity.json -policy /etc/argus-c2/probe/policy.json -task-state /var/lib/argus-c2-probe/replay -task-public-key /etc/argus-c2/probe/task-public.pem
@@ -35,7 +36,9 @@ ProtectHostname=true
 ProtectProc=invisible
 RestrictNamespaces=true
 RestrictRealtime=true
-RestrictSUIDSGID=true
+# systemd 255 blocks openat2 under this switch; safe SSH reads require openat2.
+# Keep NoNewPrivileges, empty capabilities, and all other restrictions enabled.
+RestrictSUIDSGID=false
 LockPersonality=true
 MemoryDenyWriteExecute=true
 SystemCallArchitectures=native

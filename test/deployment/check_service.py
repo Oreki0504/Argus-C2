@@ -2,6 +2,7 @@
 import errno
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 
@@ -53,4 +54,16 @@ with tempfile.TemporaryFile(dir=state) as file:
     file.write(b"local state remains writable")
     file.flush()
     os.fsync(file.fileno())
+# A harmless executable copy in a writable area must fail execve.
+for directory in (state, Path("/tmp"), Path("/var/tmp")):
+    with tempfile.TemporaryDirectory(dir=directory) as scratch:
+        executable = Path(scratch) / "true"
+        executable.write_bytes(Path("/usr/bin/true").read_bytes())
+        executable.chmod(0o700)
+        try:
+            subprocess.run([str(executable)], check=True, timeout=2)
+        except OSError as error:
+            assert error.errno in (errno.EACCES, errno.EPERM), error
+        else:
+            raise AssertionError("execution allowed in writable directory: " + str(directory))
 print("Verified effective service restrictions:", role)
