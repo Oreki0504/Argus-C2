@@ -228,7 +228,8 @@ try:
     assert not (states["probe"] / "replay").exists()
     replacement = enroll()
     assert replacement != node
-    run("systemctl", "reset-failed", units[1])
+    # stop already cancelled the failed unit's pending restart. systemd may
+    # garbage-collect it before reenrollment completes; start loads it again.
     run("systemctl", "start", units[1])
     eventually(lambda: ready(replacement), "fresh identity did not become ready")
     submit(replacement, "system.info")
