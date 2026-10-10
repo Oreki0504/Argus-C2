@@ -105,6 +105,24 @@ func TestCSRProofAndScope(t *testing.T) {
 	if _, err := LoadIssuer(filepath.Join(dir, "server-cert.pem"), filepath.Join(dir, "server-key.pem"), filepath.Join(dir, "ca.pem")); err == nil {
 		t.Fatal("transport credentials accepted as issuer")
 	}
+	for _, bad := range []time.Duration{0, time.Minute, 31 * 24 * time.Hour, time.Hour + time.Nanosecond} {
+		if err := i.SetLifetime(bad); err == nil {
+			t.Fatal("invalid lifetime accepted", bad)
+		}
+	}
+	if err := i.SetLifetime(30 * 24 * time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	// A long requested leaf cannot extend the operational issuer/root lifetime.
+	i.validUntil = time.Now().Add(2 * time.Hour)
+	_, bounded, err := i.Issue(csr, n)
+	if err != nil || bounded.NotAfter.After(i.validUntil) {
+		t.Fatal("leaf outlived issuer chain", err)
+	}
+	i.validUntil = time.Now().Add(30 * time.Second)
+	if _, _, err := i.Issue(csr, n); err == nil {
+		t.Fatal("nearly expired chain issued another leaf")
+	}
 }
 
 func FuzzParseCSR(f *testing.F) {

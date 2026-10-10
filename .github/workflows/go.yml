@@ -20,7 +20,7 @@ jobs:
       - name: Build deployment fixture
         run: |
           mkdir -p .cache/deployment-bin
-          for command in server agent localctl probectl enroll cli devpki devsign; do
+          for command in server agent localctl probectl enroll renew cli devpki devsign; do
             CGO_ENABLED=0 go build -trimpath -o ".cache/deployment-bin/$command" "./cmd/$command"
           done
           python3 -m py_compile test/deployment/check_service.py test/deployment/systemd_smoke.py
@@ -67,6 +67,7 @@ jobs:
           go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeHeartbeat$' -fuzztime=10s -parallel=2
           go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeResult$' -fuzztime=10s -parallel=2
           go test ./internal/enrollment -run '^$' -fuzz '^FuzzParseCSR$' -fuzztime=10s -parallel=2
+          go test ./internal/protocol -run '^$' -fuzz '^FuzzRenewalMessages$' -fuzztime=10s -parallel=2
           go test ./internal/sshaudit -run '^$' -fuzz '^FuzzSSHParsers$' -fuzztime=10s -parallel=2
           go test ./internal/service -run '^$' -fuzz '^FuzzDBusResponseGuard$' -fuzztime=10s -parallel=2
           go test ./internal/management -run '^$' -fuzz '^FuzzManagementRequests$' -fuzztime=10s -parallel=2

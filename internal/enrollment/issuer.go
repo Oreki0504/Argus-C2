@@ -21,9 +21,23 @@ import (
 )
 
 type Issuer struct {
-	cert *x509.Certificate
-	key  ed25519.PrivateKey
-	pem  []byte
+	cert       *x509.Certificate
+	key        ed25519.PrivateKey
+	pem        []byte
+	lifetime   time.Duration
+	validUntil time.Time
+}
+
+func (i *Issuer) Certificate() *x509.Certificate { return i.cert }
+
+// Configured once before serving. The development default remains 12 hours;
+// longer lifetimes require explicit local configuration and a usable issuer.
+func (i *Issuer) SetLifetime(lifetime time.Duration) error {
+	if lifetime < time.Hour || lifetime > 30*24*time.Hour || lifetime%time.Second != 0 {
+		return errors.New("certificate lifetime must be 1 hour through 30 days in whole seconds")
+	}
+	i.lifetime = lifetime
+	return nil
 }
 
 func (i *Issuer) CheckTaskKey(key ed25519.PrivateKey) error { return signing.Distinct(key, i.cert) }
@@ -60,7 +74,13 @@ func LoadIssuer(certPath, keyPath, caPath string) (*Issuer, error) {
 	if err != nil || len(chains) == 0 || len(chains[0]) < 2 {
 		return nil, errors.New("issuer must chain to the separately provisioned root CA")
 	}
-	return &Issuer{cert: cert, key: key, pem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})}, nil
+	validUntil := cert.NotAfter
+	for _, c := range chains[0] {
+		if c.NotAfter.Before(validUntil) {
+			validUntil = c.NotAfter
+		}
+	}
+	return &Issuer{cert: cert, key: key, pem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), validUntil: validUntil}, nil
 }
 
 func ParseCSR(der []byte) (*x509.CertificateRequest, error) {
@@ -105,7 +125,11 @@ func (i *Issuer) Issue(csr *x509.CertificateRequest, n identity.Node) ([]byte, *
 		return nil, nil, err
 	}
 	now := time.Now()
-	if now.Before(i.cert.NotBefore) || !now.Add(time.Minute).Before(i.cert.NotAfter) {
+	until := i.validUntil
+	if until.IsZero() {
+		until = i.cert.NotAfter
+	}
+	if now.Before(i.cert.NotBefore) || !now.Add(time.Minute).Before(until) {
 		return nil, nil, errors.New("issuing CA is outside its usable validity window")
 	}
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
@@ -113,9 +137,13 @@ func (i *Issuer) Issue(csr *x509.CertificateRequest, n identity.Node) ([]byte, *
 		return nil, nil, err
 	}
 	serial.Add(serial, big.NewInt(1))
-	expires := now.Add(12 * time.Hour)
-	if expires.After(i.cert.NotAfter) {
-		expires = i.cert.NotAfter
+	lifetime := i.lifetime
+	if lifetime == 0 {
+		lifetime = 12 * time.Hour
+	}
+	expires := now.Add(lifetime)
+	if expires.After(until) {
+		expires = until
 	}
 	notBefore := now.Add(-time.Minute)
 	if notBefore.Before(i.cert.NotBefore) {

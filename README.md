@@ -10,7 +10,7 @@ The central design goal is: **compromising the management server must not give a
 
 Phases 1 through 7 establish a tested local deployment baseline: explicit enrollment, persistent identities, mTLS heartbeats, and signed dispatch of four read-only tasks: `system.info`, `system.metrics`, `ssh.audit`, and `service.status`. A separate HTTPS management API and CLI use Argon2id passwords, revocable sessions, and Admin/ReadOnly roles. Root-controlled systemd units add separate non-root accounts, credentials, resource limits, and native recovery exercises. Probes enforce local opt-in, policy, replay protection, execution limits, and durable results. Both ends keep bounded hash-chained audit records. This remains a loopback-only development prototype, not a production-ready multi-VPS release. The full capabilities below remain the roadmap.
 
-See the [Phase 1 architecture and security design](docs/phase-1-design.md) for the full specification.
+The first Phase 8 increment adds authenticated, idempotent client-certificate renewal, bounded credential generations, local retirement, and operator-assisted activation without resetting replay state. Task-signing-key rotation and complete operational PKI qualification remain pending. See the [credential lifecycle guide](docs/phase-8-implementation.md) and the [Phase 1 architecture and security design](docs/phase-1-design.md).
 
 Start with the [Phase 7 Linux service guide](docs/phase-7-implementation.md) for installation permissions, systemd restrictions, and restore quarantine. The [Phase 6 guide](docs/phase-6-implementation.md) covers CLI authentication and roles; [Phase 5](docs/phase-5-implementation.md) covers inspection, and [Phase 4](docs/phase-4-implementation.md) provides enrollment/dispatch setup. Earlier guides retain their historical scope. The toolchain baseline is Go 1.27.1, with pinned dependencies in go.mod/go.sum.
 
@@ -97,6 +97,7 @@ The project is intended for machines you own or are explicitly authorized to adm
 | 5 | SSH configuration and authorized-key auditing, service status | Implemented with explicit local opt-in, bounded observations, and coverage gaps; local development only |
 | 6 | Administration CLI, administrator authentication, and RBAC | Implemented with local account provisioning and revocable sessions; optional TOTP deferred |
 | 7 | Linux deployment hardening, security tests, fuzzing, and documentation | Local systemd baseline and recovery exercises implemented; production rollout remains out of scope |
+| 8 | Identity and credential lifecycle | TLS credential renewal and local maintenance implemented; signer rotation and full lifecycle qualification remain pending |
 
 Each phase starts by explaining its scope, design rationale, and security risks before implementation and validation. Identity checks and input validation accompany the interfaces that need them. Management interfaces remain restricted to local or isolated development environments until authentication, authorization, and auditing are complete.
 
@@ -122,6 +123,7 @@ docs/
   phase-5-helper-design.md Privileged helper constraints; no helper implemented
   phase-6-implementation.md Administrator CLI, authentication, sessions, and RBAC
   phase-7-implementation.md Linux service hardening, installation, and restore quarantine
+  phase-8-implementation.md TLS credential generations, renewal, local activation, and retirement
 ```
 
-The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Follow the [Linux service guide](docs/phase-7-implementation.md) to qualify an isolated deployment and the [administration guide](docs/phase-6-implementation.md) to manage the existing read-only task flow. Certificate renewal, automatic retention, off-host auditing, and multi-host deployment remain future work.
+The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Follow the [Linux service guide](docs/phase-7-implementation.md) to qualify an isolated deployment and the [administration guide](docs/phase-6-implementation.md) to manage the existing read-only task flow. Task-signing-key rotation, operational PKI provisioning, automatic retention, off-host auditing, and multi-host deployment remain future work.

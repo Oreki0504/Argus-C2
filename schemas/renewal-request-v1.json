@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 authenticated certificate renewal request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "renewal_id", "csr_b64"],
+  "properties": {
+    "version": {"const": 1},
+    "renewal_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "csr_b64": {"type": "string", "minLength": 1, "maxLength": 2731, "pattern": "^[A-Za-z0-9_-]+$"}
+  },
+  "$comment": "At most 16384 request bytes. Requires live mTLS authorization, canonical unpadded Base64URL, and a DER CSR of at most 2048 bytes with only an Ed25519 key and proof of possession. Node identity comes from the authenticated certificate. An identical renewal ID and CSR retrieve the same committed response only while the authorizing credential and replacement remain authorized."
+}

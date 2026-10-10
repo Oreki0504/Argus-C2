@@ -127,18 +127,7 @@ func enqueueTx(ctx context.Context, tx *sql.Tx, id string, kind protocol.TaskTyp
 }
 
 func authorizeTx(ctx context.Context, tx *sql.Tx, cert *x509.Certificate) (identity.Node, error) {
-	n, err := identity.FromCertificate(cert)
-	if err != nil {
-		return n, err
-	}
-	if time.Now().Before(cert.NotBefore) || !time.Now().Before(cert.NotAfter) {
-		return n, errors.New("certificate is outside its validity window")
-	}
-	var exists int
-	if err := tx.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE agent_id=? AND enrollment_epoch=? AND certificate_sha256=? AND enabled=1", n.AgentID, n.EnrollmentEpoch, identity.Fingerprint(cert)).Scan(&exists); err != nil {
-		return n, errors.New("node is not authorized")
-	}
-	return n, nil
+	return authorizeCertificate(ctx, tx, cert)
 }
 
 func (s *Store) Poll(ctx context.Context, cert *x509.Certificate, policyDigest string, key ed25519.PrivateKey, source string) ([]byte, error) {

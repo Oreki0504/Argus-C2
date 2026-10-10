@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -39,6 +40,8 @@ func run() error {
 	enrollAddr := flag.String("enroll-listen", "", "enable a separate loopback enrollment listener")
 	issuerCert := flag.String("issuer-cert", "", "client-auth-only intermediate CA certificate")
 	issuerKey := flag.String("issuer-key", "", "intermediate CA private key")
+	renewalEnabled := flag.Bool("enable-renewal", false, "enable authenticated certificate renewal on the mTLS probe listener")
+	certificateLifetime := flag.Duration("certificate-lifetime", 12*time.Hour, "issued client certificate lifetime, 1h through 720h; capped by issuer expiry")
 	taskKey := flag.String("task-signing-key", "", "separate Ed25519 task key; enables dispatch with -state")
 	adminAddr := flag.String("admin-listen", "", "enable separate loopback HTTPS administrator API with -state")
 	flag.Parse()
@@ -89,12 +92,9 @@ func run() error {
 	}
 	var issuer *enrollment.Issuer
 	var enrollmentTLS *tls.Config
-	if *enrollAddr != "" {
+	if *enrollAddr != "" || *renewalEnabled {
 		if store == nil || *issuerCert == "" || *issuerKey == "" || *issuerKey == *key {
-			return errors.New("enrollment requires -state and separate -issuer-cert/-issuer-key")
-		}
-		if err := server.LoopbackAddress(*enrollAddr); err != nil {
-			return err
+			return errors.New("issuance requires -state and separate -issuer-cert/-issuer-key")
 		}
 		issuer, err = enrollment.LoadIssuer(*issuerCert, *issuerKey, *ca)
 		if err != nil {
@@ -103,12 +103,20 @@ func run() error {
 		if err := issuer.CheckTransport(config.Certificates[0].Leaf); err != nil {
 			return err
 		}
-		enrollmentTLS, err = tlsconfig.EnrollmentServer(files)
-		if err != nil {
+		if err := issuer.SetLifetime(*certificateLifetime); err != nil {
 			return err
 		}
-	} else if *issuerCert != "" || *issuerKey != "" {
-		return errors.New("issuer credentials require explicit -enroll-listen")
+		if *enrollAddr != "" {
+			if err := server.LoopbackAddress(*enrollAddr); err != nil {
+				return err
+			}
+			enrollmentTLS, err = tlsconfig.EnrollmentServer(files)
+			if err != nil {
+				return err
+			}
+		}
+	} else if *issuerCert != "" || *issuerKey != "" || *certificateLifetime != 12*time.Hour {
+		return errors.New("issuer settings require explicit -enroll-listen or -enable-renewal")
 	}
 	if *taskKey != "" {
 		if store == nil {
@@ -141,13 +149,17 @@ func run() error {
 	results := make(chan error, 3)
 	count := 1
 	log.Printf("Starting mTLS probe endpoint on %s", *addr)
-	go func() { results <- server.Run(ctx, *addr, config, registry, sinks...) }()
+	var renewal http.Handler
+	if *renewalEnabled {
+		renewal = enrollment.RenewalHandler(store, issuer)
+	}
+	go func() { results <- server.RunWithRenewal(ctx, *addr, config, registry, renewal, sinks...) }()
 	if adminTLS != nil {
 		count++
 		log.Printf("Starting HTTPS administrator endpoint on %s", *adminAddr)
 		go func() { results <- server.RunAdministration(ctx, *adminAddr, adminTLS, management.Handler(store)) }()
 	}
-	if issuer != nil {
+	if enrollmentTLS != nil {
 		count++
 		log.Printf("Starting development enrollment endpoint on %s", *enrollAddr)
 		go func() {

@@ -1,5 +1,7 @@
 # Argus-C2 Phase 7: Linux Service Hardening and Recovery
 
+The first [Phase 8 increment](phase-8-implementation.md) adds operator-assisted TLS renewal under these deployment restrictions. Statements below about missing certificate renewal describe the Phase 7 baseline; production PKI, signer rotation and multi-host rollout are still pending.
+
 Phase 7 supplies visible, manually installed systemd services, separate non-root accounts, root-controlled configuration, credential delivery, resource limits, and native deployment/recovery exercises. The existing four read-only task types and probe-local authority boundary are unchanged. A new local `restore-quarantine` operation contains the authority resurrected by a restored server database.
 
 The validated baseline is the GitHub-hosted Ubuntu 24.04 x86-64 VM, systemd 255 and cgroup v2, with native Linux file-resolution and D-Bus tests. Other distributions, containers, architectures, and administrator overrides need their own validation. The application still accepts only literal loopback listeners. These assets qualify local service operation; they do not make this a production-ready, multi-VPS release. Public listeners, production certificate renewal, automatic retention, and remote rollout remain unimplemented.

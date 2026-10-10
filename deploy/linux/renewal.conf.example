@@ -1,0 +1,7 @@
+# Install as /etc/systemd/system/argus-c2-server.service.d/renewal.conf.
+# Select this OR enrollment.conf; do not combine competing ExecStart overrides.
+# Renewal is on the existing mTLS listener; enrollment remains closed.
+[Service]
+LoadCredential=issuer-key:/etc/argus-c2/server/secrets/issuer-key.pem
+ExecStart=
+ExecStart=/usr/local/libexec/argus-c2/server -listen 127.0.0.1:8443 -admin-listen 127.0.0.1:8445 -enable-renewal -certificate-lifetime 12h -issuer-cert /etc/argus-c2/server/issuer-cert.pem -issuer-key %d/issuer-key -cert /etc/argus-c2/server/server-cert.pem -key %d/server-key -ca /etc/argus-c2/server/ca.pem -state /var/lib/argus-c2-server -task-signing-key %d/task-key

@@ -57,7 +57,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version < 0 || version > 3 {
+	if version < 0 || version > 4 {
 		return errors.New("unsupported database schema version")
 	}
 	if version == 0 {
@@ -95,6 +95,11 @@ PRAGMA user_version=1;`)
 	}
 	if version < 3 {
 		if err := migrateAdmins(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if version < 4 {
+		if err := migrateCertificates(ctx, tx); err != nil {
 			return err
 		}
 	}
@@ -166,13 +171,22 @@ func issueTokenTx(ctx context.Context, tx *sql.Tx, ttl time.Duration, actor, sou
 func (s *Store) Register(ctx context.Context, token string, r identity.Registration) error {
 	return s.RegisterFrom(ctx, token, r, "local")
 }
-func (s *Store) RegisterFrom(ctx context.Context, token string, r identity.Registration, source string) error {
+func (s *Store) RegisterFrom(ctx context.Context, token string, r identity.Registration, source string, certificates ...*x509.Certificate) error {
 	hash, err := tokenHash(token)
 	if err != nil {
 		return err
 	}
 	if (identity.Node{AgentID: r.AgentID, EnrollmentEpoch: r.EnrollmentEpoch}).Validate() != nil || !identity.Hex(r.CertificateSHA256, 64) || !r.Enabled {
 		return errors.New("invalid registration")
+	}
+	if len(certificates) != 0 && len(certificates) != 2 {
+		return errors.New("expected leaf and issuer")
+	}
+	if len(certificates) == 2 {
+		n, err := identity.FromCertificate(certificates[0])
+		if err != nil || n.AgentID != r.AgentID || n.EnrollmentEpoch != r.EnrollmentEpoch || identity.Fingerprint(certificates[0]) != r.CertificateSHA256 {
+			return errors.New("registration certificate mismatch")
+		}
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -201,6 +215,14 @@ func (s *Store) RegisterFrom(ctx context.Context, token string, r identity.Regis
 	if err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO node_credentials(certificate_sha256,agent_id,epoch,generation,issued_at) VALUES(?,?,?,1,?)", r.CertificateSHA256, r.AgentID, r.EnrollmentEpoch, time.Now().Unix()); err != nil {
+		return err
+	}
+	if len(certificates) == 2 {
+		if err := credentialMetadata(ctx, tx, certificates[0], certificates[1]); err != nil {
+			return err
+		}
+	}
 	if err := audit.Append(ctx, tx, audit.Event{Kind: "node_enrolled", AgentID: r.AgentID, Epoch: r.EnrollmentEpoch, Source: source, Status: "succeeded"}, 1); err != nil {
 		return err
 	}
@@ -208,21 +230,9 @@ func (s *Store) RegisterFrom(ctx context.Context, token string, r identity.Regis
 }
 
 func (s *Store) Authorize(cert *x509.Certificate) (identity.Node, error) {
-	n, err := identity.FromCertificate(cert)
-	if err != nil {
-		return identity.Node{}, err
-	}
-	if time.Now().Before(cert.NotBefore) || !time.Now().Before(cert.NotAfter) {
-		return identity.Node{}, errors.New("expired or future certificate")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	var found int
-	err = s.db.QueryRowContext(ctx, "SELECT 1 FROM nodes WHERE agent_id=? AND enrollment_epoch=? AND certificate_sha256=? AND enabled=1", n.AgentID, n.EnrollmentEpoch, identity.Fingerprint(cert)).Scan(&found)
-	if err != nil {
-		return identity.Node{}, errors.New("node identity is not authorized")
-	}
-	return n, nil
+	return authorizeCertificate(ctx, s.db, cert)
 }
 
 func (s *Store) Disable(ctx context.Context, id string) error {
@@ -289,8 +299,11 @@ func (s *Store) SaveHeartbeat(ctx context.Context, cert *x509.Certificate, h pro
 		return err
 	}
 	defer tx.Rollback()
+	if _, err := authorizeTx(ctx, tx, cert); err != nil {
+		return err
+	}
 	var last int64
-	err = tx.QueryRowContext(ctx, "SELECT received_at FROM nodes WHERE agent_id=? AND enrollment_epoch=? AND certificate_sha256=? AND enabled=1", n.AgentID, n.EnrollmentEpoch, identity.Fingerprint(cert)).Scan(&last)
+	err = tx.QueryRowContext(ctx, "SELECT received_at FROM nodes WHERE agent_id=?", n.AgentID).Scan(&last)
 	if err != nil {
 		return errors.New("node identity is not authorized")
 	}

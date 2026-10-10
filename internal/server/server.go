@@ -28,6 +28,10 @@ type TelemetryStore interface {
 
 // A persistent sink enables telemetry; a Dispatcher also enables typed tasks.
 func Handler(registry identity.Authorizer, sinks ...TelemetryStore) http.Handler {
+	return HandlerWithRenewal(registry, nil, sinks...)
+}
+
+func HandlerWithRenewal(registry identity.Authorizer, renewal http.Handler, sinks ...TelemetryStore) http.Handler {
 	var sink TelemetryStore
 	if len(sinks) == 1 {
 		sink = sinks[0]
@@ -69,6 +73,10 @@ func Handler(registry identity.Authorizer, sinks ...TelemetryStore) http.Handler
 		}
 		if r.URL.RawPath != "" || r.URL.RawQuery != "" || r.URL.ForceQuery {
 			fail(http.StatusBadRequest, protocol.InvalidRequest)
+			return
+		}
+		if r.URL.Path == protocol.RenewalPath && renewal != nil {
+			renewal.ServeHTTP(w, r)
 			return
 		}
 		if dispatcher, ok := sink.(Dispatcher); ok && (r.URL.Path == PollPath || r.URL.Path == ResultsPath) {
@@ -179,13 +187,17 @@ func LoopbackAddress(addr string) error {
 }
 
 func Run(ctx context.Context, addr string, config *tls.Config, registry identity.Authorizer, sinks ...TelemetryStore) error {
+	return RunWithRenewal(ctx, addr, config, registry, nil, sinks...)
+}
+
+func RunWithRenewal(ctx context.Context, addr string, config *tls.Config, registry identity.Authorizer, renewal http.Handler, sinks ...TelemetryStore) error {
 	if err := LoopbackAddress(addr); err != nil {
 		return err
 	}
 	if config == nil || config.MinVersion < tls.VersionTLS13 || config.ClientAuth != tls.RequireAndVerifyClientCert || config.VerifyConnection == nil || config.ClientCAs == nil || registry == nil {
 		return errors.New("verified mTLS configuration and registry are required")
 	}
-	return runHTTP(ctx, addr, config, Handler(registry, sinks...))
+	return runHTTP(ctx, addr, config, HandlerWithRenewal(registry, renewal, sinks...))
 }
 
 func RunEnrollment(ctx context.Context, addr string, config *tls.Config, handler http.Handler) error {

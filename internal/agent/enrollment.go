@@ -126,7 +126,7 @@ func verifyEnrollmentCertificate(certPEM string, keyPEM []byte, n identity.Node,
 		return err
 	}
 	actual, err := identity.FromCertificate(leaf)
-	if err != nil || actual != n || leaf.NotAfter.After(time.Now().Add(12*time.Hour+time.Minute)) {
+	if err != nil || actual != n || leaf.NotAfter.After(time.Now().Add(30*24*time.Hour+time.Minute)) || leaf.NotAfter.Sub(leaf.NotBefore) > 30*24*time.Hour+2*time.Minute {
 		return errors.New("issued certificate has unexpected identity or lifetime")
 	}
 	intermediate, err := x509.ParseCertificate(pair.Certificate[1])

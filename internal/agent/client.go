@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"mime"
@@ -19,9 +20,11 @@ import (
 )
 
 type Client struct {
-	http   *http.Client
-	origin string
-	node   identity.Node
+	http       *http.Client
+	origin     string
+	node       identity.Node
+	credential *x509.Certificate
+	roots      *x509.CertPool
 }
 
 func ServerURL(raw string) (*url.URL, error) {
@@ -45,7 +48,7 @@ func NewClient(raw string, config *tls.Config, node identity.Node) (*Client, err
 	if err != nil || actual != node {
 		return nil, errors.New("TLS certificate identity mismatch")
 	}
-	return &Client{http: newHTTP(config), origin: u.String(), node: node}, nil
+	return &Client{http: newHTTP(config), origin: u.String(), node: node, credential: cert, roots: config.RootCAs.Clone()}, nil
 }
 
 func newHTTP(config *tls.Config) *http.Client {

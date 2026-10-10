@@ -27,11 +27,12 @@ func main() {
 }
 func run() error {
 	dir := flag.String("state", "", "private server state directory")
-	action := flag.String("action", "nodes", "token, nodes, disable, submit, tasks, audit, users, user-add, user-password, user-role, user-disable, user-revoke, sessions-revoke-all, or restore-quarantine")
+	action := flag.String("action", "nodes", "token, nodes, disable, submit, tasks, audit, certificates, certificate-revoke, users, user-add, user-password, user-role, user-disable, user-revoke, sessions-revoke-all, or restore-quarantine")
 	username := flag.String("username", "", "immutable administrator user name for local account actions")
 	role := flag.String("role", "", "Admin or ReadOnly; user-add and user-role only")
 	ttl := flag.Duration("ttl", 10*time.Minute, "enrollment token lifetime, at most 15 minutes")
 	id := flag.String("agent-id", "", "node to disable or submit to")
+	certificateHash := flag.String("certificate-sha256", "", "exact leaf fingerprint; certificate-revoke only")
 	kind := flag.String("type", "", "system.info, system.metrics, ssh.audit, or service.status (submit only)")
 	profileID := flag.String("profile-id", "", "local SSH profile ID for ssh.audit")
 	serviceID := flag.String("service-id", "", "local service ID for service.status")
@@ -47,7 +48,7 @@ func run() error {
 		return errors.New("run localctl as the non-root server user")
 	}
 	userAction := *action == "user-add" || *action == "user-password" || *action == "user-role" || *action == "user-disable" || *action == "user-revoke"
-	if *action != "token" && *action != "nodes" && *action != "disable" && *action != "submit" && *action != "tasks" && *action != "audit" && *action != "users" && *action != "sessions-revoke-all" && *action != "restore-quarantine" && !userAction {
+	if *action != "token" && *action != "nodes" && *action != "disable" && *action != "submit" && *action != "tasks" && *action != "audit" && *action != "users" && *action != "sessions-revoke-all" && *action != "restore-quarantine" && *action != "certificates" && *action != "certificate-revoke" && !userAction {
 		return errors.New("unknown local action")
 	}
 	if userAction != (*username != "") || (userAction && !adminauth.Username(*username)) {
@@ -57,8 +58,11 @@ func run() error {
 	if needsRole != (*role != "") || (needsRole && !adminauth.Role(*role)) {
 		return errors.New("-role Admin or ReadOnly is required only for user-add or user-role")
 	}
-	if (*action == "disable" || *action == "submit") != (*id != "") {
-		return errors.New("-agent-id is required only for disable or submit")
+	if (*action == "disable" || *action == "submit" || *action == "certificates" || *action == "certificate-revoke") != (*id != "") {
+		return errors.New("-agent-id is required only for disable, submit, certificates, or certificate-revoke")
+	}
+	if (*action == "certificate-revoke") != (*certificateHash != "") {
+		return errors.New("-certificate-sha256 is required only for certificate-revoke")
 	}
 	if (*action == "submit") != (*kind != "") {
 		return errors.New("-type is required only for submit")
@@ -93,6 +97,14 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	switch *action {
+	case "certificates":
+		credentials, err := s.Credentials(ctx, *id)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(credentials)
+	case "certificate-revoke":
+		return s.RevokeCertificate(ctx, *id, *certificateHash)
 	case "restore-quarantine":
 		return s.QuarantineRestore(ctx)
 	case "sessions-revoke-all":

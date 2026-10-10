@@ -98,7 +98,7 @@ func Handler(store *state.Store, issuer *Issuer) http.Handler {
 			return
 		}
 		registration := identity.Registration{AgentID: node.AgentID, EnrollmentEpoch: node.EnrollmentEpoch, CertificateSHA256: identity.Fingerprint(cert), Enabled: true}
-		if err := store.RegisterFrom(r.Context(), req.Token, registration, audit.Peer(r.RemoteAddr)); err != nil {
+		if err := store.RegisterFrom(r.Context(), req.Token, registration, audit.Peer(r.RemoteAddr), cert, issuer.Certificate()); err != nil {
 			fail(403, "enrollment_rejected")
 			return
 		}

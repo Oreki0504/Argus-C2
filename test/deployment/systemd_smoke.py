@@ -75,12 +75,33 @@ def eventually(fn, message, seconds=45):
     raise AssertionError(message)
 
 
-def state_value(query, args=()):
-    db = sqlite3.connect("file:" + str(states["server"] / "argus.db") + "?mode=ro", uri=True)
+def state_value(query, args=(), database=None):
+    database = database or states["server"] / "argus.db"
+    db = sqlite3.connect("file:" + str(database) + "?mode=ro", uri=True)
     try:
         return db.execute(query, args).fetchone()
     finally:
         db.close()
+
+
+def renewal_command(action, stage=None, cert=None, key_source=None, ok=True):
+    # Root supplies the existing private key through systemd credentials; the
+    # maintenance executable itself runs as the unprivileged probe account.
+    options = ["systemd-run", "--quiet", "--wait", "--pipe", "--collect",
+               "--unit=argus-c2-renew-ci-" + secrets.token_hex(4),
+               "--property=User=argus-probe", "--property=Group=argus-probe",
+               "--property=UMask=0077", "--property=NoNewPrivileges=yes",
+               "--property=CapabilityBoundingSet=", "--property=ProtectSystem=strict",
+               "--property=ProtectHome=yes", "--property=PrivateTmp=yes",
+               "--property=RestrictSUIDSGID=yes",
+               "--property=ReadWritePaths=" + str(states["probe"]),
+               "--property=LoadCredential=probe-key:" + str(key_source or etc / "probe/secrets/probe-key.pem")]
+    args = [lib / "renew", "-action", action, "-server", "https://127.0.0.1:8443",
+            "-ca", etc / "probe/ca.pem", "-identity", etc / "probe/identity.json",
+            "-cert", cert or etc / "probe/probe-cert.pem", "-key", "%d/probe-key"]
+    if stage:
+        args += ["-out", stage]
+    return run(*options, *args, ok=ok)
 
 
 def enroll():
@@ -118,7 +139,7 @@ try:
     work.mkdir(mode=0o700)
     lib.mkdir(parents=True, mode=0o755)
     etc.mkdir(mode=0o755)
-    for name in ("server", "agent", "localctl", "probectl", "enroll", "cli"):
+    for name in ("server", "agent", "localctl", "probectl", "enroll", "renew", "cli"):
         put(build / name, lib / name, 0o755)
     put(repo / "test/deployment/check_service.py", lib / "check-service.py")
     run(build / "devpki", "-enrollment", "-out", work / "pki")
@@ -148,6 +169,8 @@ try:
     put(work / "signing/task-private.pem", etc / "server/secrets/task-private.pem", 0o600)
     put(work / "signing/task-public.pem", etc / "probe/task-public.pem")
     put(repo / "deploy/linux/enrollment.conf.example", "/etc/systemd/system/argus-c2-server.service.d/enrollment.conf")
+    enrollment_dropin = Path("/etc/systemd/system/argus-c2-server.service.d/enrollment.conf")
+    enrollment_dropin.write_text(enrollment_dropin.read_text().replace(" -enroll-listen ", " -enable-renewal -enroll-listen "))
     policy = json.loads((repo / "examples/task-policy-v2.json").read_text())
     policy["telemetry"]["sample_milliseconds"] = 100
     policy["allow_service_status"] = True
@@ -202,6 +225,39 @@ try:
         quota, period = map(int, (cg / "cpu.max").read_text().split())
         assert quota / period == (1 if role == "server" else 0.5), (role, "cpu.max", quota, period)
     print("PASS: effective isolation, credentials, cgroups, HTTPS, mTLS, metrics, systemd query", flush=True)
+    # Renew without changing node identity, root-owned permissions, or replay.
+    old_identity = (etc / "probe/identity.json").read_bytes()
+    old_hash = state_value("SELECT certificate_sha256 FROM node_credentials WHERE agent_id=? AND generation=1", (node,))[0]
+    stage = states["probe"] / "renewal-ci"
+    renewal_command("prepare", stage)
+    renewal_command("request", stage)
+    renewal_command("request", stage)  # Retry uses the same committed certificate.
+    assert state_value("SELECT COUNT(*) FROM node_credentials WHERE agent_id=?", (node,)) == (2,)
+    assert (stage / "identity.json").read_bytes() == old_identity
+    # New cert with the old key must fail before connecting.
+    assert renewal_command("verify", cert=stage / "probe-cert.pem", ok=False).returncode != 0
+    old_cert = states["probe"] / "old-probe-cert.pem"
+    put(etc / "probe/probe-cert.pem", old_cert)
+    old_key = work / "old-probe-key.pem"
+    put(etc / "probe/secrets/probe-key.pem", old_key, 0o600)
+    run("systemctl", "stop", units[1])
+    replay_db = states["probe"] / "replay/probe.db"
+    audit_seq, audit_hash = state_value("SELECT sequence,hash FROM audit_head", database=replay_db)
+    put(stage / "probe-cert.pem", etc / "probe/probe-cert.pem")
+    put(stage / "probe-key.pem", etc / "probe/secrets/probe-key.pem", 0o600)
+    run("systemctl", "start", units[1])
+    submit(node, "system.info")
+    assert state_value("SELECT hash FROM audit_events WHERE sequence=?", (audit_seq,), replay_db) == (audit_hash,)
+    assert (etc / "probe/identity.json").read_bytes() == old_identity
+    local("certificate-revoke", "-agent-id", node, "-certificate-sha256", old_hash)
+    assert renewal_command("verify", cert=old_cert, key_source=old_key, ok=False).returncode != 0
+    renewal_command("verify")
+    submit(node, "system.metrics")
+    # This fixture deliberately performs more maintenance restarts than a normal
+    # installation. Reset the counter while the unit is known to be loaded and
+    # running, before the separate missing-state/recovery exercise below.
+    run("systemctl", "reset-failed", units[1])
+    print("PASS: credential renewal, local activation, old credential retirement, preserved replay audit", flush=True)
     # Cold backup: stop every database writer; copy the entire directory.
     run("systemctl", "stop", *units)
     snapshot = work / "server-backup"
