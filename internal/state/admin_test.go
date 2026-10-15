@@ -31,7 +31,8 @@ func TestSchemaTwoUpgradePreservesDispatchAndAudit(t *testing.T) {
 	// Remove only the empty administration tables to reproduce the schema-2
 	// boundary while retaining real enrolled identity, task, and audit state.
 	if _, err := s.db.Exec(`DROP TABLE admin_sessions; DROP TABLE admin_users;
-DROP TABLE admin_limits; DROP TABLE admin_clock; DROP TABLE certificate_renewals; DROP TABLE node_credentials; PRAGMA user_version=2;`); err != nil {
+DROP TABLE admin_limits; DROP TABLE admin_clock; DROP TABLE certificate_renewals; DROP TABLE node_credentials;
+ALTER TABLE dispatch_settings DROP COLUMN trust_json; ALTER TABLE dispatch_settings DROP COLUMN paused; PRAGMA user_version=2;`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -43,7 +44,7 @@ DROP TABLE admin_limits; DROP TABLE admin_clock; DROP TABLE certificate_renewals
 	}
 	defer s.Close()
 	var version, reserved int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 5 {
 		t.Fatal("wrong migrated schema", version, err)
 	}
 	if err := s.db.QueryRow("SELECT reserved FROM audit_head WHERE id=1").Scan(&reserved); err != nil || reserved != 4 {

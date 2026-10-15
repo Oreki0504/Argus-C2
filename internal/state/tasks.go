@@ -42,8 +42,8 @@ func (s *Store) ConfigureSigner(ctx context.Context, key ed25519.PrivateKey) err
 		return err
 	}
 	defer tx.Rollback()
-	var current string
-	if err := tx.QueryRowContext(ctx, "SELECT key_digest FROM dispatch_settings WHERE id=1").Scan(&current); err != nil {
+	current, _, _, err := dispatchSettings(ctx, tx)
+	if err != nil {
 		return err
 	}
 	if current != "" && current != digest {
@@ -81,7 +81,7 @@ func enqueueTx(ctx context.Context, tx *sql.Tx, id string, kind protocol.TaskTyp
 	if !identity.Hex(id, 32) || ttl < time.Second || ttl > protocol.MaxLifetime*time.Second {
 		return protocol.Task{}, errors.New("invalid task target or lifetime")
 	}
-	var epoch, digest, keyDigest, worker string
+	var epoch, digest, worker string
 	var received int64
 	if err := tx.QueryRowContext(ctx, "SELECT enrollment_epoch,policy_digest,task_state,received_at FROM nodes WHERE agent_id=? AND enabled=1", id).Scan(&epoch, &digest, &worker, &received); err != nil {
 		return protocol.Task{}, errors.New("node is not enabled")
@@ -89,8 +89,12 @@ func enqueueTx(ctx context.Context, tx *sql.Tx, id string, kind protocol.TaskTyp
 	if !identity.Hex(digest, 64) || worker != "ready" || received < time.Now().Add(-5*time.Minute).UnixNano() {
 		return protocol.Task{}, errors.New("a recent ready task heartbeat is required")
 	}
-	if err := tx.QueryRowContext(ctx, "SELECT key_digest FROM dispatch_settings WHERE id=1").Scan(&keyDigest); err != nil || keyDigest == "" {
+	keyDigest, trust, paused, err := dispatchSettings(ctx, tx)
+	if err != nil || keyDigest == "" {
 		return protocol.Task{}, errors.New("task signing is not configured")
+	}
+	if paused {
+		return protocol.Task{}, errors.New("task dispatch is paused for local maintenance")
 	}
 	if err := expireTasks(ctx, tx, id, time.Now().Unix()); err != nil {
 		return protocol.Task{}, err
@@ -112,6 +116,11 @@ func enqueueTx(ctx context.Context, tx *sql.Tx, id string, kind protocol.TaskTyp
 	}
 	if err := t.Validate(); err != nil {
 		return protocol.Task{}, err
+	}
+	if trust != nil {
+		if err := trust.CheckTask(t, keyDigest, time.Now()); err != nil {
+			return protocol.Task{}, err
+		}
 	}
 	data, err := json.Marshal(t)
 	if err != nil {
@@ -145,9 +154,12 @@ func (s *Store) Poll(ctx context.Context, cert *x509.Certificate, policyDigest s
 	if err != nil {
 		return nil, err
 	}
-	var current string
-	if err := tx.QueryRowContext(ctx, "SELECT key_digest FROM dispatch_settings WHERE id=1").Scan(&current); err != nil || current != audit.Digest(key.Public().(ed25519.PublicKey)) {
+	current, trust, paused, err := dispatchSettings(ctx, tx)
+	if err != nil || current != audit.Digest(key.Public().(ed25519.PublicKey)) {
 		return nil, errors.New("task signing configuration mismatch")
+	}
+	if paused {
+		return nil, tx.Commit()
 	}
 	if err := expireTasks(ctx, tx, n.AgentID, time.Now().Unix()); err != nil {
 		return nil, err
@@ -166,7 +178,11 @@ func (s *Store) Poll(ctx context.Context, cert *x509.Certificate, policyDigest s
 		return nil, errors.New("stored task is invalid")
 	}
 	if status == "queued" {
-		envelope, err = signing.Sign(payload, key)
+		if trust == nil {
+			envelope, err = signing.Sign(payload, key)
+		} else {
+			envelope, err = signing.SignTrusted(payload, key, *trust, time.Now())
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -177,7 +193,13 @@ func (s *Store) Poll(ctx context.Context, cert *x509.Certificate, policyDigest s
 			return nil, err
 		}
 	} else {
-		_, signed, err := signing.VerifyPayload(envelope, key.Public().(ed25519.PublicKey))
+		var signed []byte
+		var err error
+		if trust == nil {
+			_, signed, err = signing.VerifyPayload(envelope, key.Public().(ed25519.PublicKey))
+		} else {
+			_, signed, _, err = signing.VerifyTrusted(envelope, *trust, time.Now())
+		}
 		if err != nil || audit.Digest(signed) != audit.Digest(payload) {
 			return nil, errors.New("stored task signature is invalid")
 		}

@@ -139,7 +139,7 @@ try:
     work.mkdir(mode=0o700)
     lib.mkdir(parents=True, mode=0o755)
     etc.mkdir(mode=0o755)
-    for name in ("server", "agent", "localctl", "probectl", "enroll", "renew", "cli"):
+    for name in ("server", "agent", "localctl", "probectl", "enroll", "renew", "signctl", "cli"):
         put(build / name, lib / name, 0o755)
     put(repo / "test/deployment/check_service.py", lib / "check-service.py")
     run(build / "devpki", "-enrollment", "-out", work / "pki")
@@ -258,6 +258,66 @@ try:
     # running, before the separate missing-state/recovery exercise below.
     run("systemctl", "reset-failed", units[1])
     print("PASS: credential renewal, local activation, old credential retirement, preserved replay audit", flush=True)
+    # Stage public signer trust locally, pause dispatch, and migrate with both
+    # services stopped. No service gains write access to root-owned config.
+    run(lib / "signctl", "-action", "generate", "-out", work / "signing-next")
+    put(work / "signing-next/task-public.pem", etc / "server/next-task-public.pem")
+    overlap = work / "signer-overlap.json"
+    run(lib / "signctl", "-action", "stage", "-current", etc / "probe/task-public.pem",
+        "-next-public-key", etc / "server/next-task-public.pem", "-out", overlap,
+        "-retire-at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3600)),
+        "-valid-until", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 86400)))
+    trust = json.loads(overlap.read_text())
+    legacy_key = next(key["key_id"] for key in trust["keys"] if key["allow_legacy"])
+    new_key = next(key["key_id"] for key in trust["keys"] if not key["allow_legacy"])
+    put(overlap, etc / "probe/next-task-trust.json")
+    local("dispatch-pause")
+    assert cli("submit", "-agent-id", node, "-type", "system.info", ok=False).returncode != 0
+    run("systemctl", "stop", *units)
+    for role in states:
+        shutil.copytree(states[role], work / (role + "-before-signer-migration"))
+    audit_seq, audit_hash = state_value("SELECT sequence,hash FROM audit_head", database=replay_db)
+    run(lib / "probectl", "-action", "trust-migrate", "-state", states["probe"] / "replay",
+        "-identity", etc / "probe/identity.json", "-task-public-key", etc / "probe/task-public.pem",
+        "-next-trust-set", etc / "probe/next-task-trust.json", user="probe")
+    local("signer-trust", "-current-task-public-key", etc / "probe/task-public.pem",
+          "-task-trust-set", etc / "probe/next-task-trust.json")
+    local("signer-switch", "-next-task-public-key", etc / "server/next-task-public.pem")
+    put(work / "signing-next/task-private.pem", etc / "server/secrets/task-private.pem", 0o600)
+    put(overlap, etc / "probe/task-public.pem")  # Same reviewed path now contains versioned JSON.
+    put(overlap, etc / "server/task-trust.json")
+    run("systemctl", "start", units[0])
+    eventually(listening, "server did not restart with new signer")
+    run("systemctl", "start", units[1])
+    local("dispatch-resume")
+    rotated_result = submit(node, "system.info")
+    wire = json.loads(state_value("SELECT envelope FROM tasks WHERE request_id=?", (rotated_result["request_id"],))[0])
+    assert wire["version"] == 2 and wire["trust_set_id"] == trust["trust_set_id"] and wire["key_id"] == new_key
+    assert state_value("SELECT hash FROM audit_events WHERE sequence=?", (audit_seq,), replay_db) == (audit_hash,)
+    assert (etc / "probe/identity.json").read_bytes() == old_identity
+    # All previous assignments completed. Retire the old key through a second
+    # explicit local generation, without clearing replay or pending results.
+    retired = work / "signer-retired.json"
+    run(lib / "signctl", "-action", "retire", "-current", overlap, "-key-id", legacy_key, "-out", retired)
+    put(retired, etc / "probe/next-task-trust.json")
+    local("dispatch-pause")
+    run("systemctl", "stop", units[1])
+    run(lib / "probectl", "-action", "trust-migrate", "-state", states["probe"] / "replay",
+        "-identity", etc / "probe/identity.json", "-task-public-key", etc / "probe/task-public.pem",
+        "-next-trust-set", etc / "probe/next-task-trust.json", user="probe")
+    local("signer-trust", "-current-task-public-key", etc / "server/task-trust.json",
+          "-task-trust-set", etc / "probe/next-task-trust.json")
+    put(retired, etc / "probe/task-public.pem")
+    put(retired, etc / "server/task-trust.json")
+    run("systemctl", "start", units[1])
+    local("dispatch-resume")
+    assert submit(node, "ssh.audit", "-profile-id", "fixture")["data"]["files"][0]["status"] == "ok"
+    signer_status = json.loads(local("signers").stdout)
+    assert signer_status["selected_key_id"] == new_key and not signer_status["dispatch_paused"]
+    assert signer_status["trust_set"]["retired_key_ids"] == [legacy_key]
+    # Additional maintenance cycles are specific to this disposable exercise.
+    run("systemctl", "reset-failed", *units)
+    print("PASS: local signer migration, v2 dispatch, retirement, unchanged replay and service hardening", flush=True)
     # Cold backup: stop every database writer; copy the entire directory.
     run("systemctl", "stop", *units)
     snapshot = work / "server-backup"

@@ -261,7 +261,7 @@ func TestSchemaThreeCredentialMigrationPreservesExistingState(t *testing.T) {
 	if err := s.db.QueryRow("SELECT sequence,hash FROM audit_head").Scan(&seq, &hash); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec("DROP TABLE certificate_renewals; DROP TABLE node_credentials; PRAGMA user_version=3"); err != nil {
+	if _, err := s.db.Exec("DROP TABLE certificate_renewals; DROP TABLE node_credentials; ALTER TABLE dispatch_settings DROP COLUMN trust_json; ALTER TABLE dispatch_settings DROP COLUMN paused; PRAGMA user_version=3"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

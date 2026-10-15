@@ -32,7 +32,7 @@ func main() {
 	once := flag.Bool("once", false, "run one telemetry or task cycle, then exit")
 	policyFile := flag.String("policy", "", "local task and telemetry policy (instead of -config)")
 	stateDir := flag.String("task-state", "", "existing probe replay state initialized with probectl")
-	taskKey := flag.String("task-public-key", "", "locally pinned task verification key")
+	taskKey := flag.String("task-public-key", "", "locally pinned task PEM key or explicitly migrated trust-set JSON")
 	flag.Parse()
 	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
 		log.Fatal("the probe must run as a non-root user")
@@ -106,11 +106,16 @@ func runTasks(client *agent.Client, node identity.Node, path, dir, keyFile strin
 	if _, err := policy.Load(path); err != nil {
 		return err
 	}
-	key, err := signing.LoadPublic(keyFile)
+	key, trust, err := signing.LoadVerification(keyFile)
 	if err != nil {
 		return err
 	}
-	s, err := probe.Open(dir, node, key)
+	var s *probe.State
+	if trust == nil {
+		s, err = probe.Open(dir, node, key)
+	} else {
+		s, err = probe.OpenWithTrust(dir, node, *trust)
+	}
 	if err != nil {
 		log.Printf("Task execution blocked: %v; continuing telemetry only", err)
 	} else {

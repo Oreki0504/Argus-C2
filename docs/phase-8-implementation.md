@@ -1,6 +1,6 @@
 # Argus-C2 Phase 8, First Increment: TLS Credential Renewal
 
-This increment implements client-certificate generations, authenticated and idempotent renewal, local credential inspection/revocation, and operator-assisted activation. It does not complete the whole Phase 8 design: task-signing-key rotation, operational CA provisioning, expiry health reporting and full compromise-recovery qualification remain pending. All listeners remain loopback-only. The four task types, root-controlled policy, SSH `openat2` reader and Phase 7 unit hardening remain unchanged.
+This guide covers client-certificate generations, authenticated and idempotent renewal, local credential inspection/revocation, and operator-assisted activation. Local task-signing-key rotation is implemented separately in the [signer rotation guide](phase-8-signer-rotation.md). Operational CA provisioning, expiry health reporting and full compromise-recovery qualification remain pending. All listeners remain loopback-only. The four task types, root-controlled policy, SSH `openat2` reader and Phase 7 unit hardening remain unchanged.
 
 The pinned build toolchain is Go 1.27.2. This patch release includes standard-library security fixes; see the [official release history](https://go.dev/doc/devel/release#go1.27.2). The previous 1.27.1 baseline failed the current vulnerability scan.
 
@@ -128,7 +128,7 @@ Individual leaf revocation requires ordinary audit capacity and rolls back if it
 | Root, issuer or both usable leaves expire | Connectivity blocks; use a separately reviewed trust/re-enrollment recovery procedure |
 | Replay state missing or restored | Phase 7 quarantine/fresh-enrollment rules still apply; renewal is not a replay repair operation |
 
-At present only leaf credential metadata is exposed through the local listing. Scheduled expiry notifications, server/issuer/root renewal and a production issuance tool are not implemented. Task-signing trust remains pinned to the original single key and cannot be rotated by this TLS endpoint.
+At present only leaf credential metadata is exposed through the local listing. Scheduled expiry notifications, server/issuer/root renewal and a production issuance tool are not implemented. Task-signing trust changes require the separate local maintenance procedure; this TLS endpoint cannot install or rotate signing trust.
 
 ## Validation
 

@@ -57,7 +57,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version < 0 || version > 4 {
+	if version < 0 || version > 5 {
 		return errors.New("unsupported database schema version")
 	}
 	if version == 0 {
@@ -100,6 +100,11 @@ PRAGMA user_version=1;`)
 	}
 	if version < 4 {
 		if err := migrateCertificates(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if version < 5 {
+		if err := migrateSigners(ctx, tx); err != nil {
 			return err
 		}
 	}

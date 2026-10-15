@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 local signer trust set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "trust_set_id", "generation", "keys", "retired_key_ids"],
+  "properties": {
+    "version": {"const": 1},
+    "trust_set_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "generation": {"type": "integer", "minimum": 1, "maximum": 129},
+    "keys": {
+      "type": "array", "minItems": 1, "maxItems": 2,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["key_id", "public_key_b64", "not_before", "not_after", "allow_legacy"],
+        "properties": {
+          "key_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "public_key_b64": {"type": "string", "minLength": 43, "maxLength": 43, "pattern": "^[A-Za-z0-9_-]+$"},
+          "not_before": {"type": "integer", "minimum": 1},
+          "not_after": {"type": "integer", "minimum": 2},
+          "allow_legacy": {"type": "boolean"}
+        }
+      }
+    },
+    "retired_key_ids": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+  },
+  "$comment": "Local configuration only, never accepted over the network. At most 16384 bytes. Go additionally checks key IDs against SHA-256 of raw Ed25519 keys, canonical encoding, unique non-retired keys, positive windows and at most 24h overlap. A migration must retain the stable trust ID, advance exactly one generation, retain one key without extending its authority, and preserve cumulative retirement history. Legacy admission is limited to the original pinned key."
+}

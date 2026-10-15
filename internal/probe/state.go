@@ -15,6 +15,7 @@ import (
 	"github.com/Oreki0504/Argus-C2/internal/localdb"
 	"github.com/Oreki0504/Argus-C2/internal/policy"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
+	"github.com/Oreki0504/Argus-C2/internal/signing"
 )
 
 const MaxRecords = 8192
@@ -25,15 +26,27 @@ var ErrConflict = errors.New("request ID reused with different signed bytes")
 var ErrCapacity = errors.New("local replay or result capacity exhausted")
 
 type State struct {
-	db   *sql.DB
-	lock *os.File
-	node identity.Node
-	key  ed25519.PublicKey
+	db    *sql.DB
+	lock  *os.File
+	node  identity.Node
+	key   ed25519.PublicKey
+	trust *signing.TrustSet
 }
 
 // Initialize is a separate local action. Open never initializes lost state.
 func Initialize(dir string, node identity.Node, key ed25519.PublicKey) error {
-	if node.Validate() != nil || len(key) != ed25519.PublicKeySize {
+	return initialize(dir, node, key, nil)
+}
+
+func InitializeWithTrust(dir string, node identity.Node, trust signing.TrustSet) error {
+	if err := trust.Validate(); err != nil {
+		return err
+	}
+	return initialize(dir, node, nil, &trust)
+}
+
+func initialize(dir string, node identity.Node, key ed25519.PublicKey, trust *signing.TrustSet) error {
+	if node.Validate() != nil || (trust == nil && len(key) != ed25519.PublicKeySize) {
 		return errors.New("valid node and task key are required")
 	}
 	if err := os.Mkdir(dir, 0700); err != nil {
@@ -58,20 +71,47 @@ PRAGMA user_version=1;`)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO probe_meta(id,agent_id,epoch,key_digest,clock_high) VALUES(1,?,?,?,?)", node.AgentID, node.EnrollmentEpoch, audit.Digest(key), time.Now().Unix()); err != nil {
+	digest := audit.Digest(key)
+	if trust != nil {
+		data, err := trust.Canonical()
+		if err != nil {
+			return err
+		}
+		digest = audit.Digest(data)
+		if err := createTrust(ctx, tx, data); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO probe_meta(id,agent_id,epoch,key_digest,clock_high) VALUES(1,?,?,?,?)", node.AgentID, node.EnrollmentEpoch, digest, time.Now().Unix()); err != nil {
 		return err
 	}
 	if err := audit.Initialize(ctx, tx); err != nil {
 		return err
 	}
-	if err := audit.Append(ctx, tx, audit.Event{Kind: "state_initialized", AgentID: node.AgentID, Epoch: node.EnrollmentEpoch, Source: "local", Status: "succeeded", PayloadDigest: audit.Digest(key)}, 0); err != nil {
+	if err := audit.Append(ctx, tx, audit.Event{Kind: "state_initialized", AgentID: node.AgentID, Epoch: node.EnrollmentEpoch, Source: "local", Status: "succeeded", PayloadDigest: digest}, 0); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 func Open(dir string, node identity.Node, key ed25519.PublicKey) (*State, error) {
-	if node.Validate() != nil || len(key) != ed25519.PublicKeySize {
+	return open(dir, node, key, nil)
+}
+
+func OpenWithTrust(dir string, node identity.Node, trust signing.TrustSet) (*State, error) {
+	data, err := trust.Canonical()
+	if err != nil {
+		return nil, err
+	}
+	copy, err := signing.DecodeTrust(data)
+	if err != nil {
+		return nil, err
+	}
+	return open(dir, node, nil, &copy)
+}
+
+func open(dir string, node identity.Node, key ed25519.PublicKey, trust *signing.TrustSet) (*State, error) {
+	if node.Validate() != nil || (trust == nil && len(key) != ed25519.PublicKeySize) {
 		return nil, errors.New("valid node and task key are required")
 	}
 	lock, err := localdb.Lock(dir)
@@ -83,7 +123,7 @@ func Open(dir string, node identity.Node, key ed25519.PublicKey) (*State, error)
 		lock.Close()
 		return nil, err
 	}
-	s := &State{db: db, lock: lock, node: node, key: append(ed25519.PublicKey{}, key...)}
+	s := &State{db: db, lock: lock, node: node, key: append(ed25519.PublicKey{}, key...), trust: trust}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.recover(ctx, time.Now()); err != nil {
@@ -110,7 +150,7 @@ func (s *State) recover(ctx context.Context, now time.Time) error {
 	var version int
 	var id, epoch, key string
 	var health string
-	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 1 {
+	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || (version != 1 && version != 2) {
 		return errors.New("unknown probe schema")
 	}
 	if err := tx.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&health); err != nil || health != "ok" {
@@ -119,8 +159,11 @@ func (s *State) recover(ctx context.Context, now time.Time) error {
 	if err := tx.QueryRowContext(ctx, "SELECT agent_id,epoch,key_digest FROM probe_meta WHERE id=1").Scan(&id, &epoch, &key); err != nil {
 		return err
 	}
-	if id != s.node.AgentID || epoch != s.node.EnrollmentEpoch || key != audit.Digest(s.key) {
+	if id != s.node.AgentID || epoch != s.node.EnrollmentEpoch {
 		return errors.New("probe state belongs to a different identity or task key")
+	}
+	if err := checkTrustBinding(ctx, tx, version, key, s.key, s.trust); err != nil {
+		return err
 	}
 	if err := audit.Verify(ctx, tx); err != nil {
 		return err
@@ -254,6 +297,15 @@ func capacity(ctx context.Context, tx *sql.Tx, p policy.Policy, now time.Time) e
 }
 
 func (s *State) Ready(ctx context.Context, p policy.Policy, now time.Time) error {
+	if s.trust != nil {
+		active := false
+		for _, k := range s.trust.Keys {
+			active = active || (now.Unix() >= k.NotBefore && now.Unix() < k.NotAfter)
+		}
+		if !active {
+			return errors.New("no currently valid local task key")
+		}
+	}
 	digest, err := p.Digest()
 	if err != nil {
 		return err
@@ -300,7 +352,7 @@ func emptyResult(t protocol.Task, digest string, start, end int64, status protoc
 	return protocol.Result{RequestID: t.RequestID, AgentID: t.AgentID, Epoch: t.EnrollmentEpoch, Type: t.Type, StartedAt: start, FinishedAt: end, Status: status, Data: json.RawMessage(`{}`), ErrorCode: code, PolicyDigest: digest}
 }
 
-func (s *State) prepare(ctx context.Context, t protocol.Task, payload []byte, p policy.Policy, source string, now time.Time) (decision, error) {
+func (s *State) prepare(ctx context.Context, t protocol.Task, payload []byte, p policy.Policy, source string, now time.Time, keyID ...string) (decision, error) {
 	digest, err := p.Digest()
 	if err != nil {
 		return decision{}, err
@@ -322,6 +374,14 @@ func (s *State) prepare(ctx context.Context, t protocol.Task, payload []byte, p 
 			return decision{}, err
 		}
 		return decision{}, ErrClock
+	}
+	if s.trust != nil {
+		if len(keyID) != 1 {
+			return decision{}, errors.New("verified task key ID required")
+		}
+		if err := s.trust.CheckTask(t, keyID[0], time.Now()); err != nil {
+			return decision{}, err
+		}
 	}
 	hash := audit.Digest(payload)
 	var previous, resultHash string

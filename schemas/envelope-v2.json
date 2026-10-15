@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus-C2 locally trusted Ed25519 task envelope v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "trust_set_id", "key_id", "payload_b64", "signature_b64"],
+  "properties": {
+    "version": {"const": 2},
+    "trust_set_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "key_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "payload_b64": {"type": "string", "minLength": 1, "maxLength": 10923, "pattern": "^[A-Za-z0-9_-]+$"},
+    "signature_b64": {"type": "string", "minLength": 86, "maxLength": 86, "pattern": "^[A-Za-z0-9_-]+$"}
+  },
+  "$comment": "At most 16384 bytes. Signature input is UTF-8 argus-c2/task/v2 followed by NUL, trust_set_id, NUL, key_id, NUL, and exact decoded payload bytes. IDs only select locally installed trust. Canonical unpadded Base64URL, fixed-domain Ed25519 verification, strict task-v1 payload validation, key time windows, local policy and durable replay checks are also mandatory. No public key or URL can be supplied by this envelope."
+}

@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/Oreki0504/Argus-C2/internal/adminauth"
+	"github.com/Oreki0504/Argus-C2/internal/audit"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
 	"github.com/Oreki0504/Argus-C2/internal/secretinput"
+	"github.com/Oreki0504/Argus-C2/internal/signing"
 	"github.com/Oreki0504/Argus-C2/internal/state"
 )
 
@@ -27,12 +29,15 @@ func main() {
 }
 func run() error {
 	dir := flag.String("state", "", "private server state directory")
-	action := flag.String("action", "nodes", "token, nodes, disable, submit, tasks, audit, certificates, certificate-revoke, users, user-add, user-password, user-role, user-disable, user-revoke, sessions-revoke-all, or restore-quarantine")
+	action := flag.String("action", "nodes", "token, nodes, disable, submit, tasks, audit, certificates, certificate-revoke, users, user-add, user-password, user-role, user-disable, user-revoke, sessions-revoke-all, restore-quarantine, signers, dispatch-pause, dispatch-resume, dispatch-cancel-queued, signer-trust, or signer-switch")
 	username := flag.String("username", "", "immutable administrator user name for local account actions")
 	role := flag.String("role", "", "Admin or ReadOnly; user-add and user-role only")
 	ttl := flag.Duration("ttl", 10*time.Minute, "enrollment token lifetime, at most 15 minutes")
 	id := flag.String("agent-id", "", "node to disable or submit to")
 	certificateHash := flag.String("certificate-sha256", "", "exact leaf fingerprint; certificate-revoke only")
+	trustFile := flag.String("task-trust-set", "", "next signer trust-set JSON; signer-trust only")
+	currentKey := flag.String("current-task-public-key", "", "current PEM key or trust-set JSON; signer-trust only")
+	nextKey := flag.String("next-task-public-key", "", "new selected signer public PEM; signer-switch only")
 	kind := flag.String("type", "", "system.info, system.metrics, ssh.audit, or service.status (submit only)")
 	profileID := flag.String("profile-id", "", "local SSH profile ID for ssh.audit")
 	serviceID := flag.String("service-id", "", "local service ID for service.status")
@@ -48,8 +53,12 @@ func run() error {
 		return errors.New("run localctl as the non-root server user")
 	}
 	userAction := *action == "user-add" || *action == "user-password" || *action == "user-role" || *action == "user-disable" || *action == "user-revoke"
-	if *action != "token" && *action != "nodes" && *action != "disable" && *action != "submit" && *action != "tasks" && *action != "audit" && *action != "users" && *action != "sessions-revoke-all" && *action != "restore-quarantine" && *action != "certificates" && *action != "certificate-revoke" && !userAction {
+	signerAction := *action == "dispatch-pause" || *action == "dispatch-resume" || *action == "dispatch-cancel-queued" || *action == "signer-trust" || *action == "signer-switch" || *action == "signers"
+	if *action != "token" && *action != "nodes" && *action != "disable" && *action != "submit" && *action != "tasks" && *action != "audit" && *action != "users" && *action != "sessions-revoke-all" && *action != "restore-quarantine" && *action != "certificates" && *action != "certificate-revoke" && !userAction && !signerAction {
 		return errors.New("unknown local action")
+	}
+	if (*action == "signer-trust") != (*trustFile != "") || (*action == "signer-trust") != (*currentKey != "") || (*action == "signer-switch") != (*nextKey != "") {
+		return errors.New("signer-trust requires only -task-trust-set and -current-task-public-key; signer-switch requires only -next-task-public-key")
 	}
 	if userAction != (*username != "") || (userAction && !adminauth.Username(*username)) {
 		return errors.New("-username is required only for local user actions")
@@ -97,6 +106,40 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	switch *action {
+	case "signers":
+		status, err := s.Signers(ctx)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(status)
+	case "dispatch-pause", "dispatch-resume":
+		return s.PauseDispatch(ctx, *action == "dispatch-pause")
+	case "dispatch-cancel-queued":
+		return s.CancelQueuedForSignerChange(ctx)
+	case "signer-switch":
+		key, err := signing.LoadPublic(*nextKey)
+		if err != nil {
+			return err
+		}
+		return s.SwitchSigner(ctx, signing.KeyID(key))
+	case "signer-trust":
+		key, previous, err := signing.LoadVerification(*currentKey)
+		if err != nil {
+			return err
+		}
+		expected := signing.KeyID(key)
+		if previous != nil {
+			data, err := previous.Canonical()
+			if err != nil {
+				return err
+			}
+			expected = audit.Digest(data)
+		}
+		next, err := signing.LoadTrust(*trustFile)
+		if err != nil {
+			return err
+		}
+		return s.InstallSignerTrust(ctx, expected, next)
 	case "certificates":
 		credentials, err := s.Credentials(ctx, *id)
 		if err != nil {

@@ -27,7 +27,15 @@ func (e *Engine) Process(ctx context.Context, envelope []byte) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	t, payload, err := signing.VerifyPayload(envelope, e.state.key)
+	var t protocol.Task
+	var payload []byte
+	var keyID string
+	var err error
+	if e.state.trust == nil {
+		t, payload, err = signing.VerifyPayload(envelope, e.state.key)
+	} else {
+		t, payload, keyID, err = signing.VerifyTrusted(envelope, *e.state.trust, time.Now())
+	}
 	if err != nil || t.AgentID != e.state.node.AgentID || t.EnrollmentEpoch != e.state.node.EnrollmentEpoch {
 		if len(envelope) > protocol.MaxEnvelopeBytes {
 			envelope = envelope[:protocol.MaxEnvelopeBytes]
@@ -41,7 +49,7 @@ func (e *Engine) Process(ctx context.Context, envelope []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	d, err := e.state.prepare(ctx, t, payload, p, e.source, time.Now())
+	d, err := e.state.prepare(ctx, t, payload, p, e.source, time.Now(), keyID)
 	if err != nil {
 		return nil, err
 	}
