@@ -2,6 +2,8 @@
 
 This increment implements client-certificate generations, authenticated and idempotent renewal, local credential inspection/revocation, and operator-assisted activation. It does not complete the whole Phase 8 design: task-signing-key rotation, operational CA provisioning, expiry health reporting and full compromise-recovery qualification remain pending. All listeners remain loopback-only. The four task types, root-controlled policy, SSH `openat2` reader and Phase 7 unit hardening remain unchanged.
 
+The pinned build toolchain is Go 1.27.2. This patch release includes standard-library security fixes; see the [official release history](https://go.dev/doc/devel/release#go1.27.2). The previous 1.27.1 baseline failed the current vulnerability scan.
+
 ## Identity and storage
 
 Server schema 4 migrates each existing exact leaf fingerprint into generation 1. The node ID and enrollment epoch, task bytes, results, sessions, signer pin, audit prefix and reservations are preserved. Older databases did not retain certificates, so unknown legacy issuer/serial/key/validity metadata is shown as empty strings or zero; the original exact fingerprint remains mandatory. A successful authenticated renewal populates that generation's metadata from the verified peer chain. New enrollments store full metadata immediately.
@@ -72,7 +74,7 @@ The staging directory must be private and its parent operator-controlled. `renew
 The application does not acquire write access to `/etc/argus-c2`. A trusted administrator supplies the existing key to maintenance commands through systemd credentials. For example, run this as root on a reviewed local installation; the spawned executable runs as `argus-probe`:
 
 ```sh
-systemd-run --quiet --wait --pipe --collect \
+systemd-run --quiet --wait --pipe --collect --expand-environment=yes \
   -p User=argus-probe -p Group=argus-probe -p UMask=0077 \
   -p NoNewPrivileges=yes -p 'CapabilityBoundingSet=' \
   -p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes \
@@ -81,11 +83,11 @@ systemd-run --quiet --wait --pipe --collect \
   /usr/local/libexec/argus-c2/renew -action prepare \
   -server https://127.0.0.1:8443 -ca /etc/argus-c2/probe/ca.pem \
   -identity /etc/argus-c2/probe/identity.json \
-  -cert /etc/argus-c2/probe/probe-cert.pem -key %d/probe-key \
+  -cert /etc/argus-c2/probe/probe-cert.pem -key '${CREDENTIALS_DIRECTORY}/probe-key' \
   -out /var/lib/argus-c2-probe/renewal-1
 ```
 
-Run the same command with `-action request` and the same staging directory. The transient maintenance service keeps `RestrictSUIDSGID=yes`: it does not perform SSH-file inspection. The existing probe service alone retains its previously approved `RestrictSUIDSGID=false` exception.
+Run the same command with `-action request` and the same staging directory. Keep the single quotes around the credential path so the invoking shell does not expand it; the service manager expands its own `CREDENTIALS_DIRECTORY` as documented for [systemd-run 255](https://github.com/systemd/systemd/blob/v255/man/systemd-run.xml). `%d` remains appropriate in installed unit files, but is not expanded in transient command arguments. The transient maintenance service keeps `RestrictSUIDSGID=yes`: it does not perform SSH-file inspection. The existing probe service alone retains its previously approved `RestrictSUIDSGID=false` exception.
 
 After successful request and verification, inspect the response and locally activate the complete pair:
 

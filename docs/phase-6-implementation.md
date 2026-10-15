@@ -10,7 +10,7 @@ Management, enrollment, and probe traffic use separate listeners. The probe list
 
 `cmd/localctl` requires direct access to the private server database and is reserved for trusted local administration and recovery. `cmd/cli` is the authenticated network client and never opens that database. A ReadOnly user must not receive server filesystem access: possession of the database and local operator tools is outside the network RBAC boundary.
 
-Use Go 1.27.1. Follow the [Phase 4 setup](phase-4-implementation.md) for development PKI, task-signing keys, enrollment, and replay state. Existing Phase 5 probe policies and resource mappings remain unchanged; see the [inspection guide](phase-5-implementation.md). Create the first administrator under the non-root server account:
+Use Go 1.27.2. Follow the [Phase 4 setup](phase-4-implementation.md) for development PKI, task-signing keys, enrollment, and replay state. Existing Phase 5 probe policies and resource mappings remain unchanged; see the [inspection guide](phase-5-implementation.md). Create the first administrator under the non-root server account:
 
 ```text
 go run ./cmd/localctl -state .local/phase4-server -action user-add -username operator -role Admin

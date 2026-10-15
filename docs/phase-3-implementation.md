@@ -23,7 +23,7 @@ The [Phase 1 design](phase-1-design.md) remains the target architecture. The [Ph
 
 **Try the complete flow locally**
 
-Use Go 1.27.1 and run from the repository root. On Linux, use a non-root account for every command: the server, probe, enrollment client, and local operator tool refuse UID 0. The examples keep all development material inside the ignored `.local/` directory. Use new output paths for subsequent PKI or enrollment runs; existing credentials are never overwritten.
+Use Go 1.27.2 and run from the repository root. On Linux, use a non-root account for every command: the server, probe, enrollment client, and local operator tool refuse UID 0. The examples keep all development material inside the ignored `.local/` directory. Use new output paths for subsequent PKI or enrollment runs; existing credentials are never overwritten.
 
 1. Create development credentials:
 
@@ -138,7 +138,7 @@ Enrollment requests and replies are limited to 8 KiB; DER CSRs to 2 KiB. Enrollm
 
 **Dependencies and validation**
 
-Go 1.27.1 remains the pinned baseline. [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) supplies pure-Go SQLite without a C runtime build requirement; `golang.org/x/sys/unix` supplies Linux filesystem statistics. Direct and transitive versions and checksums are recorded in go.mod/go.sum. No extensions or dynamic SQL are supplied by network requests.
+Go 1.27.2 remains the pinned baseline. [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) supplies pure-Go SQLite without a C runtime build requirement; `golang.org/x/sys/unix` supplies Linux filesystem statistics. Direct and transitive versions and checksums are recorded in go.mod/go.sum. No extensions or dynamic SQL are supplied by network requests.
 
 ```text
 go build ./...

@@ -87,7 +87,7 @@ def state_value(query, args=(), database=None):
 def renewal_command(action, stage=None, cert=None, key_source=None, ok=True):
     # Root supplies the existing private key through systemd credentials; the
     # maintenance executable itself runs as the unprivileged probe account.
-    options = ["systemd-run", "--quiet", "--wait", "--pipe", "--collect",
+    options = ["systemd-run", "--quiet", "--wait", "--pipe", "--collect", "--expand-environment=yes",
                "--unit=argus-c2-renew-ci-" + secrets.token_hex(4),
                "--property=User=argus-probe", "--property=Group=argus-probe",
                "--property=UMask=0077", "--property=NoNewPrivileges=yes",
@@ -98,7 +98,7 @@ def renewal_command(action, stage=None, cert=None, key_source=None, ok=True):
                "--property=LoadCredential=probe-key:" + str(key_source or etc / "probe/secrets/probe-key.pem")]
     args = [lib / "renew", "-action", action, "-server", "https://127.0.0.1:8443",
             "-ca", etc / "probe/ca.pem", "-identity", etc / "probe/identity.json",
-            "-cert", cert or etc / "probe/probe-cert.pem", "-key", "%d/probe-key"]
+            "-cert", cert or etc / "probe/probe-cert.pem", "-key", "${CREDENTIALS_DIRECTORY}/probe-key"]
     if stage:
         args += ["-out", stage]
     return run(*options, *args, ok=ok)

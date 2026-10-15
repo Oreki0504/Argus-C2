@@ -22,7 +22,7 @@ The periodic heartbeat remains independently enabled by the local telemetry conf
 
 **Run the complete development flow**
 
-Use Go 1.27.1 from the repository root and a non-root account on Linux. Keep generated material in ignored `.local/` paths. Use new credential and replay directories for a new test environment; the tools refuse to overwrite existing enrollment, signing, or replay state.
+Use Go 1.27.2 from the repository root and a non-root account on Linux. Keep generated material in ignored `.local/` paths. Use new credential and replay directories for a new test environment; the tools refuse to overwrite existing enrollment, signing, or replay state.
 
 Create short-lived development PKI and a separate task key:
 

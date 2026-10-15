@@ -12,7 +12,7 @@ Phases 1 through 7 establish a tested local deployment baseline: explicit enroll
 
 The first Phase 8 increment adds authenticated, idempotent client-certificate renewal, bounded credential generations, local retirement, and operator-assisted activation without resetting replay state. Task-signing-key rotation and complete operational PKI qualification remain pending. See the [credential lifecycle guide](docs/phase-8-implementation.md) and the [Phase 1 architecture and security design](docs/phase-1-design.md).
 
-Start with the [Phase 7 Linux service guide](docs/phase-7-implementation.md) for installation permissions, systemd restrictions, and restore quarantine. The [Phase 6 guide](docs/phase-6-implementation.md) covers CLI authentication and roles; [Phase 5](docs/phase-5-implementation.md) covers inspection, and [Phase 4](docs/phase-4-implementation.md) provides enrollment/dispatch setup. Earlier guides retain their historical scope. The toolchain baseline is Go 1.27.1, with pinned dependencies in go.mod/go.sum.
+Start with the [Phase 7 Linux service guide](docs/phase-7-implementation.md) for installation permissions, systemd restrictions, and restore quarantine. The [Phase 6 guide](docs/phase-6-implementation.md) covers CLI authentication and roles; [Phase 5](docs/phase-5-implementation.md) covers inspection, and [Phase 4](docs/phase-4-implementation.md) provides enrollment/dispatch setup. Earlier guides retain their historical scope. The toolchain baseline is Go 1.27.2, with pinned dependencies in go.mod/go.sum.
 
 **Architecture**
 

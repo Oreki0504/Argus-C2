@@ -41,12 +41,12 @@ MemoryHigh applies pressure; MemoryMax is the hard limit. CPU quotas may delay r
 
 ## Build and manually install on a fresh test VM
 
-This example installs both roles on one disposable Linux VM because the current endpoints are loopback-only. Use a trusted checkout and Go 1.27.1. Build as an ordinary development user, review the files, and use sudo only for the explicit installation steps. Do not run the CI fixture on a real host.
+This example installs both roles on one disposable Linux VM because the current endpoints are loopback-only. Use a trusted checkout and Go 1.27.2. Build as an ordinary development user, review the files, and use sudo only for the explicit installation steps. Do not run the CI fixture on a real host.
 
 ```sh
 mkdir -p .cache/deployment-bin
 for command in server agent localctl probectl enroll cli devpki devsign; do
-  GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go build -trimpath \
+  GOTOOLCHAIN=go1.27.2 CGO_ENABLED=0 go build -trimpath \
     -o ".cache/deployment-bin/$command" "./cmd/$command"
 done
 go test ./... -count=1

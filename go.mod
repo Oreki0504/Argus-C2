@@ -1,6 +1,6 @@
 module github.com/Oreki0504/Argus-C2
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/godbus/dbus/v5 v5.2.2

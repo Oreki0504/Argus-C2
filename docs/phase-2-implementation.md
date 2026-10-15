@@ -6,7 +6,7 @@ This document describes the Phase 2 baseline. Phase 3 preserves these static-reg
 
 **Toolchain and layout**
 
-The module is `github.com/Oreki0504/Argus-C2`. The baseline and CI toolchain is Go 1.27.1, selected from the [official release history](https://go.dev/doc/devel/release). At the Phase 2 commit, application code used only the standard library. Phase 3 adds pinned runtime dependencies and go.sum. To reproduce the exact local toolchain, set `GOTOOLCHAIN=go1.27.1` in your shell; otherwise Go's toolchain selection may use a newer installed version.
+The module is `github.com/Oreki0504/Argus-C2`. The baseline and CI toolchain is Go 1.27.2, selected from the [official release history](https://go.dev/doc/devel/release). At the Phase 2 commit, application code used only the standard library. Phase 3 adds pinned runtime dependencies and go.sum. To reproduce the exact local toolchain, set `GOTOOLCHAIN=go1.27.2` in your shell; otherwise Go's toolchain selection may use a newer installed version.
 
 | Path | Implemented responsibility |
 | --- | --- |
@@ -27,7 +27,7 @@ The administration CLI is deferred to Phase 6. `cmd/agent` is the resident-clien
 
 **Try the connection locally**
 
-Run these commands from the repository root with Go 1.27.1 available. They work in PowerShell and a POSIX shell. On Linux, run as an unprivileged user; the server and probe commands refuse UID 0. The generated `.local/` directory is ignored by Git.
+Run these commands from the repository root with Go 1.27.2 available. They work in PowerShell and a POSIX shell. On Linux, run as an unprivileged user; the server and probe commands refuse UID 0. The generated `.local/` directory is ignored by Git.
 
 1. Generate fresh development credentials in a new directory:
 
