@@ -17,6 +17,7 @@ import (
 	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
 	"github.com/Oreki0504/Argus-C2/internal/strictjson"
+	"github.com/Oreki0504/Argus-C2/internal/tlsconfig"
 )
 
 type Client struct {
@@ -55,6 +56,7 @@ func newHTTP(config *tls.Config) *http.Client {
 	transport := &http.Transport{
 		Proxy: nil, TLSClientConfig: config.Clone(), DisableCompression: true,
 		DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+		DialTLSContext:      tlsconfig.ClientDialContext(config),
 		TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 5 * time.Second,
 		IdleConnTimeout: 30 * time.Second, MaxConnsPerHost: 2, MaxIdleConnsPerHost: 1,
 		MaxResponseHeaderBytes: 8192,

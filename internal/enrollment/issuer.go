@@ -63,7 +63,7 @@ func LoadIssuer(certPath, keyPath, caPath string) (*Issuer, error) {
 		return nil, err
 	}
 	key, ok := pair.PrivateKey.(ed25519.PrivateKey)
-	if !ok || !cert.IsCA || !cert.BasicConstraintsValid || !cert.MaxPathLenZero || cert.KeyUsage&x509.KeyUsageCertSign == 0 || len(cert.ExtKeyUsage) != 1 || cert.ExtKeyUsage[0] != x509.ExtKeyUsageClientAuth || len(cert.UnknownExtKeyUsage) != 0 || bytes.Equal(cert.RawSubject, cert.RawIssuer) {
+	if !ok || tlsconfig.CheckIssuerProfile(cert) != nil {
 		return nil, errors.New("issuer must be a non-root, client-auth-only Ed25519 CA with path length zero")
 	}
 	roots, err := tlsconfig.LoadRoots(caPath)

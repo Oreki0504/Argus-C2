@@ -116,6 +116,10 @@ Removing a key can shorten authority immediately on a locally updated probe, eve
 
 ## Validation scope
 
+`signctl -action inspect` now provides public local expiry snapshots, including an
+optional expected selected-key ID. See the [PKI and recovery guide](phase-8-pki-recovery.md)
+for exit codes, warning windows, and authority-replacement runbooks.
+
 Tests cover strict nested trust JSON, canonical IDs/encoding, domain and trust-ID substitution, v1 downgrade rejection, key windows, retirement and revival prevention, generation rollback, migration locking, audit failure rollback, corrupted state, interrupted-task recovery, unchanged replay/outbox/audit history, dispatch pause, explicit queue cancellation, stale server keys, immutable old envelopes, and late results through real mTLS after a signer switch. New fuzz targets cover trust documents and v2 envelope verification.
 
-The disposable Ubuntu job also generates the next key, migrates the stopped services, replaces files through local root setup, verifies v2 dispatch, retires the old key, runs SSH inspection under the unchanged unit, and continues into cold restore/fresh enrollment with the new trust representation. These checks qualify this local increment; they do not complete the remaining Phase 8 work or qualify public listeners.
+The disposable Ubuntu job also generates the next key, migrates the stopped services, replaces files through local root setup, verifies v2 dispatch, retires the old key, runs SSH inspection under the unchanged unit, and continues into cold restore/fresh enrollment with the new trust representation. Together with the TLS and PKI guides, these checks qualify the local lifecycle baseline; they do not qualify public listeners or multi-host rollout.

@@ -54,6 +54,7 @@ func New(origin, ca string) (*Client, error) {
 }
 func newClient(origin, caHash string, config *tls.Config) *Client {
 	tr := &http.Transport{Proxy: nil, TLSClientConfig: config.Clone(), DisableCompression: true, DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 8 * time.Second, IdleConnTimeout: 30 * time.Second, MaxConnsPerHost: 2, MaxIdleConnsPerHost: 1, MaxResponseHeaderBytes: 8192}
+	tr.DialTLSContext = tlsconfig.ClientDialContext(config)
 	return &Client{http: &http.Client{Transport: tr, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("administrator redirects are forbidden") }}, Origin: origin, CAHash: caHash}
 }
 func (c *Client) Close() { c.http.CloseIdleConnections() }

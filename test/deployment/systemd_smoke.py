@@ -1,7 +1,8 @@
 """Install and exercise services on a disposable GitHub-hosted Linux VM only.
 
 Never run on a workstation or deployed host. Root setup belongs to this fixture;
-all Argus application commands execute as dedicated non-root service accounts.
+Runtime and state commands execute as dedicated non-root service accounts;
+offline artifact preparation belongs to trusted fixture setup.
 """
 import json
 import os
@@ -135,14 +136,41 @@ def submit(node, kind, *args):
     return eventually(completed, "task did not complete under systemd restrictions")
 
 
+def issue_pair(profile, label):
+    request, issued = work / (label + "-request"), work / (label + "-issued")
+    run(lib / "pkictl", "-action", "request", "-out", request)
+    run(lib / "pkictl", "-action", "issue", "-profile", profile, "-out", issued,
+        "-root-cert", work / "offline-root/root-cert.pem", "-root-key", work / "offline-root/root-key.pem",
+        "-csr", request / "request.pem")
+    assert {p.name for p in issued.iterdir()} == {"certificate.pem", "receipt.json"}
+    return issued / "certificate.pem", request / "key.pem"
+
+
+def certificate_health(profile, role, cert, *args, warning=False):
+    result = run(lib / "pkictl", "-action", "inspect", "-profile", profile, "-cert", cert,
+                 "-ca", etc / role / "ca.pem", *args, user=role, ok=not warning)
+    assert result.returncode == (2 if warning else 0)
+    report = json.loads(result.stdout)
+    assert report["state"] == ("warning" if warning else "ok"), report
+    return report
+
+
 try:
     work.mkdir(mode=0o700)
     lib.mkdir(parents=True, mode=0o755)
     etc.mkdir(mode=0o755)
-    for name in ("server", "agent", "localctl", "probectl", "enroll", "renew", "signctl", "cli"):
+    for name in ("server", "agent", "localctl", "probectl", "enroll", "renew", "signctl", "pkictl", "cli"):
         put(build / name, lib / name, 0o755)
     put(repo / "test/deployment/check_service.py", lib / "check-service.py")
-    run(build / "devpki", "-enrollment", "-out", work / "pki")
+    # A single disposable VM emulates separate offline and online preparation.
+    # Root private material never enters service configuration/credentials.
+    run(lib / "pkictl", "-action", "root", "-out", work / "offline-root")
+    (work / "pki").mkdir(mode=0o700)
+    put(work / "offline-root/root-cert.pem", work / "pki/ca.pem")
+    for profile in ("server", "issuer"):
+        cert, key = issue_pair(profile, profile)
+        put(cert, work / "pki" / (profile + "-cert.pem"))
+        put(key, work / "pki" / (profile + "-key.pem"), 0o600)
     run(build / "devsign", "-out", work / "signing")
     for role, state in states.items():
         run("systemd-sysusers", repo / ("deploy/linux/argus-c2-" + role + ".sysusers.conf"))
@@ -170,7 +198,7 @@ try:
     put(work / "signing/task-public.pem", etc / "probe/task-public.pem")
     put(repo / "deploy/linux/enrollment.conf.example", "/etc/systemd/system/argus-c2-server.service.d/enrollment.conf")
     enrollment_dropin = Path("/etc/systemd/system/argus-c2-server.service.d/enrollment.conf")
-    enrollment_dropin.write_text(enrollment_dropin.read_text().replace(" -enroll-listen ", " -enable-renewal -enroll-listen "))
+    enrollment_dropin.write_text(enrollment_dropin.read_text().replace(" -enroll-listen ", " -enable-renewal -certificate-lifetime 720h -enroll-listen "))
     policy = json.loads((repo / "examples/task-policy-v2.json").read_text())
     policy["telemetry"]["sample_milliseconds"] = 100
     policy["allow_service_status"] = True
@@ -206,6 +234,15 @@ try:
     eventually(listening, "server did not listen")
     cli("login", "-username", "operator", data=password + "\n")
     node = enroll()
+    certificate_health("server", "server", etc / "server/server-cert.pem", "-server-name", "127.0.0.1")
+    certificate_health("issuer", "server", etc / "server/issuer-cert.pem")
+    client_health = certificate_health("client", "probe", etc / "probe/probe-cert.pem", "-identity", etc / "probe/identity.json")
+    assert any(29 * 86400 < c["remaining_seconds"] <= 30 * 86400 for c in client_health["certificates"])
+    certificate_health("client", "probe", etc / "probe/probe-cert.pem", "-identity", etc / "probe/identity.json",
+                       "-warn-before", "2160h", warning=True)
+    for role in states:
+        assert run("/usr/bin/test", "-r", work / "offline-root/root-key.pem", user=role, ok=False).returncode == 1
+    print("PASS: operational PKI, 30-day client issuance, expiry health, root key excluded from services", flush=True)
     run("systemctl", "start", units[1])
     eventually(lambda: ready(node), "probe did not advertise readiness")
     assert submit(node, "system.info")["data"]["available"], "system information unavailable"
@@ -318,6 +355,26 @@ try:
     # Additional maintenance cycles are specific to this disposable exercise.
     run("systemctl", "reset-failed", *units)
     print("PASS: local signer migration, v2 dispatch, retirement, unchanged replay and service hardening", flush=True)
+    signer_health = run(lib / "signctl", "-action", "inspect", "-current", etc / "probe/task-public.pem",
+                        "-selected-key-id", new_key, "-warn-before", "0s", user="probe")
+    assert json.loads(signer_health.stdout)["state"] == "ok"
+    # Local replacement of both online key pairs under the same offline root.
+    # Existing client chains remain trusted; new issuance uses the new issuer.
+    replacement_pairs = {profile: issue_pair(profile, profile + "-next") for profile in ("server", "issuer")}
+    run("systemctl", "stop", units[0])
+    for profile, (cert, key) in replacement_pairs.items():
+        put(cert, etc / "server" / (profile + "-cert.pem"))
+        put(key, etc / "server/secrets" / (profile + "-key.pem"), 0o600)
+    run("systemctl", "start", units[0])
+    eventually(listening, "server did not restart with replaced TLS/issuer pairs")
+    cli("me")
+    submit(node, "system.info")
+    assert (etc / "probe/identity.json").read_bytes() == old_identity
+    assert state_value("SELECT hash FROM audit_events WHERE sequence=?", (audit_seq,), replay_db) == (audit_hash,)
+    certificate_health("server", "server", etc / "server/server-cert.pem", "-server-name", "127.0.0.1")
+    certificate_health("issuer", "server", etc / "server/issuer-cert.pem")
+    run("systemctl", "reset-failed", *units)
+    print("PASS: local server/issuer replacement, preserved node/replay, unchanged service isolation", flush=True)
     # Cold backup: stop every database writer; copy the entire directory.
     run("systemctl", "stop", *units)
     snapshot = work / "server-backup"

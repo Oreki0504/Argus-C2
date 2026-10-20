@@ -3,8 +3,10 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -14,21 +16,65 @@ import (
 
 func main() {
 	log.SetFlags(0)
-	if err := run(); err != nil {
+	if err := run(os.Args[1:], os.Stdout); err != nil {
+		if errors.Is(err, errUnhealthy) {
+			os.Exit(2)
+		}
 		log.Fatal(err)
 	}
 }
 
-func run() error {
-	action := flag.String("action", "", "generate, stage, or retire")
-	out := flag.String("out", "", "new key directory for generate, or new JSON file for stage/retire")
-	current := flag.String("current", "", "current public PEM key or trust-set JSON")
-	next := flag.String("next-public-key", "", "next public PEM key; stage only")
-	retire := flag.String("retire-at", "", "old key cutoff as RFC3339; stage only")
-	until := flag.String("valid-until", "", "new key expiry as RFC3339; stage only")
-	id := flag.String("key-id", "", "key to remove; retire only")
-	flag.Parse()
-	if flag.NArg() != 0 || *out == "" {
+var errUnhealthy = errors.New("signer health requires attention")
+
+func run(args []string, writer io.Writer) error {
+	flags := flag.NewFlagSet("signctl", flag.ContinueOnError)
+	action := flags.String("action", "", "generate, stage, retire, or inspect")
+	out := flags.String("out", "", "new key directory for generate, or new JSON file for stage/retire")
+	current := flags.String("current", "", "current public PEM key or trust-set JSON")
+	next := flags.String("next-public-key", "", "next public PEM key; stage only")
+	retire := flags.String("retire-at", "", "old key cutoff as RFC3339; stage only")
+	until := flags.String("valid-until", "", "new key expiry as RFC3339; stage only")
+	id := flags.String("key-id", "", "key to remove; retire only")
+	selected := flags.String("selected-key-id", "", "expected active key ID; inspect only")
+	warning := flags.Duration("warn-before", 10*24*time.Hour, "expiry warning window, 0 through 2160h; inspect only")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	allowed := map[string]map[string]bool{
+		"generate": {"action": true, "out": true},
+		"stage":    {"action": true, "out": true, "current": true, "next-public-key": true, "retire-at": true, "valid-until": true},
+		"retire":   {"action": true, "out": true, "current": true, "key-id": true},
+		"inspect":  {"action": true, "current": true, "selected-key-id": true, "warn-before": true},
+	}
+	bad := allowed[*action] == nil || flags.NArg() != 0
+	flags.Visit(func(f *flag.Flag) {
+		if !allowed[*action][f.Name] {
+			bad = true
+		}
+	})
+	if bad {
+		return errors.New("unknown action or incompatible flags")
+	}
+	if *action == "inspect" {
+		if *current == "" {
+			return errors.New("current local trust is required")
+		}
+		report, err := signing.Inspect(*current, *selected, *warning, time.Now())
+		if err != nil {
+			return err
+		}
+		if err := json.NewEncoder(writer).Encode(report); err != nil {
+			return err
+		}
+		if report.State != "ok" {
+			return errUnhealthy
+		}
+		return nil
+	}
+	if *out == "" {
 		return errors.New("required: -action and -out; no positional arguments")
 	}
 	if *action == "generate" {

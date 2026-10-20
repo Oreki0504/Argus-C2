@@ -2,10 +2,8 @@
 package tlsconfig
 
 import (
-	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"time"
 
@@ -18,6 +16,9 @@ type Files struct{ Certificate, PrivateKey, CA string }
 func load(files Files, usage x509.ExtKeyUsage) (tls.Certificate, *x509.CertPool, error) {
 	certPEM, err := localfile.Read(files.Certificate, 64*1024, false)
 	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	if _, err := ParseCertificates(certPEM); err != nil {
 		return tls.Certificate{}, nil, err
 	}
 	keyPEM, err := localfile.Read(files.PrivateKey, 16*1024, true)
@@ -43,31 +44,20 @@ func load(files Files, usage x509.ExtKeyUsage) (tls.Certificate, *x509.CertPool,
 
 // LoadRoots never falls back to platform trust or trust-on-first-use.
 func LoadRoots(path string) (*x509.CertPool, error) {
-	caPEM, err := localfile.Read(path, 64*1024, false)
+	certificates, err := LoadCertificates(path)
 	if err != nil {
 		return nil, err
 	}
+	return certificateRoots(certificates)
+}
+
+func certificateRoots(certificates []*x509.Certificate) (*x509.CertPool, error) {
 	roots := x509.NewCertPool()
-	count := 0
-	for len(bytes.TrimSpace(caPEM)) > 0 {
-		caPEM = bytes.TrimSpace(caPEM)
-		if !bytes.HasPrefix(caPEM, []byte("-----BEGIN CERTIFICATE-----")) {
-			return nil, errors.New("invalid CA PEM data")
-		}
-		block, rest := pem.Decode(caPEM)
-		if block == nil || block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-			return nil, errors.New("invalid CA PEM block")
-		}
-		ca, err := x509.ParseCertificate(block.Bytes)
-		if err != nil || !ca.IsCA || !ca.BasicConstraintsValid || ca.KeyUsage&x509.KeyUsageCertSign == 0 {
+	for _, ca := range certificates {
+		if !ca.IsCA || !ca.BasicConstraintsValid || ca.KeyUsage&x509.KeyUsageCertSign == 0 {
 			return nil, errors.New("trust anchor is not a CA certificate")
 		}
 		roots.AddCert(ca)
-		count++
-		caPEM = rest
-	}
-	if count == 0 {
-		return nil, errors.New("empty CA bundle")
 	}
 	return roots, nil
 }

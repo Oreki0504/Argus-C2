@@ -1,6 +1,6 @@
 # Argus-C2 Phase 7: Linux Service Hardening and Recovery
 
-The first [Phase 8 increment](phase-8-implementation.md) adds operator-assisted TLS renewal under these deployment restrictions. Statements below about missing certificate renewal describe the Phase 7 baseline; production PKI, signer rotation and multi-host rollout are still pending.
+The [Phase 8 TLS guide](phase-8-implementation.md), [signer guide](phase-8-signer-rotation.md), and [PKI/recovery guide](phase-8-pki-recovery.md) add operator-assisted credential lifecycle operations under these deployment restrictions. Statements below about missing renewal or operational PKI describe the historical Phase 7 baseline. Multi-host rollout remains pending.
 
 Phase 7 supplies visible, manually installed systemd services, separate non-root accounts, root-controlled configuration, credential delivery, resource limits, and native deployment/recovery exercises. The existing four read-only task types and probe-local authority boundary are unchanged. A new local `restore-quarantine` operation contains the authority resurrected by a restored server database.
 
