@@ -1,0 +1,13 @@
+{
+  "allowed": ["system.info", "system.metrics"],
+  "poll_seconds": 10,
+  "timeout_seconds": 10,
+  "max_result_bytes": 65536,
+  "telemetry": {
+    "sample_milliseconds": 1000,
+    "disk_paths": ["/"],
+    "network_interfaces": []
+  },
+  "services": [],
+  "ssh_profiles": []
+}

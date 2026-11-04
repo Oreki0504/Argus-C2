@@ -1,0 +1,6 @@
+{
+  "server": "https://fleet.example.com:8443",
+  "ca": "/etc/argus-c2/ca.pem",
+  "state_dir": "/var/lib/argus-c2-agent",
+  "policy": "/etc/argus-c2/policy.json"
+}

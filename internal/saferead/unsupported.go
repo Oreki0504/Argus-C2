@@ -4,6 +4,7 @@ package saferead
 
 import (
 	"context"
+
 	"github.com/Oreki0504/Argus-C2/internal/resources"
 )
 

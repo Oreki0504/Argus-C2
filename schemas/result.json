@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus diagnostics result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "node_id",
+    "status",
+    "payload",
+    "error",
+    "completed_at"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "node_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "status": {
+      "enum": [
+        "SUCCEEDED",
+        "FAILED",
+        "UNKNOWN"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    },
+    "error": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "completed_at": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

@@ -2,177 +2,174 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"runtime"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/Oreki0504/Argus-C2/internal/api"
+	"github.com/Oreki0504/Argus-C2/internal/auth"
+	"github.com/Oreki0504/Argus-C2/internal/config"
+	"github.com/Oreki0504/Argus-C2/internal/database"
 	"github.com/Oreki0504/Argus-C2/internal/enrollment"
-	"github.com/Oreki0504/Argus-C2/internal/identity"
-	"github.com/Oreki0504/Argus-C2/internal/management"
-	"github.com/Oreki0504/Argus-C2/internal/server"
-	"github.com/Oreki0504/Argus-C2/internal/signing"
-	"github.com/Oreki0504/Argus-C2/internal/state"
-	"github.com/Oreki0504/Argus-C2/internal/tlsconfig"
+	"github.com/Oreki0504/Argus-C2/internal/localdb"
+	"github.com/Oreki0504/Argus-C2/internal/transport"
 )
 
 func main() {
-	log.SetFlags(0)
-	if err := run(); err != nil {
-		log.Fatal(err)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	if e := run(); e != nil {
+		slog.Error("server stopped", "error", e)
+		os.Exit(1)
 	}
 }
-
 func run() error {
-	addr := flag.String("listen", "127.0.0.1:8443", "literal loopback address")
-	cert := flag.String("cert", "", "server certificate PEM file")
-	key := flag.String("key", "", "server private key PEM file")
-	ca := flag.String("ca", "", "client CA bundle PEM file")
-	registrations := flag.String("registry", "", "locally provisioned probe registry JSON file")
-	stateDir := flag.String("state", "", "private SQLite state directory (instead of -registry)")
-	enrollAddr := flag.String("enroll-listen", "", "enable a separate loopback enrollment listener")
-	issuerCert := flag.String("issuer-cert", "", "client-auth-only intermediate CA certificate")
-	issuerKey := flag.String("issuer-key", "", "intermediate CA private key")
-	renewalEnabled := flag.Bool("enable-renewal", false, "enable authenticated certificate renewal on the mTLS probe listener")
-	certificateLifetime := flag.Duration("certificate-lifetime", 12*time.Hour, "issued client certificate lifetime, 1h through 720h; capped by issuer expiry")
-	taskKey := flag.String("task-signing-key", "", "separate Ed25519 task key; enables dispatch with -state")
-	adminAddr := flag.String("admin-listen", "", "enable separate loopback HTTPS administrator API with -state")
-	flag.Parse()
-	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
-		return errors.New("the server must run as a non-root user")
+	if len(os.Args) < 2 {
+		return errors.New("usage: server init|run|backup|storage [flags]")
 	}
-	if flag.NArg() != 0 || *cert == "" || *key == "" || *ca == "" || (*registrations == "") == (*stateDir == "") {
-		return errors.New("required: -cert, -key, -ca and exactly one of -registry or -state; no positional arguments")
+	f := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
+	dir := f.String("dir", "", "new private server directory")
+	hosts := f.String("hosts", "localhost,127.0.0.1", "comma-separated server DNS names/IPs")
+	listen := f.String("listen", "127.0.0.1:8443", "HTTPS listen address")
+	file := f.String("config", "/etc/argus-c2/server.json", "server configuration")
+	check := f.Bool("check", false, "validate configuration and exit")
+	out := f.String("out", "", "new backup file in a private directory")
+	if e := f.Parse(os.Args[2:]); e != nil {
+		return e
 	}
-	if err := server.LoopbackAddress(*addr); err != nil {
-		return err
+	if f.NArg() != 0 {
+		return errors.New("unexpected positional arguments")
 	}
-	var registry identity.Authorizer
-	var sinks []server.TelemetryStore
-	var store *state.Store
-	var err error
-	if *stateDir != "" {
-		store, err = state.Open(*stateDir)
-		if err != nil {
-			return err
+	if os.Args[1] == "init" {
+		if *dir == "" {
+			return errors.New("-dir is required")
 		}
-		defer store.Close()
-		registry = store
-		sinks = []server.TelemetryStore{store}
-	} else {
-		registry, err = identity.LoadRegistry(*registrations)
-		if err != nil {
-			return err
+		abs, e := filepath.Abs(*dir)
+		if e != nil {
+			return e
 		}
+		if _, e = os.Stat(abs); !os.IsNotExist(e) {
+			return errors.New("initialization requires a new directory")
+		}
+		if e = enrollment.Initialize(abs, strings.Split(*hosts, ",")); e != nil {
+			return e
+		}
+		stateDir := filepath.Join(abs, "state")
+		store, e := database.Open(stateDir, true)
+		if e != nil {
+			return e
+		}
+		if e = store.Close(); e != nil {
+			return e
+		}
+		user, token, e := auth.NewUser("admin", "Admin")
+		if e != nil {
+			return e
+		}
+		admins := filepath.Join(abs, "admins.json")
+		if e = writeJSON(admins, auth.Config{Users: []auth.User{user}}); e != nil {
+			return e
+		}
+		if e = os.WriteFile(filepath.Join(abs, "admin.token"), []byte(token+"\n"), 0600); e != nil {
+			return e
+		}
+		c := config.Server{Listen: *listen, StateDir: stateDir, Certificate: filepath.Join(abs, "server.pem"), PrivateKey: filepath.Join(abs, "server-key.pem"), CA: filepath.Join(abs, "ca.pem"), IssuerKey: filepath.Join(abs, "ca-key.pem"), Admins: admins}
+		if e = writeJSON(filepath.Join(abs, "server.json"), c); e != nil {
+			return e
+		}
+		fmt.Println("Initialized", abs, "; administrator token saved to admin.token")
+		return nil
 	}
-	files := tlsconfig.Files{Certificate: *cert, PrivateKey: *key, CA: *ca}
-	config, err := tlsconfig.Server(files, registry)
-	if err != nil {
-		return err
+	c, e := config.LoadServer(*file)
+	if e != nil {
+		return e
 	}
-	var adminTLS *tls.Config
-	if *adminAddr != "" {
-		if store == nil {
-			return errors.New("administrator API requires -state")
-		}
-		if err := server.LoopbackAddress(*adminAddr); err != nil {
-			return err
-		}
-		adminTLS, err = tlsconfig.AdministrationServer(files)
-		if err != nil {
-			return err
-		}
+	store, e := database.Open(c.StateDir, false)
+	if e != nil {
+		return e
 	}
-	var issuer *enrollment.Issuer
-	var enrollmentTLS *tls.Config
-	if *enrollAddr != "" || *renewalEnabled {
-		if store == nil || *issuerCert == "" || *issuerKey == "" || *issuerKey == *key {
-			return errors.New("issuance requires -state and separate -issuer-cert/-issuer-key")
+	defer store.Close()
+	if os.Args[1] == "storage" {
+		report, e := localdb.InspectStorage(c.StateDir, "argus.db")
+		if e != nil {
+			return e
 		}
-		issuer, err = enrollment.LoadIssuer(*issuerCert, *issuerKey, *ca)
-		if err != nil {
-			return err
-		}
-		if err := issuer.CheckTransport(config.Certificates[0].Leaf); err != nil {
-			return err
-		}
-		if err := issuer.SetLifetime(*certificateLifetime); err != nil {
-			return err
-		}
-		if *enrollAddr != "" {
-			if err := server.LoopbackAddress(*enrollAddr); err != nil {
-				return err
-			}
-			enrollmentTLS, err = tlsconfig.EnrollmentServer(files)
-			if err != nil {
-				return err
-			}
-		}
-	} else if *issuerCert != "" || *issuerKey != "" || *certificateLifetime != 12*time.Hour {
-		return errors.New("issuer settings require explicit -enroll-listen or -enable-renewal")
+		return json.NewEncoder(os.Stdout).Encode(report)
 	}
-	if *taskKey != "" {
-		if store == nil {
-			return errors.New("task dispatch requires -state")
+	if os.Args[1] == "backup" {
+		if *out == "" {
+			return errors.New("-out is required")
 		}
-		private, err := signing.LoadPrivate(*taskKey)
-		if err != nil {
-			return err
+		parent, e := os.Stat(filepath.Dir(*out))
+		if e != nil {
+			return e
 		}
-		if err := signing.Distinct(private, config.Certificates[0].Leaf); err != nil {
-			return err
+		if !parent.IsDir() || parent.Mode().Perm()&0077 != 0 {
+			return errors.New("backup directory must have mode 0700")
 		}
-		if issuer != nil {
-			if err := issuer.CheckTaskKey(private); err != nil {
-				return err
-			}
+		if e = store.Backup(context.Background(), *out); e != nil {
+			return e
 		}
-		setupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		service, err := server.NewTaskService(setupCtx, store, private)
-		cancel()
-		if err != nil {
-			return err
-		}
-		sinks = []server.TelemetryStore{service}
+		return os.Chmod(*out, 0600)
 	}
+	if os.Args[1] != "run" {
+		return errors.New("unknown server command")
+	}
+	admins, e := auth.Load(c.Admins)
+	if e != nil {
+		return e
+	}
+	issuer, e := enrollment.Load(c.CA, c.IssuerKey)
+	if e != nil {
+		return e
+	}
+	tlsConfig, e := transport.Server(c.Certificate, c.PrivateKey, c.CA)
+	if e != nil {
+		return e
+	}
+	if *check {
+		fmt.Println("server configuration valid")
+		return nil
+	}
+	handler := (&api.Server{Store: store, Enrollment: enrollment.Service{Store: store, Issuer: issuer}, Admins: admins}).Handler()
+	server := &http.Server{Addr: c.Listen, Handler: handler, TLSConfig: tlsConfig, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 40 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	results := make(chan error, 3)
-	count := 1
-	log.Printf("Starting mTLS probe endpoint on %s", *addr)
-	var renewal http.Handler
-	if *renewalEnabled {
-		renewal = enrollment.RenewalHandler(store, issuer)
-	}
-	go func() { results <- server.RunWithRenewal(ctx, *addr, config, registry, renewal, sinks...) }()
-	if adminTLS != nil {
-		count++
-		log.Printf("Starting HTTPS administrator endpoint on %s", *adminAddr)
-		go func() { results <- server.RunAdministration(ctx, *adminAddr, adminTLS, management.Handler(store)) }()
-	}
-	if enrollmentTLS != nil {
-		count++
-		log.Printf("Starting development enrollment endpoint on %s", *enrollAddr)
-		go func() {
-			results <- server.RunEnrollment(ctx, *enrollAddr, enrollmentTLS, enrollment.Handler(store, issuer))
-		}()
-	}
-	var first error
-	for i := 0; i < count; i++ {
-		err := <-results
-		if err != nil && first == nil {
-			first = fmt.Errorf("server listener: %w", err)
+	done := make(chan error, 1)
+	go func() { done <- server.ListenAndServeTLS("", "") }()
+	slog.Info("server listening", "address", c.Listen)
+	select {
+	case e = <-done:
+		if errors.Is(e, http.ErrServerClosed) {
+			return nil
 		}
-		cancel()
+		return e
+	case <-ctx.Done():
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if e = server.Shutdown(shutdown); e != nil {
+			server.Close()
+			return e
+		}
+		e = <-done
+		if errors.Is(e, http.ErrServerClosed) {
+			return nil
+		}
+		return e
 	}
-	return first
+}
+func writeJSON(path string, v any) error {
+	b, e := json.MarshalIndent(v, "", "  ")
+	if e != nil {
+		return e
+	}
+	return os.WriteFile(path, append(b, '\n'), 0600)
 }

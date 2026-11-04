@@ -30,7 +30,7 @@ func Read(r io.Reader, limit int) ([]byte, error) {
 
 // Decode requires an object with exactly the listed fields, including spelling.
 // Nested objects are checked for duplicate keys; callers must additionally
-// validate their nested schemas. Null is not a value in Phase 2 messages.
+// validate their nested schemas. Null is not a value in protocol messages.
 func Decode(data []byte, dst any, limit int, fields ...string) error {
 	if limit <= 0 || len(data) > limit {
 		return errors.New("JSON exceeds size limit")

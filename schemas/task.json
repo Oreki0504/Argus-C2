@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Argus diagnostics task",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "node_id",
+    "task_type",
+    "parameters",
+    "status",
+    "created_at",
+    "dispatch_expires_at",
+    "execution_timeout_ms",
+    "result_due_at"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "node_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "task_type": {
+      "enum": [
+        "system.info",
+        "system.metrics",
+        "service.status",
+        "ssh.audit",
+        "process.list",
+        "network.listeners"
+      ]
+    },
+    "parameters": {
+      "type": "object"
+    },
+    "status": {
+      "enum": [
+        "PENDING",
+        "ACCEPTED",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+        "UNKNOWN"
+      ]
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "dispatch_expires_at": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "execution_timeout_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 30000
+    },
+    "result_due_at": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "task_type": {
+            "enum": [
+              "system.info",
+              "system.metrics",
+              "process.list",
+              "network.listeners"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "type": "object",
+            "maxProperties": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "task_type": {
+            "enum": [
+              "service.status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "service_id"
+            ],
+            "properties": {
+              "service_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "task_type": {
+            "enum": [
+              "ssh.audit"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "profile_id"
+            ],
+            "properties": {
+              "profile_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

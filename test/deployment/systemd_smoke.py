@@ -1,431 +1,159 @@
-"""Install and exercise services on a disposable GitHub-hosted Linux VM only.
-
-Never run on a workstation or deployed host. Root setup belongs to this fixture;
-Runtime and state commands execute as dedicated non-root service accounts;
-offline artifact preparation belongs to trusted fixture setup.
-"""
+#!/usr/bin/env python3
+"""Install real units only on a disposable GitHub Actions Linux VM."""
+import argparse
 import json
 import os
 from pathlib import Path
 import pwd
-import secrets
 import shutil
-import socket
-import sqlite3
 import subprocess
 import sys
 import time
-import traceback
-
-if sys.argv[1:] != ["--disposable-ci"] or os.environ.get("GITHUB_ACTIONS") != "true" or os.geteuid() != 0:
-    sys.exit("Requires an explicitly selected disposable GitHub Actions VM and root fixture setup")
-repo = Path(__file__).resolve().parents[2]
-build = repo / ".cache/deployment-bin"
-lib = Path("/usr/local/libexec/argus-c2")
-etc = Path("/etc/argus-c2")
-work = Path("/var/lib/argus-c2-ci")
-states = {role: Path("/var/lib/argus-c2-" + role) for role in ("server", "probe")}
-units = ["argus-c2-server.service", "argus-c2-probe.service"]
-for path in (lib, etc, work, *states.values(), Path("/var/lib/argus-c2-ci-writable"), Path("/home/argus-c2-ci-readable")):
-    assert not path.exists() and not path.is_symlink(), "fixture refuses existing path: " + str(path)
-for unit in units:
-    assert not Path("/etc/systemd/system", unit).exists()
-for role in states:
-    try:
-        pwd.getpwnam("argus-" + role)
-    except KeyError:
-        pass
-    else:
-        raise AssertionError("fixture refuses existing service account")
+import tempfile
 
 
-def run(*args, user=None, data=None, ok=True):
-    argv = [str(arg) for arg in args]
-    if user:
-        argv = ["runuser", "-u", "argus-" + user, "--"] + argv
-    result = subprocess.run(argv, input=data, text=True, capture_output=True, timeout=35)
-    if ok and result.returncode:
-        # No argv or input: tokens and passwords must not enter CI diagnostics.
-        raise AssertionError("fixture command failed: " + result.stderr[:2000])
-    return result
+def run(*args, parse=False):
+    result = subprocess.run(list(map(str, args)), check=True, text=True,
+                            capture_output=True, timeout=60)
+    return json.loads(result.stdout) if parse else result.stdout
 
 
-def put(source, destination, mode=0o644):
-    destination = Path(destination)
-    assert not destination.is_symlink()
-    shutil.copyfile(source, destination)
-    destination.chmod(mode)
-
-
-def local(action, *args, data=None):
-    return run(lib / "localctl", "-state", states["server"], "-action", action, *args, user="server", data=data)
-
-
-def cli(action, *args, data=None, ok=True):
-    return run(lib / "cli", "-server", "https://127.0.0.1:8445", "-ca", etc / "server/ca.pem",
-               "-session", states["server"] / "ci-session", "-action", action, *args, user="server", data=data, ok=ok)
-
-
-def eventually(fn, message, seconds=45):
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        result = fn()
-        if result:
-            return result
-        time.sleep(2)
-    raise AssertionError(message)
-
-
-def state_value(query, args=(), database=None):
-    database = database or states["server"] / "argus.db"
-    db = sqlite3.connect("file:" + str(database) + "?mode=ro", uri=True)
-    try:
-        return db.execute(query, args).fetchone()
-    finally:
-        db.close()
-
-
-def renewal_command(action, stage=None, cert=None, key_source=None, ok=True):
-    # Root supplies the existing private key through systemd credentials; the
-    # maintenance executable itself runs as the unprivileged probe account.
-    options = ["systemd-run", "--quiet", "--wait", "--pipe", "--collect", "--expand-environment=yes",
-               "--unit=argus-c2-renew-ci-" + secrets.token_hex(4),
-               "--property=User=argus-probe", "--property=Group=argus-probe",
-               "--property=UMask=0077", "--property=NoNewPrivileges=yes",
-               "--property=CapabilityBoundingSet=", "--property=ProtectSystem=strict",
-               "--property=ProtectHome=yes", "--property=PrivateTmp=yes",
-               "--property=RestrictSUIDSGID=yes",
-               "--property=ReadWritePaths=" + str(states["probe"]),
-               "--property=LoadCredential=probe-key:" + str(key_source or etc / "probe/secrets/probe-key.pem")]
-    args = [lib / "renew", "-action", action, "-server", "https://127.0.0.1:8443",
-            "-ca", etc / "probe/ca.pem", "-identity", etc / "probe/identity.json",
-            "-cert", cert or etc / "probe/probe-cert.pem", "-key", "${CREDENTIALS_DIRECTORY}/probe-key"]
-    if stage:
-        args += ["-out", stage]
-    return run(*options, *args, ok=ok)
-
-
-def enroll():
-    token = local("token", "-ttl", "120s").stdout
-    out = states["probe"] / ("enrollment-" + secrets.token_hex(4))
-    run(lib / "enroll", "-server", "https://127.0.0.1:8444", "-ca", etc / "probe/ca.pem", "-out", out,
-        user="probe", data=token)
-    for name in ("identity.json", "probe-cert.pem"):
-        put(out / name, etc / "probe" / name)
-    put(out / "probe-key.pem", etc / "probe/secrets/probe-key.pem", 0o600)
-    # Remove only the disposable duplicate key after installing it. Public
-    # enrollment evidence remains available in the fixture for diagnostics.
-    (out / "probe-key.pem").unlink()
-    run(lib / "probectl", "-action", "init", "-state", states["probe"] / "replay",
-        "-identity", etc / "probe/identity.json", "-task-public-key", etc / "probe/task-public.pem", user="probe")
-    return json.loads((etc / "probe/identity.json").read_text())["agent_id"]
-
-
-def ready(node):
-    return state_value("SELECT task_state FROM nodes WHERE agent_id=?", (node,)) == ("ready",)
-
-
-def submit(node, kind, *args):
-    task = json.loads(cli("submit", "-agent-id", node, "-type", kind, "-ttl-seconds", "120", *args).stdout)
-    request = task["request_id"]
-    def completed():
-        row = state_value("SELECT state,result FROM tasks WHERE request_id=?", (request,))
-        if row and row[0] not in ("queued", "dispatched"):
-            assert row[0] == "succeeded", row[0]
-            return json.loads(row[1])
-    return eventually(completed, "task did not complete under systemd restrictions")
-
-
-def issue_pair(profile, label):
-    request, issued = work / (label + "-request"), work / (label + "-issued")
-    run(lib / "pkictl", "-action", "request", "-out", request)
-    run(lib / "pkictl", "-action", "issue", "-profile", profile, "-out", issued,
-        "-root-cert", work / "offline-root/root-cert.pem", "-root-key", work / "offline-root/root-key.pem",
-        "-csr", request / "request.pem")
-    assert {p.name for p in issued.iterdir()} == {"certificate.pem", "receipt.json"}
-    return issued / "certificate.pem", request / "key.pem"
-
-
-def certificate_health(profile, role, cert, *args, warning=False):
-    result = run(lib / "pkictl", "-action", "inspect", "-profile", profile, "-cert", cert,
-                 "-ca", etc / role / "ca.pem", *args, user=role, ok=not warning)
-    assert result.returncode == (2 if warning else 0)
-    report = json.loads(result.stdout)
-    assert report["state"] == ("warning" if warning else "ok"), report
-    return report
-
-
-try:
-    work.mkdir(mode=0o700)
-    lib.mkdir(parents=True, mode=0o755)
-    etc.mkdir(mode=0o755)
-    for name in ("server", "agent", "localctl", "probectl", "enroll", "renew", "signctl", "pkictl", "cli"):
-        put(build / name, lib / name, 0o755)
-    put(repo / "test/deployment/check_service.py", lib / "check-service.py")
-    # A single disposable VM emulates separate offline and online preparation.
-    # Root private material never enters service configuration/credentials.
-    run(lib / "pkictl", "-action", "root", "-out", work / "offline-root")
-    (work / "pki").mkdir(mode=0o700)
-    put(work / "offline-root/root-cert.pem", work / "pki/ca.pem")
-    for profile in ("server", "issuer"):
-        cert, key = issue_pair(profile, profile)
-        put(cert, work / "pki" / (profile + "-cert.pem"))
-        put(key, work / "pki" / (profile + "-key.pem"), 0o600)
-    run(build / "devsign", "-out", work / "signing")
-    for role, state in states.items():
-        run("systemd-sysusers", repo / ("deploy/linux/argus-c2-" + role + ".sysusers.conf"))
-        account = pwd.getpwnam("argus-" + role)
-        assert account.pw_shell == "/usr/sbin/nologin"
-        state.mkdir(mode=0o700)
-        os.chown(state, account.pw_uid, account.pw_gid)
-        (state / "ci-private").write_text("private fixture")
-        (state / "ci-private").chmod(0o600)
-        os.chown(state / "ci-private", account.pw_uid, account.pw_gid)
-        config = etc / role
-        config.mkdir(mode=0o755)
-        (config / "secrets").mkdir(mode=0o700)
-        put(work / "pki/ca.pem", config / "ca.pem")
-        unit = "argus-c2-" + role + ".service"
-        put(repo / "deploy/linux" / unit, Path("/etc/systemd/system") / unit)
-        dropin = Path("/etc/systemd/system") / (unit + ".d")
-        dropin.mkdir(mode=0o755)
-        (dropin / "ci-check.conf").write_text("[Service]\nExecStartPre=/usr/bin/python3 /usr/local/libexec/argus-c2/check-service.py " + role + "\n")
-    for name in ("server-cert.pem", "issuer-cert.pem"):
-        put(work / "pki" / name, etc / "server" / name)
-    for name in ("server-key.pem", "issuer-key.pem"):
-        put(work / "pki" / name, etc / "server/secrets" / name, 0o600)
-    put(work / "signing/task-private.pem", etc / "server/secrets/task-private.pem", 0o600)
-    put(work / "signing/task-public.pem", etc / "probe/task-public.pem")
-    put(repo / "deploy/linux/enrollment.conf.example", "/etc/systemd/system/argus-c2-server.service.d/enrollment.conf")
-    enrollment_dropin = Path("/etc/systemd/system/argus-c2-server.service.d/enrollment.conf")
-    enrollment_dropin.write_text(enrollment_dropin.read_text().replace(" -enroll-listen ", " -enable-renewal -certificate-lifetime 720h -enroll-listen "))
-    policy = json.loads((repo / "examples/task-policy-v2.json").read_text())
-    policy["telemetry"]["sample_milliseconds"] = 100
-    policy["allow_service_status"] = True
-    policy["services"] = [{"id": "journal", "unit": "systemd-journald.service"}]
-    (etc / "fixtures").mkdir(mode=0o755)
-    (etc / "fixtures/sshd_config").write_text("PermitRootLogin no\nPasswordAuthentication no\n")
-    policy["allow_ssh_audit"] = True
-    policy["ssh_profiles"] = [{"id": "fixture", "files": [{
-        "id": "config", "kind": "sshd_config", "base_dir": "/etc/argus-c2/fixtures",
-        "relative_path": "sshd_config", "owner_uid": 0, "owner_gid": 0,
-        "max_bytes": 1024, "baseline_sha256": ""
-    }]}]
-    (etc / "probe/policy.json").write_text(json.dumps(policy))
-    # Accessible fixtures distinguish systemd isolation from Unix DAC.
-    for path in (Path("/var/lib/argus-c2-ci-writable"), Path("/home/argus-c2-ci-readable")):
-        path.mkdir(mode=0o777)
-        path.chmod(0o777)
-    Path("/home/argus-c2-ci-readable/check").write_text("readable outside ProtectHome")
-    Path("/home/argus-c2-ci-readable/check").chmod(0o644)
-    Path("/tmp/argus-c2-ci-host-marker").write_text("host tmp")
-    password = secrets.token_urlsafe(24)
-    local("user-add", "-username", "operator", "-role", "Admin", data=password + "\n")
-    run("systemd-analyze", "verify", *["/etc/systemd/system/" + unit for unit in units])
-    run("systemctl", "daemon-reload")
-    run("systemctl", "start", units[0])
-    # Type=exec confirms exec, not readiness. Wait for the socket before login.
-    def listening():
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--disposable-ci", action="store_true", required=True)
+    parser.add_argument("--bin", type=Path, required=True)
+    args = parser.parse_args()
+    if not args.disposable_ci or os.geteuid() != 0 or os.environ.get("GITHUB_ACTIONS") != "true":
+        raise SystemExit("This fixture requires root on an explicitly disposable GitHub Actions VM")
+    if Path("/etc/argus-c2").exists():
+        raise SystemExit("Refusing to touch an existing Argus installation")
+    binaries = args.bin.resolve()
+    # The state test is built by CI and runs as the checkout owner, not root.
+    test_binary = binaries / "agent-state.test"
+    owner = pwd.getpwuid(test_binary.stat().st_uid)
+    if owner.pw_uid == 0:
+        raise SystemExit("Filesystem pressure test must run as a non-root checkout owner")
+    with tempfile.TemporaryDirectory(prefix="argus-full-") as temporary:
+        mount = Path(temporary)
+        run("mount", "-t", "tmpfs", "-o", "size=16m,mode=0700", "argus-full-test", mount)
         try:
-            with socket.create_connection(("127.0.0.1", 8445), timeout=1):
-                return True
-        except OSError:
-            return False
-    eventually(listening, "server did not listen")
-    cli("login", "-username", "operator", data=password + "\n")
-    node = enroll()
-    certificate_health("server", "server", etc / "server/server-cert.pem", "-server-name", "127.0.0.1")
-    certificate_health("issuer", "server", etc / "server/issuer-cert.pem")
-    client_health = certificate_health("client", "probe", etc / "probe/probe-cert.pem", "-identity", etc / "probe/identity.json")
-    assert any(29 * 86400 < c["remaining_seconds"] <= 30 * 86400 for c in client_health["certificates"])
-    certificate_health("client", "probe", etc / "probe/probe-cert.pem", "-identity", etc / "probe/identity.json",
-                       "-warn-before", "2160h", warning=True)
-    for role in states:
-        assert run("/usr/bin/test", "-r", work / "offline-root/root-key.pem", user=role, ok=False).returncode == 1
-    print("PASS: operational PKI, 30-day client issuance, expiry health, root key excluded from services", flush=True)
-    run("systemctl", "start", units[1])
-    eventually(lambda: ready(node), "probe did not advertise readiness")
-    assert submit(node, "system.info")["data"]["available"], "system information unavailable"
-    assert submit(node, "system.metrics")["data"]["memory"]["available"], "memory metrics unavailable"
-    service = submit(node, "service.status", "-service-id", "journal")["data"]
-    assert service["load_state"] == "loaded", service
-    observation = submit(node, "ssh.audit", "-profile-id", "fixture")["data"]["files"][0]
-    assert observation["status"] == "ok", observation
-    for role in states:
-        restrict_suid = run("systemctl", "show", "--property=RestrictSUIDSGID", "--value", "argus-c2-" + role).stdout.strip()
-        assert restrict_suid == ("yes" if role == "server" else "no"), (role, "RestrictSUIDSGID", restrict_suid)
-        group = run("systemctl", "show", "--property=ControlGroup", "--value", "argus-c2-" + role).stdout.strip()
-        cg = Path("/sys/fs/cgroup") / group.lstrip("/")
-        assert (cg / "memory.max").read_text().strip() == str((512 if role == "server" else 192) * 1024 * 1024), (role, "memory.max", (cg / "memory.max").read_text())
-        assert (cg / "pids.max").read_text().strip() == "128", (role, "pids.max", (cg / "pids.max").read_text())
-        assert (cg / "memory.swap.max").read_text().strip() == "0", (role, "memory.swap.max", (cg / "memory.swap.max").read_text())
-        quota, period = map(int, (cg / "cpu.max").read_text().split())
-        assert quota / period == (1 if role == "server" else 0.5), (role, "cpu.max", quota, period)
-    print("PASS: effective isolation, credentials, cgroups, HTTPS, mTLS, metrics, systemd query", flush=True)
-    # Renew without changing node identity, root-owned permissions, or replay.
-    old_identity = (etc / "probe/identity.json").read_bytes()
-    old_hash = state_value("SELECT certificate_sha256 FROM node_credentials WHERE agent_id=? AND generation=1", (node,))[0]
-    stage = states["probe"] / "renewal-ci"
-    renewal_command("prepare", stage)
-    renewal_command("request", stage)
-    renewal_command("request", stage)  # Retry uses the same committed certificate.
-    assert state_value("SELECT COUNT(*) FROM node_credentials WHERE agent_id=?", (node,)) == (2,)
-    assert (stage / "identity.json").read_bytes() == old_identity
-    # New cert with the old key must fail before connecting.
-    assert renewal_command("verify", cert=stage / "probe-cert.pem", ok=False).returncode != 0
-    old_cert = states["probe"] / "old-probe-cert.pem"
-    put(etc / "probe/probe-cert.pem", old_cert)
-    old_key = work / "old-probe-key.pem"
-    put(etc / "probe/secrets/probe-key.pem", old_key, 0o600)
-    run("systemctl", "stop", units[1])
-    replay_db = states["probe"] / "replay/probe.db"
-    audit_seq, audit_hash = state_value("SELECT sequence,hash FROM audit_head", database=replay_db)
-    put(stage / "probe-cert.pem", etc / "probe/probe-cert.pem")
-    put(stage / "probe-key.pem", etc / "probe/secrets/probe-key.pem", 0o600)
-    run("systemctl", "start", units[1])
-    submit(node, "system.info")
-    assert state_value("SELECT hash FROM audit_events WHERE sequence=?", (audit_seq,), replay_db) == (audit_hash,)
-    assert (etc / "probe/identity.json").read_bytes() == old_identity
-    local("certificate-revoke", "-agent-id", node, "-certificate-sha256", old_hash)
-    assert renewal_command("verify", cert=old_cert, key_source=old_key, ok=False).returncode != 0
-    renewal_command("verify")
-    submit(node, "system.metrics")
-    # This fixture deliberately performs more maintenance restarts than a normal
-    # installation. Reset the counter while the unit is known to be loaded and
-    # running, before the separate missing-state/recovery exercise below.
-    run("systemctl", "reset-failed", units[1])
-    print("PASS: credential renewal, local activation, old credential retirement, preserved replay audit", flush=True)
-    # Stage public signer trust locally, pause dispatch, and migrate with both
-    # services stopped. No service gains write access to root-owned config.
-    run(lib / "signctl", "-action", "generate", "-out", work / "signing-next")
-    put(work / "signing-next/task-public.pem", etc / "server/next-task-public.pem")
-    overlap = work / "signer-overlap.json"
-    run(lib / "signctl", "-action", "stage", "-current", etc / "probe/task-public.pem",
-        "-next-public-key", etc / "server/next-task-public.pem", "-out", overlap,
-        "-retire-at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3600)),
-        "-valid-until", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 86400)))
-    trust = json.loads(overlap.read_text())
-    legacy_key = next(key["key_id"] for key in trust["keys"] if key["allow_legacy"])
-    new_key = next(key["key_id"] for key in trust["keys"] if not key["allow_legacy"])
-    put(overlap, etc / "probe/next-task-trust.json")
-    local("dispatch-pause")
-    assert cli("submit", "-agent-id", node, "-type", "system.info", ok=False).returncode != 0
-    run("systemctl", "stop", *units)
-    for role in states:
-        shutil.copytree(states[role], work / (role + "-before-signer-migration"))
-    audit_seq, audit_hash = state_value("SELECT sequence,hash FROM audit_head", database=replay_db)
-    run(lib / "probectl", "-action", "trust-migrate", "-state", states["probe"] / "replay",
-        "-identity", etc / "probe/identity.json", "-task-public-key", etc / "probe/task-public.pem",
-        "-next-trust-set", etc / "probe/next-task-trust.json", user="probe")
-    local("signer-trust", "-current-task-public-key", etc / "probe/task-public.pem",
-          "-task-trust-set", etc / "probe/next-task-trust.json")
-    local("signer-switch", "-next-task-public-key", etc / "server/next-task-public.pem")
-    put(work / "signing-next/task-private.pem", etc / "server/secrets/task-private.pem", 0o600)
-    put(overlap, etc / "probe/task-public.pem")  # Same reviewed path now contains versioned JSON.
-    put(overlap, etc / "server/task-trust.json")
-    run("systemctl", "start", units[0])
-    eventually(listening, "server did not restart with new signer")
-    run("systemctl", "start", units[1])
-    local("dispatch-resume")
-    rotated_result = submit(node, "system.info")
-    wire = json.loads(state_value("SELECT envelope FROM tasks WHERE request_id=?", (rotated_result["request_id"],))[0])
-    assert wire["version"] == 2 and wire["trust_set_id"] == trust["trust_set_id"] and wire["key_id"] == new_key
-    assert state_value("SELECT hash FROM audit_events WHERE sequence=?", (audit_seq,), replay_db) == (audit_hash,)
-    assert (etc / "probe/identity.json").read_bytes() == old_identity
-    # All previous assignments completed. Retire the old key through a second
-    # explicit local generation, without clearing replay or pending results.
-    retired = work / "signer-retired.json"
-    run(lib / "signctl", "-action", "retire", "-current", overlap, "-key-id", legacy_key, "-out", retired)
-    put(retired, etc / "probe/next-task-trust.json")
-    local("dispatch-pause")
-    run("systemctl", "stop", units[1])
-    run(lib / "probectl", "-action", "trust-migrate", "-state", states["probe"] / "replay",
-        "-identity", etc / "probe/identity.json", "-task-public-key", etc / "probe/task-public.pem",
-        "-next-trust-set", etc / "probe/next-task-trust.json", user="probe")
-    local("signer-trust", "-current-task-public-key", etc / "server/task-trust.json",
-          "-task-trust-set", etc / "probe/next-task-trust.json")
-    put(retired, etc / "probe/task-public.pem")
-    put(retired, etc / "server/task-trust.json")
-    run("systemctl", "start", units[1])
-    local("dispatch-resume")
-    assert submit(node, "ssh.audit", "-profile-id", "fixture")["data"]["files"][0]["status"] == "ok"
-    signer_status = json.loads(local("signers").stdout)
-    assert signer_status["selected_key_id"] == new_key and not signer_status["dispatch_paused"]
-    assert signer_status["trust_set"]["retired_key_ids"] == [legacy_key]
-    # Additional maintenance cycles are specific to this disposable exercise.
-    run("systemctl", "reset-failed", *units)
-    print("PASS: local signer migration, v2 dispatch, retirement, unchanged replay and service hardening", flush=True)
-    signer_health = run(lib / "signctl", "-action", "inspect", "-current", etc / "probe/task-public.pem",
-                        "-selected-key-id", new_key, "-warn-before", "0s", user="probe")
-    assert json.loads(signer_health.stdout)["state"] == "ok"
-    # Local replacement of both online key pairs under the same offline root.
-    # Existing client chains remain trusted; new issuance uses the new issuer.
-    replacement_pairs = {profile: issue_pair(profile, profile + "-next") for profile in ("server", "issuer")}
-    run("systemctl", "stop", units[0])
-    for profile, (cert, key) in replacement_pairs.items():
-        put(cert, etc / "server" / (profile + "-cert.pem"))
-        put(key, etc / "server/secrets" / (profile + "-key.pem"), 0o600)
-    run("systemctl", "start", units[0])
-    eventually(listening, "server did not restart with replaced TLS/issuer pairs")
-    cli("me")
-    submit(node, "system.info")
-    assert (etc / "probe/identity.json").read_bytes() == old_identity
-    assert state_value("SELECT hash FROM audit_events WHERE sequence=?", (audit_seq,), replay_db) == (audit_hash,)
-    certificate_health("server", "server", etc / "server/server-cert.pem", "-server-name", "127.0.0.1")
-    certificate_health("issuer", "server", etc / "server/issuer-cert.pem")
-    run("systemctl", "reset-failed", *units)
-    print("PASS: local server/issuer replacement, preserved node/replay, unchanged service isolation", flush=True)
-    # Cold backup: stop every database writer; copy the entire directory.
-    run("systemctl", "stop", *units)
-    snapshot = work / "server-backup"
-    shutil.copytree(states["server"], snapshot)
-    local("sessions-revoke-all")
-    # Restore under maintenance; preserve the replaced state as evidence.
-    states["server"].rename(work / "server-before-restore")
-    shutil.copytree(snapshot, states["server"])
+            os.chown(mount, owner.pw_uid, owner.pw_gid)
+            print(run("runuser", "-u", owner.pw_name, "--", "env",
+                      f"ARGUS_ENOSPC_DIR={mount}", test_binary,
+                      "-test.run=^TestFilesystemFullRecovery$", "-test.v"))
+        finally:
+            run("umount", mount)
+    root = Path("/etc/argus-c2")
+    server = root / "server"
+    active = Path("/var/lib/argus-c2-server")
+    state = Path("/var/lib/argus-c2-agent")
+    run("sh", "deploy/linux/install.sh", binaries)
+    run(binaries / "server", "init", "-dir", server, "-hosts", "localhost,127.0.0.1")
+    shutil.copy2(server / "state/argus.db", active / "argus.db")
     account = pwd.getpwnam("argus-server")
-    for path in (states["server"], *states["server"].rglob("*")):
-        os.chown(path, account.pw_uid, account.pw_gid)
-    local("restore-quarantine")
-    run("systemctl", "start", units[0])
-    eventually(listening, "restored server did not listen")
-    assert cli("me", ok=False).returncode != 0, "restored session survived local revocation"
-    cli("forget")
-    cli("login", "-username", "operator", data=password + "\n")
-    assert state_value("SELECT enabled FROM nodes WHERE agent_id=?", (node,)) == (0,)
-    # Missing replay state fails startup; no empty replacement may be created.
-    run("systemctl", "stop", units[1])
-    (states["probe"] / "replay").rename(work / "probe-replay-evidence")
-    assert run("systemctl", "start", units[1], ok=False).returncode != 0
-    run("systemctl", "stop", units[1])
-    assert not (states["probe"] / "replay").exists()
-    replacement = enroll()
-    assert replacement != node
-    # stop already cancelled the failed unit's pending restart. systemd may
-    # garbage-collect it before reenrollment completes; start loads it again.
-    run("systemctl", "start", units[1])
-    eventually(lambda: ready(replacement), "fresh identity did not become ready")
-    submit(replacement, "system.info")
-    assert state_value("SELECT enabled FROM nodes WHERE agent_id=?", (node,)) == (0,)
-    # Enrollment is temporary; close it without weakening management or mTLS.
-    Path("/etc/systemd/system/argus-c2-server.service.d/enrollment.conf").unlink()
-    run("systemctl", "daemon-reload")
-    run("systemctl", "restart", units[0])
-    eventually(listening, "normal server did not restart")
-    cli("me")
-    with socket.socket() as connection:
-        assert connection.connect_ex(("127.0.0.1", 8444)) != 0
-    print("PASS: cold restore, session revocation, lost replay state, disable and fresh enrollment", flush=True)
-except Exception:
-    message = traceback.format_exc().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-    print("::error title=Deployment exercise::" + message, flush=True)
-    for unit in units:
-        log = run("journalctl", "-u", unit, "--no-pager", "-n", "25", ok=False).stdout
-        log = log.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-        print("::error title=" + unit + "::" + log, flush=True)
-    raise
-finally:
-    for unit in units:
-        result = run("journalctl", "-u", unit, "--no-pager", "-n", "60", ok=False)
-        print(result.stdout)
-    run("systemctl", "stop", *units, ok=False)
+    os.chown(active / "argus.db", account.pw_uid, account.pw_gid)
+    server.chmod(0o755)
+    for name in ["ca.pem", "server.pem"]:
+        (server / name).chmod(0o644)
+    config = {"listen": "127.0.0.1:8443", "state_dir": str(active),
+              "certificate": str(server / "server.pem"), "ca": str(server / "ca.pem"),
+              "private_key": "/run/credentials/argus-c2-server.service/server-key",
+              "issuer_key": "/run/credentials/argus-c2-server.service/issuer-key",
+              "admins": "/run/credentials/argus-c2-server.service/admins"}
+    (root / "server.json").write_text(json.dumps(config))
+    shutil.copy2(server / "ca.pem", root / "ca.pem")
+    policy = json.loads(Path("examples/policy.json").read_text())
+    policy["allowed"] += ["service.status", "ssh.audit", "network.listeners", "process.list"]
+    policy["poll_seconds"] = 5
+    policy["telemetry"]["sample_milliseconds"] = 100
+    policy["services"] = [{"id": "journal", "unit": "systemd-journald.service"}]
+    ssh_dir = root / "test-ssh"
+    ssh_dir.mkdir(mode=0o755)
+    (ssh_dir / "sshd_config").write_text("PermitRootLogin no\nPasswordAuthentication no\n")
+    policy["ssh_profiles"] = [{"id": "host", "files": [{"id": "config", "kind": "sshd_config",
+        "base_dir": str(ssh_dir), "relative_path": "sshd_config", "owner_uid": 0, "owner_gid": 0,
+        "max_bytes": 4096, "baseline_sha256": ""}]}]
+    (root / "policy.json").write_text(json.dumps(policy))
+    (root / "agent.json").write_text(json.dumps({"server": "https://localhost:8443",
+        "ca": str(root / "ca.pem"), "state_dir": str(state), "policy": str(root / "policy.json")}))
+    admin = [binaries / "argus", "-server", "https://localhost:8443", "-ca", server / "ca.pem",
+             "-token-file", server / "admin.token"]
+    def cli(*argv):
+        return run(*admin, *argv, parse=True)
+    units = ["argus-c2-server", "argus-c2-agent"]
+    try:
+        run("systemctl", "start", units[0])
+        for _ in range(100):
+            try:
+                cli("health")
+                break
+            except subprocess.CalledProcessError:
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("server health timeout")
+        token = state / "enroll.token"
+        run(*admin, "enrollment-token", "-out", token)
+        user = pwd.getpwnam("argus-agent")
+        os.chown(token, user.pw_uid, user.pw_gid)
+        run("runuser", "-u", "argus-agent", "--", "/usr/local/libexec/argus-c2/agent", "enroll", "-config",
+            root / "agent.json", "-token-file", token)
+        token.unlink()
+        run("systemctl", "start", units[1])
+        node = cli("nodes")[0]
+        for kind in policy["allowed"]:
+            options = ["create", "-node", node["id"], "-type", kind]
+            if kind == "service.status":
+                options += ["-resource", "journal"]
+            if kind == "ssh.audit":
+                options += ["-resource", "host"]
+            job = cli(*options)
+            result = cli("wait", "-task", job["id"], "-timeout", "40s")
+            assert result["task"]["status"] == "SUCCEEDED", result
+            if kind == "service.status":
+                assert result["result"]["payload"]["available"], result
+            if kind == "ssh.audit":
+                assert result["result"]["payload"]["coverage"] == "complete", result
+        for unit in units:
+            props = dict(line.split("=", 1) for line in run("systemctl", "show", unit,
+                         "-p", "User", "-p", "NoNewPrivileges", "-p", "ProtectSystem",
+                         "-p", "MemoryMax", "-p", "MainPID").splitlines())
+            assert props["User"] in ["argus-server", "argus-agent"]
+            assert props["NoNewPrivileges"] == "yes" and props["ProtectSystem"] == "strict"
+            assert int(props["MemoryMax"]) <= 256 * 1024 * 1024 and int(props["MainPID"]) > 0
+        run("systemctl", "restart", *units)
+        for _ in range(100):
+            try:
+                cli("health")
+                break
+            except subprocess.CalledProcessError:
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("server did not become ready after restart")
+        assert cli("result", "-task", job["id"])["task"]["status"] == "SUCCEEDED"
+        print("Native systemd: six collectors, dedicated users, isolation, limits and restart passed")
+    except Exception:
+        for unit in units:
+            print(run("journalctl", "-u", unit, "--no-pager", "-n", "80"))
+        raise
+    finally:
+        subprocess.run(["systemctl", "stop", *units], check=False, timeout=60)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        # Captured child output is otherwise omitted from Python's traceback.
+        # These commands only operate on this disposable test installation.
+        details = [str(error)]
+        for output in (error.stdout, error.stderr):
+            if output:
+                if isinstance(output, bytes):
+                    output = output.decode("utf-8", errors="replace")
+                print(output, file=sys.stderr)
+                details.append(output)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            message = "\n".join(details)[-4000:]
+            message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print(f"::error title=Deployment subprocess failed::{message}", flush=True)
+        raise

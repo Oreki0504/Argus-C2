@@ -8,12 +8,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/strictjson"
 )
 
 const MaxHeartbeatBytes = 16 * 1024
-const TaskHeartbeatVersion = 2
 
 // Unavailable measurements carry zero values and Available=false, never a
 // fabricated successful measurement. Network counters are cumulative bytes.
@@ -53,38 +51,12 @@ type SystemMeasurements struct {
 	Disks    []DiskStats    `json:"disks"`
 	Networks []NetworkStats `json:"networks"`
 }
-type Heartbeat struct {
-	Version         int                `json:"version"`
-	AgentID         string             `json:"agent_id"`
-	EnrollmentEpoch string             `json:"enrollment_epoch"`
-	SentAt          int64              `json:"sent_at"`
-	Info            SystemInformation  `json:"system_info"`
-	Metrics         SystemMeasurements `json:"system_metrics"`
-	PolicyDigest    string             `json:"policy_digest,omitempty"`
-	TaskState       string             `json:"task_state,omitempty"`
-}
 
 func CleanText(s string, max int) bool {
 	if len(s) > max || !utf8.ValidString(s) {
 		return false
 	}
 	return strings.IndexFunc(s, unicode.IsControl) == -1
-}
-func (h Heartbeat) Validate() error {
-	bad := errors.New("invalid heartbeat")
-	if (h.Version != Version && h.Version != TaskHeartbeatVersion) || h.SentAt <= 0 || (identity.Node{AgentID: h.AgentID, EnrollmentEpoch: h.EnrollmentEpoch}).Validate() != nil {
-		return bad
-	}
-	if h.Version == Version && (h.PolicyDigest != "" || h.TaskState != "") {
-		return bad
-	}
-	if h.Version == TaskHeartbeatVersion && (!identity.Hex(h.PolicyDigest, 64) || (h.TaskState != "ready" && h.TaskState != "paused" && h.TaskState != "blocked")) {
-		return bad
-	}
-	if err := h.Info.Validate(h.SentAt); err != nil {
-		return err
-	}
-	return h.Metrics.Validate()
 }
 func (i SystemInformation) Validate(now int64) error {
 	bad := errors.New("invalid system information")
@@ -134,45 +106,6 @@ func (m SystemMeasurements) Validate() error {
 	return nil
 }
 
-func DecodeHeartbeat(data []byte) (Heartbeat, error) {
-	var raw struct {
-		Version         int             `json:"version"`
-		AgentID         string          `json:"agent_id"`
-		EnrollmentEpoch string          `json:"enrollment_epoch"`
-		SentAt          int64           `json:"sent_at"`
-		Info            json.RawMessage `json:"system_info"`
-		Metrics         json.RawMessage `json:"system_metrics"`
-		PolicyDigest    string          `json:"policy_digest"`
-		TaskState       string          `json:"task_state"`
-	}
-	if len(data) > MaxHeartbeatBytes {
-		return Heartbeat{}, errors.New("heartbeat exceeds size limit")
-	}
-	var header struct {
-		Version int `json:"version"`
-	}
-	if err := json.Unmarshal(data, &header); err != nil {
-		return Heartbeat{}, err
-	}
-	fields := []string{"version", "agent_id", "enrollment_epoch", "sent_at", "system_info", "system_metrics"}
-	if header.Version == TaskHeartbeatVersion {
-		fields = append(fields, "policy_digest", "task_state")
-	}
-	if err := strictjson.Decode(data, &raw, MaxHeartbeatBytes, fields...); err != nil {
-		return Heartbeat{}, err
-	}
-	h := Heartbeat{Version: raw.Version, AgentID: raw.AgentID, EnrollmentEpoch: raw.EnrollmentEpoch, SentAt: raw.SentAt, PolicyDigest: raw.PolicyDigest, TaskState: raw.TaskState}
-	var err error
-	h.Info, err = DecodeInformation(raw.Info)
-	if err != nil {
-		return Heartbeat{}, err
-	}
-	h.Metrics, err = DecodeMeasurements(raw.Metrics)
-	if err != nil {
-		return Heartbeat{}, err
-	}
-	return h, h.Validate()
-}
 func DecodeInformation(data []byte) (SystemInformation, error) {
 	var i SystemInformation
 	if err := strictjson.Decode(data, &i, 2048, "available", "os", "architecture", "hostname", "kernel", "boot_time"); err != nil {

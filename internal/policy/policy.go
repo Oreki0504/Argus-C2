@@ -1,13 +1,11 @@
-// Package policy defines immutable snapshots of locally administered authority.
+// Package policy is local authority; no server request can change these limits.
 package policy
 
 import (
 	"encoding/json"
 	"errors"
-	"sort"
 
-	"github.com/Oreki0504/Argus-C2/internal/audit"
-	"github.com/Oreki0504/Argus-C2/internal/collector"
+	"github.com/Oreki0504/Argus-C2/internal/collectors/system"
 	"github.com/Oreki0504/Argus-C2/internal/localfile"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
 	"github.com/Oreki0504/Argus-C2/internal/resources"
@@ -15,180 +13,107 @@ import (
 )
 
 type Policy struct {
-	Version            int                    `json:"version"`
-	Paused             bool                   `json:"paused"`
-	AllowSystemInfo    bool                   `json:"allow_system_info"`
-	AllowSystemMetrics bool                   `json:"allow_system_metrics"`
-	PollSeconds        int                    `json:"poll_seconds"`
-	TimeoutSeconds     int                    `json:"timeout_seconds"`
-	MaxPerMinute       int                    `json:"max_per_minute"`
-	Burst              int                    `json:"burst"`
-	MaxResultBytes     int                    `json:"max_result_bytes"`
-	PendingBytes       int                    `json:"pending_bytes"`
-	Telemetry          collector.Config       `json:"telemetry"`
-	AllowSSHAudit      bool                   `json:"allow_ssh_audit,omitempty"`
-	AllowServiceStatus bool                   `json:"allow_service_status,omitempty"`
-	SSHProfiles        []resources.SSHProfile `json:"ssh_profiles,omitempty"`
-	Services           []resources.Service    `json:"services,omitempty"`
+	Allowed        []protocol.TaskType    `json:"allowed"`
+	PollSeconds    int                    `json:"poll_seconds"`
+	TimeoutSeconds int                    `json:"timeout_seconds"`
+	MaxResultBytes int                    `json:"max_result_bytes"`
+	Telemetry      collector.Config       `json:"telemetry"`
+	Services       []resources.Service    `json:"services"`
+	SSHProfiles    []resources.SSHProfile `json:"ssh_profiles"`
 }
 
-// Keep v1's serialized bytes stable; v2 always emits its explicit opt-in fields.
-func (p Policy) MarshalJSON() ([]byte, error) {
-	type wire Policy
-	if p.Version != 2 {
-		return json.Marshal(wire(p))
-	}
-	return json.Marshal(struct {
-		wire
-		AllowSSHAudit      bool                   `json:"allow_ssh_audit"`
-		AllowServiceStatus bool                   `json:"allow_service_status"`
-		SSHProfiles        []resources.SSHProfile `json:"ssh_profiles"`
-		Services           []resources.Service    `json:"services"`
-	}{wire(p), p.AllowSSHAudit, p.AllowServiceStatus, p.SSHProfiles, p.Services})
+func Default() Policy {
+	return Policy{Allowed: []protocol.TaskType{protocol.SystemInfo, protocol.SystemMetrics}, PollSeconds: 10, TimeoutSeconds: 10, MaxResultBytes: 65536, Telemetry: collector.Config{SampleMilliseconds: 1000, DiskPaths: []string{"/"}, NetworkInterfaces: []string{}}, Services: []resources.Service{}, SSHProfiles: []resources.SSHProfile{}}
 }
-
 func (p Policy) Validate() error {
-	if (p.Version != 1 && p.Version != 2) || p.PollSeconds < 5 || p.PollSeconds > 60 || p.TimeoutSeconds < 1 || p.TimeoutSeconds > 30 || p.MaxPerMinute < 1 || p.MaxPerMinute > 30 || p.Burst < 1 || p.Burst > 5 || p.Burst > p.MaxPerMinute || p.MaxResultBytes < 1024 || p.MaxResultBytes > 16384 || p.PendingBytes < p.MaxResultBytes || p.PendingBytes > 32*1024*1024 {
-		return errors.New("invalid local task limits")
+	if p.Allowed == nil || len(p.Allowed) > 6 || p.PollSeconds < 5 || p.PollSeconds > 60 || p.TimeoutSeconds < 1 || p.TimeoutSeconds > 30 || p.MaxResultBytes < 1024 || p.MaxResultBytes > protocol.MaxResultBytes || p.Services == nil || p.SSHProfiles == nil || len(p.Services) > 16 || len(p.SSHProfiles) > 4 {
+		return errors.New("invalid local policy limits")
 	}
-	if p.Version == 1 && (p.AllowSSHAudit || p.AllowServiceStatus || p.SSHProfiles != nil || p.Services != nil) {
-		return errors.New("version 1 policy cannot enable new resources")
+	seen := map[protocol.TaskType]bool{}
+	for _, t := range p.Allowed {
+		if !protocol.KnownTask(t) || seen[t] {
+			return errors.New("unknown or duplicate collector")
+		}
+		seen[t] = true
 	}
-	if p.Version == 2 {
-		if p.SSHProfiles == nil || p.Services == nil || len(p.SSHProfiles) > resources.MaxProfiles || len(p.Services) > resources.MaxServices {
-			return errors.New("invalid resource counts")
+	ids := map[string]bool{}
+	for _, s := range p.Services {
+		if e := s.Validate(); e != nil {
+			return e
 		}
-		seen := map[string]bool{}
-		for _, profile := range p.SSHProfiles {
-			if err := profile.Validate(); err != nil {
-				return err
-			}
-			if seen[profile.ID] {
-				return errors.New("duplicate SSH profile")
-			}
-			seen[profile.ID] = true
+		if ids[s.ID] {
+			return errors.New("duplicate service")
 		}
-		seen = map[string]bool{}
-		for _, service := range p.Services {
-			if err := service.Validate(); err != nil {
-				return err
-			}
-			if seen[service.ID] {
-				return errors.New("duplicate service ID")
-			}
-			seen[service.ID] = true
+		ids[s.ID] = true
+	}
+	ids = map[string]bool{}
+	for _, s := range p.SSHProfiles {
+		if e := s.Validate(); e != nil {
+			return e
 		}
+		if ids[s.ID] {
+			return errors.New("duplicate SSH profile")
+		}
+		ids[s.ID] = true
 	}
 	return p.Telemetry.Validate()
 }
-func Decode(data []byte) (Policy, error) {
-	var raw struct {
-		Version            int               `json:"version"`
-		Paused             bool              `json:"paused"`
-		AllowSystemInfo    bool              `json:"allow_system_info"`
-		AllowSystemMetrics bool              `json:"allow_system_metrics"`
-		PollSeconds        int               `json:"poll_seconds"`
-		TimeoutSeconds     int               `json:"timeout_seconds"`
-		MaxPerMinute       int               `json:"max_per_minute"`
-		Burst              int               `json:"burst"`
-		MaxResultBytes     int               `json:"max_result_bytes"`
-		PendingBytes       int               `json:"pending_bytes"`
-		Telemetry          json.RawMessage   `json:"telemetry"`
-		AllowSSHAudit      bool              `json:"allow_ssh_audit"`
-		AllowServiceStatus bool              `json:"allow_service_status"`
-		SSHProfiles        []json.RawMessage `json:"ssh_profiles"`
-		Services           []json.RawMessage `json:"services"`
+func Decode(b []byte) (Policy, error) {
+	var p Policy
+	if e := strictjson.Decode(b, &p, 32768, "allowed", "poll_seconds", "timeout_seconds", "max_result_bytes", "telemetry", "services", "ssh_profiles"); e != nil {
+		return p, e
 	}
-	if len(data) > 32768 {
-		return Policy{}, errors.New("policy too large")
+	var nested struct {
+		Telemetry json.RawMessage   `json:"telemetry"`
+		Services  []json.RawMessage `json:"services"`
+		Profiles  []json.RawMessage `json:"ssh_profiles"`
 	}
-	var header struct {
-		Version int `json:"version"`
+	if err := json.Unmarshal(b, &nested); err != nil {
+		return p, err
 	}
-	if err := json.Unmarshal(data, &header); err != nil {
-		return Policy{}, err
+	if _, err := collector.DecodeConfig(nested.Telemetry); err != nil {
+		return p, err
 	}
-	fields := []string{"version", "paused", "allow_system_info", "allow_system_metrics", "poll_seconds", "timeout_seconds", "max_per_minute", "burst", "max_result_bytes", "pending_bytes", "telemetry"}
-	if header.Version == 2 {
-		fields = append(fields, "allow_ssh_audit", "allow_service_status", "ssh_profiles", "services")
-	}
-	if err := strictjson.Decode(data, &raw, 32768, fields...); err != nil {
-		return Policy{}, err
-	}
-	c, err := collector.DecodeConfig(raw.Telemetry)
-	if err != nil {
-		return Policy{}, err
-	}
-	p := Policy{Version: raw.Version, Paused: raw.Paused, AllowSystemInfo: raw.AllowSystemInfo, AllowSystemMetrics: raw.AllowSystemMetrics, PollSeconds: raw.PollSeconds, TimeoutSeconds: raw.TimeoutSeconds, MaxPerMinute: raw.MaxPerMinute, Burst: raw.Burst, MaxResultBytes: raw.MaxResultBytes, PendingBytes: raw.PendingBytes, Telemetry: c, AllowSSHAudit: raw.AllowSSHAudit, AllowServiceStatus: raw.AllowServiceStatus}
-	if p.Version == 2 {
-		if len(raw.SSHProfiles) > resources.MaxProfiles || len(raw.Services) > resources.MaxServices {
-			return Policy{}, errors.New("too many local resources")
+	for _, v := range nested.Services {
+		if _, err := resources.DecodeService(v); err != nil {
+			return p, err
 		}
-		p.SSHProfiles = []resources.SSHProfile{}
-		p.Services = []resources.Service{}
-		for _, b := range raw.SSHProfiles {
-			v, err := resources.DecodeProfile(b)
-			if err != nil {
-				return Policy{}, err
-			}
-			p.SSHProfiles = append(p.SSHProfiles, v)
-		}
-		for _, b := range raw.Services {
-			v, err := resources.DecodeService(b)
-			if err != nil {
-				return Policy{}, err
-			}
-			p.Services = append(p.Services, v)
+	}
+	for _, v := range nested.Profiles {
+		if _, err := resources.DecodeProfile(v); err != nil {
+			return p, err
 		}
 	}
 	return p, p.Validate()
 }
 func Load(path string) (Policy, error) {
-	data, err := localfile.Read(path, 32768, false)
-	if err != nil {
-		return Policy{}, err
+	b, e := localfile.Read(path, 32768, false)
+	if e != nil {
+		return Policy{}, e
 	}
-	return Decode(data)
+	return Decode(b)
 }
-func (p Policy) Digest() (string, error) {
-	if err := p.Validate(); err != nil {
-		return "", err
-	}
-	p.Telemetry.DiskPaths = append([]string{}, p.Telemetry.DiskPaths...)
-	sort.Strings(p.Telemetry.DiskPaths)
-	p.Telemetry.NetworkInterfaces = append([]string{}, p.Telemetry.NetworkInterfaces...)
-	sort.Strings(p.Telemetry.NetworkInterfaces)
-	if p.Version == 2 {
-		p.Services = append([]resources.Service{}, p.Services...)
-		sort.Slice(p.Services, func(i, j int) bool { return p.Services[i].ID < p.Services[j].ID })
-		p.SSHProfiles = append([]resources.SSHProfile{}, p.SSHProfiles...)
-		sort.Slice(p.SSHProfiles, func(i, j int) bool { return p.SSHProfiles[i].ID < p.SSHProfiles[j].ID })
-		for i := range p.SSHProfiles {
-			p.SSHProfiles[i].Files = append([]resources.SSHFile{}, p.SSHProfiles[i].Files...)
-			sort.Slice(p.SSHProfiles[i].Files, func(a, b int) bool { return p.SSHProfiles[i].Files[a].ID < p.SSHProfiles[i].Files[b].ID })
+func (p Policy) Allows(t protocol.Task) bool {
+	ok := false
+	for _, v := range p.Allowed {
+		if v == t.Type {
+			ok = true
 		}
 	}
-	data, err := json.Marshal(p)
-	if err != nil {
-		return "", err
+	if !ok {
+		return false
 	}
-	domain := "argus-c2/policy/v1\x00"
-	if p.Version == 2 {
-		domain = "argus-c2/policy/v2\x00"
+	switch t.Type {
+	case protocol.ServiceStatus:
+		id, e := t.Resource()
+		_, ok = p.Service(id)
+		return e == nil && ok
+	case protocol.SSHAudit:
+		id, e := t.Resource()
+		_, ok = p.SSHProfile(id)
+		return e == nil && ok
 	}
-	return audit.Digest(append([]byte(domain), data...)), nil
-}
-func (p Policy) Allows(kind protocol.TaskType) bool {
-	return !p.Paused && (kind == protocol.SystemInfo && p.AllowSystemInfo || kind == protocol.SystemMetrics && p.AllowSystemMetrics || kind == protocol.SSHAudit && p.Version == 2 && p.AllowSSHAudit || kind == protocol.ServiceStatus && p.Version == 2 && p.AllowServiceStatus)
-}
-
-func (p Policy) SSHProfile(id string) (resources.SSHProfile, bool) {
-	for _, v := range p.SSHProfiles {
-		if v.ID == id {
-			return v, true
-		}
-	}
-	return resources.SSHProfile{}, false
+	return true
 }
 func (p Policy) Service(id string) (resources.Service, bool) {
 	for _, v := range p.Services {
@@ -198,16 +123,11 @@ func (p Policy) Service(id string) (resources.Service, bool) {
 	}
 	return resources.Service{}, false
 }
-func (p Policy) AllowsResource(t protocol.Task) bool {
-	if t.Type == protocol.SSHAudit {
-		id, err := t.Resource()
-		_, ok := p.SSHProfile(id)
-		return err == nil && ok
+func (p Policy) SSHProfile(id string) (resources.SSHProfile, bool) {
+	for _, v := range p.SSHProfiles {
+		if v.ID == id {
+			return v, true
+		}
 	}
-	if t.Type == protocol.ServiceStatus {
-		id, err := t.Resource()
-		_, ok := p.Service(id)
-		return err == nil && ok
-	}
-	return t.Type == protocol.SystemInfo || t.Type == protocol.SystemMetrics
+	return resources.SSHProfile{}, false
 }

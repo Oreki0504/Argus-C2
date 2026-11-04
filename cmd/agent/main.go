@@ -2,132 +2,116 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
-	"log"
+	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
-	"time"
 
+	"encoding/json"
 	"github.com/Oreki0504/Argus-C2/internal/agent"
-	"github.com/Oreki0504/Argus-C2/internal/collector"
-	"github.com/Oreki0504/Argus-C2/internal/identity"
-	"github.com/Oreki0504/Argus-C2/internal/policy"
-	"github.com/Oreki0504/Argus-C2/internal/probe"
-	"github.com/Oreki0504/Argus-C2/internal/signing"
-	"github.com/Oreki0504/Argus-C2/internal/tlsconfig"
+	"github.com/Oreki0504/Argus-C2/internal/config"
+	"github.com/Oreki0504/Argus-C2/internal/localdb"
+	"github.com/Oreki0504/Argus-C2/internal/localfile"
 )
 
 func main() {
-	log.SetFlags(0)
-	address := flag.String("server", "https://127.0.0.1:8443", "server HTTPS origin")
-	cert := flag.String("cert", "", "probe certificate PEM file")
-	key := flag.String("key", "", "probe private key PEM file")
-	ca := flag.String("ca", "", "server CA bundle PEM file")
-	identityFile := flag.String("identity", "", "local node identity JSON file")
-	telemetry := flag.String("config", "", "local telemetry JSON configuration; omission checks identity once")
-	once := flag.Bool("once", false, "run one telemetry or task cycle, then exit")
-	policyFile := flag.String("policy", "", "local task and telemetry policy (instead of -config)")
-	stateDir := flag.String("task-state", "", "existing probe replay state initialized with probectl")
-	taskKey := flag.String("task-public-key", "", "locally pinned task PEM key or explicitly migrated trust-set JSON")
-	flag.Parse()
-	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
-		log.Fatal("the probe must run as a non-root user")
-	}
-	if flag.NArg() != 0 || *cert == "" || *key == "" || *ca == "" || *identityFile == "" {
-		log.Fatal("required: -cert, -key, -ca, -identity; no positional arguments")
-	}
-	if *once && *telemetry == "" && *policyFile == "" {
-		log.Fatal("-once requires -config or -policy")
-	}
-	if *policyFile != "" && (*telemetry != "" || *stateDir == "" || *taskKey == "") {
-		log.Fatal("-policy requires -task-state and -task-public-key and cannot be combined with -config")
-	}
-	if *policyFile == "" && (*stateDir != "" || *taskKey != "") {
-		log.Fatal("task state and verification key require -policy")
-	}
-	u, err := agent.ServerURL(*address)
-	if err != nil {
-		log.Fatal(err)
-	}
-	node, err := identity.LoadNode(*identityFile)
-	if err != nil {
-		log.Fatal(err)
-	}
-	config, err := tlsconfig.Client(tlsconfig.Files{Certificate: *cert, PrivateKey: *key, CA: *ca}, node, u.Hostname())
-	if err != nil {
-		log.Fatal(err)
-	}
-	client, err := agent.NewClient(*address, config, node)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer client.Close()
-	if *policyFile != "" {
-		if err := runTasks(client, node, *policyFile, *stateDir, *taskKey, *once); err != nil && !errors.Is(err, context.Canceled) {
-			log.Fatal(err)
-		}
-		return
-	}
-	if *telemetry != "" {
-		cfg, err := collector.LoadConfig(*telemetry)
-		if err != nil {
-			log.Fatal(err)
-		}
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		err = client.Run(ctx, cfg, *once, func(err error) {
-			if err != nil {
-				log.Println("Heartbeat failed; next attempt uses local backoff")
-			} else {
-				log.Println("Heartbeat accepted")
-			}
-		})
-		if err != nil && !errors.Is(err, context.Canceled) {
-			log.Fatal(err)
-		}
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	info, err := client.Connect(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if err := json.NewEncoder(os.Stdout).Encode(info); err != nil {
-		log.Fatal(err)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	if e := run(); e != nil {
+		slog.Error("agent stopped", "error", e)
+		os.Exit(1)
 	}
 }
-
-func runTasks(client *agent.Client, node identity.Node, path, dir, keyFile string, once bool) error {
-	if _, err := policy.Load(path); err != nil {
-		return err
+func run() error {
+	if len(os.Args) < 2 {
+		return errors.New("usage: agent enroll|run|renew|storage|results|result-export|result-retry|result-discard [flags]")
 	}
-	key, trust, err := signing.LoadVerification(keyFile)
-	if err != nil {
-		return err
+	f := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
+	path := f.String("config", "/etc/argus-c2/agent.json", "local agent configuration")
+	tokenFile := f.String("token-file", "", "private single-use enrollment token file")
+	check := f.Bool("check", false, "validate configuration and exit")
+	taskID := f.String("task", "", "local task ID for result maintenance")
+	after := f.String("after", "", "local result pagination cursor")
+	out := f.String("out", "", "new private result export file")
+	confirm := f.String("confirm-task", "", "explicit task ID confirmation for noninteractive discard")
+	once := f.Bool("once", false, "perform one collection cycle")
+	if e := f.Parse(os.Args[2:]); e != nil {
+		return e
 	}
-	var s *probe.State
-	if trust == nil {
-		s, err = probe.Open(dir, node, key)
-	} else {
-		s, err = probe.OpenWithTrust(dir, node, *trust)
+	if f.NArg() != 0 {
+		return errors.New("unexpected positional arguments")
 	}
-	if err != nil {
-		log.Printf("Task execution blocked: %v; continuing telemetry only", err)
-	} else {
-		defer s.Close()
+	c, p, e := config.LoadAgent(*path)
+	if e != nil {
+		return e
+	}
+	if *check {
+		fmt.Println("agent configuration valid")
+		return nil
+	}
+	if runtime.GOOS != "linux" {
+		return errors.New("the node agent requires Linux")
+	}
+	if os.Geteuid() == 0 {
+		return errors.New("run the agent as a dedicated non-root user")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return client.RunTasks(ctx, path, s, once, func(stage string, err error) {
-		if err != nil {
-			log.Printf("%s failed: %v", stage, err)
-		} else {
-			log.Printf("%s completed", stage)
+	switch os.Args[1] {
+	case "storage", "results", "result-export", "result-retry", "result-discard":
+		state, e := agent.OpenLocal(c.StateDir)
+		if e != nil {
+			return e
 		}
-	})
+		defer state.Close()
+		if os.Args[1] == "storage" {
+			storage, e := localdb.InspectStorage(c.StateDir, "probe.db")
+			if e != nil {
+				return e
+			}
+			capacity, e := state.Capacity(ctx)
+			if e != nil {
+				return e
+			}
+			return json.NewEncoder(os.Stdout).Encode(struct {
+				Storage localdb.Storage      `json:"storage"`
+				Results agent.ResultCapacity `json:"results"`
+			}{storage, capacity})
+		}
+		return maintain(ctx, state, os.Args[1], *taskID, *after, *out, *confirm, os.Stdin, os.Stdout, os.Stderr)
+	}
+	if os.Args[1] == "enroll" {
+		b, e := localfile.Read(*tokenFile, 1024, true)
+		if e != nil {
+			return e
+		}
+		hostname, e := os.Hostname()
+		if e != nil {
+			return e
+		}
+		if e = agent.Enroll(ctx, c.Server, c.CA, c.StateDir, strings.TrimSpace(string(b)), hostname); e != nil {
+			return e
+		}
+		fmt.Println("node enrolled")
+		return nil
+	}
+	if os.Args[1] != "run" && os.Args[1] != "renew" {
+		return errors.New("unknown agent command")
+	}
+	r, e := agent.Open(c.Server, c.CA, c.StateDir, p)
+	if e != nil {
+		return e
+	}
+	defer r.Close()
+	if os.Args[1] == "renew" {
+		return r.Renew(ctx)
+	}
+	if *once {
+		return r.Step(ctx)
+	}
+	return r.Run(ctx)
 }

@@ -223,39 +223,3 @@ func DecodeServiceReport(data []byte, now int64) (ServiceReport, error) {
 	}
 	return r, r.Validate(now)
 }
-
-func (r Result) CheckAssignment(t Task) error {
-	if r.RequestID != t.RequestID || r.AgentID != t.AgentID || r.Epoch != t.EnrollmentEpoch || r.Type != t.Type {
-		return errors.New("result assignment mismatch")
-	}
-	if r.Status != Succeeded {
-		return nil
-	}
-	if t.Type == SSHAudit {
-		id, err := t.Resource()
-		if err != nil {
-			return err
-		}
-		v, err := DecodeSSHReport(r.Data, r.FinishedAt)
-		if err != nil {
-			return err
-		}
-		if v.ProfileID != id {
-			return errors.New("SSH result profile mismatch")
-		}
-	}
-	if t.Type == ServiceStatus {
-		id, err := t.Resource()
-		if err != nil {
-			return err
-		}
-		v, err := DecodeServiceReport(r.Data, r.FinishedAt)
-		if err != nil {
-			return err
-		}
-		if v.ServiceID != id {
-			return errors.New("service result ID mismatch")
-		}
-	}
-	return nil
-}

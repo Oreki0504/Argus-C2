@@ -1,4 +1,4 @@
-// Package protocol defines strict versioned messages for the fixed task registry.
+// Package protocol defines the small, unsigned HTTPS diagnostics protocol.
 package protocol
 
 import (
@@ -10,200 +10,231 @@ import (
 	"github.com/Oreki0504/Argus-C2/internal/strictjson"
 )
 
-const (
-	Version          = 1
-	MaxEnvelopeBytes = 16 * 1024
-	MaxPayloadBytes  = 8 * 1024
-	MaxParamsBytes   = 4 * 1024
-	MaxResultBytes   = 256 * 1024
-	MaxLifetime      = 300
-	MaxClockSkew     = 30
-)
+const MaxPayloadBytes = 8192
+const MaxDispatchResultBytes = 65536
+const MaxResultBytes = MaxDispatchResultBytes
+const MaxLifetime = 3600
+const MaxClockSkew = 30
+const MaxExecutionTimeoutMS = 30000
+const ResultGraceSeconds = 60
+const MaxUnixTime = 253402300799
 
 type TaskType string
 
 const (
-	SystemInfo    TaskType = "system.info"
-	SystemMetrics TaskType = "system.metrics"
-	SSHAudit      TaskType = "ssh.audit"
-	ServiceStatus TaskType = "service.status"
+	SystemInfo       TaskType = "system.info"
+	SystemMetrics    TaskType = "system.metrics"
+	ServiceStatus    TaskType = "service.status"
+	NetworkListeners TaskType = "network.listeners"
+	ProcessList      TaskType = "process.list"
+	SSHAudit         TaskType = "ssh.audit"
 )
-
-type Task struct {
-	Version         int             `json:"version"`
-	RequestID       string          `json:"request_id"`
-	AgentID         string          `json:"agent_id"`
-	EnrollmentEpoch string          `json:"enrollment_epoch"`
-	CreatedAt       int64           `json:"created_at"`
-	ExpiresAt       int64           `json:"expires_at"`
-	Type            TaskType        `json:"task_type"`
-	TaskVersion     int             `json:"task_version"`
-	Params          json.RawMessage `json:"params"`
-	ActorID         string          `json:"actor_id"`
-	PolicyDigest    string          `json:"policy_digest"`
-}
-
-func DecodeTask(data []byte) (Task, error) {
-	var task Task
-	err := strictjson.Decode(data, &task, MaxPayloadBytes, "version", "request_id", "agent_id", "enrollment_epoch", "created_at", "expires_at", "task_type", "task_version", "params", "actor_id", "policy_digest")
-	if err != nil {
-		return Task{}, err
-	}
-	return task, task.Validate()
-}
-
-func (t Task) Validate() error {
-	if t.Version != Version || t.TaskVersion != 1 {
-		return errors.New("unsupported protocol or task version")
-	}
-	if !identity.Hex(t.RequestID, 32) || !identity.Hex(t.PolicyDigest, 64) || (identity.Node{AgentID: t.AgentID, EnrollmentEpoch: t.EnrollmentEpoch}).Validate() != nil {
-		return errors.New("invalid task identity or policy digest")
-	}
-	if !identifier(t.ActorID) {
-		return errors.New("invalid actor identifier")
-	}
-	// Positive timestamps make subtraction safe after checking their order.
-	if t.CreatedAt <= 0 || t.ExpiresAt <= t.CreatedAt || t.ExpiresAt-t.CreatedAt > MaxLifetime {
-		return errors.New("invalid task validity window")
-	}
-	switch t.Type {
-	case SystemInfo, SystemMetrics:
-		var params struct{}
-		if err := strictjson.Decode(t.Params, &params, MaxParamsBytes); err != nil {
-			return err
-		}
-	case SSHAudit, ServiceStatus:
-		if _, err := t.Resource(); err != nil {
-			return err
-		}
-	default:
-		return errors.New("unsupported task type")
-	}
-	return nil
-}
-
-func KnownTask(t TaskType) bool {
-	return t == SystemInfo || t == SystemMetrics || t == SSHAudit || t == ServiceStatus
-}
-func ResourceID(s string) bool {
-	if len(s) < 1 || len(s) > 32 || s[0] == '_' || s[0] == '-' {
-		return false
-	}
-	return identifier(s)
-}
-
-// Resource parses the only remotely selectable value for an audit/status task.
-func (t Task) Resource() (string, error) {
-	if t.Type == SSHAudit {
-		var p struct {
-			ID string `json:"profile_id"`
-		}
-		if err := strictjson.Decode(t.Params, &p, 256, "profile_id"); err != nil {
-			return "", err
-		}
-		if !ResourceID(p.ID) {
-			return "", errors.New("invalid profile ID")
-		}
-		return p.ID, nil
-	}
-	if t.Type == ServiceStatus {
-		var p struct {
-			ID string `json:"service_id"`
-		}
-		if err := strictjson.Decode(t.Params, &p, 256, "service_id"); err != nil {
-			return "", err
-		}
-		if !ResourceID(p.ID) {
-			return "", errors.New("invalid service ID")
-		}
-		return p.ID, nil
-	}
-	return "", errors.New("task has no resource selector")
-}
-
-// CheckTarget is preflight only; the probe's policy and durable acceptance gate
-// are still required before any handler may run.
-func (t Task) CheckTarget(node identity.Node, policyDigest string, now time.Time) error {
-	if err := t.Validate(); err != nil {
-		return err
-	}
-	if node.Validate() != nil || !identity.Hex(policyDigest, 64) || t.AgentID != node.AgentID || t.EnrollmentEpoch != node.EnrollmentEpoch || t.PolicyDigest != policyDigest {
-		return errors.New("task target or policy mismatch")
-	}
-	current := now.Unix()
-	if current >= t.ExpiresAt || current < t.CreatedAt-MaxClockSkew {
-		return errors.New("expired or future task")
-	}
-	return nil
-}
-
-func identifier(s string) bool {
-	if len(s) == 0 || len(s) > 64 {
-		return false
-	}
-	for _, c := range s {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
-			return false
-		}
-	}
-	return true
-}
-
-type ErrorCode string
-
-const (
-	Unauthorized     ErrorCode = "unauthorized"
-	InvalidRequest   ErrorCode = "invalid_request"
-	NotFound         ErrorCode = "not_found"
-	MethodNotAllowed ErrorCode = "method_not_allowed"
-)
-
-type ErrorResponse struct {
-	Code ErrorCode `json:"code"`
-}
-
-// ConnectionInfo describes the mutually authenticated peer, not a heartbeat.
-type ConnectionInfo struct {
-	Version         int    `json:"version"`
-	AgentID         string `json:"agent_id"`
-	EnrollmentEpoch string `json:"enrollment_epoch"`
-}
-
-func DecodeConnectionInfo(data []byte) (ConnectionInfo, error) {
-	var info ConnectionInfo
-	if err := strictjson.Decode(data, &info, 4096, "version", "agent_id", "enrollment_epoch"); err != nil {
-		return info, err
-	}
-	if info.Version != Version {
-		return info, errors.New("unsupported protocol version")
-	}
-	return info, (identity.Node{AgentID: info.AgentID, EnrollmentEpoch: info.EnrollmentEpoch}).Validate()
-}
 
 type TaskStatus string
 
 const (
-	Accepted      TaskStatus = "accepted"
-	Running       TaskStatus = "running"
-	Succeeded     TaskStatus = "succeeded"
-	Failed        TaskStatus = "failed"
-	Rejected      TaskStatus = "rejected"
-	Expired       TaskStatus = "expired"
-	Indeterminate TaskStatus = "indeterminate"
+	Pending   TaskStatus = "PENDING"
+	Accepted  TaskStatus = "ACCEPTED"
+	Running   TaskStatus = "RUNNING"
+	Succeeded TaskStatus = "SUCCEEDED"
+	Failed    TaskStatus = "FAILED"
+	Unknown   TaskStatus = "UNKNOWN"
 )
 
-// Result carries a terminal outcome; actual policy and assignment are checked
-// independently by the probe and server.
+func Terminal(s TaskStatus) bool { return s == Succeeded || s == Failed || s == Unknown }
+
+type Task struct {
+	ID                 string          `json:"id"`
+	NodeID             string          `json:"node_id"`
+	Type               TaskType        `json:"task_type"`
+	Params             json.RawMessage `json:"parameters"`
+	Status             TaskStatus      `json:"status"`
+	CreatedAt          int64           `json:"created_at"`
+	DispatchExpiresAt  int64           `json:"dispatch_expires_at"`
+	ExecutionTimeoutMS int             `json:"execution_timeout_ms"`
+	ResultDueAt        int64           `json:"result_due_at"`
+}
+type TaskRequest struct {
+	NodeID             string          `json:"node_id"`
+	Type               TaskType        `json:"task_type"`
+	Params             json.RawMessage `json:"parameters"`
+	TTLSeconds         int             `json:"ttl_seconds"`
+	ExecutionTimeoutMS int             `json:"execution_timeout_ms"`
+}
 type Result struct {
-	RequestID    string          `json:"request_id"`
-	AgentID      string          `json:"agent_id"`
-	Epoch        string          `json:"epoch"`
-	Type         TaskType        `json:"task_type"`
-	StartedAt    int64           `json:"started_at"`
-	FinishedAt   int64           `json:"finished_at"`
-	Status       TaskStatus      `json:"status"`
-	Data         json.RawMessage `json:"data"`
-	ErrorCode    ErrorCode       `json:"error_code"`
-	Truncated    bool            `json:"truncated"`
-	PolicyDigest string          `json:"policy_digest"`
+	TaskID      string          `json:"task_id"`
+	NodeID      string          `json:"node_id"`
+	Status      TaskStatus      `json:"status"`
+	Payload     json.RawMessage `json:"payload"`
+	Error       string          `json:"error"`
+	CompletedAt int64           `json:"completed_at"`
+}
+type Node struct {
+	AgentMetadata
+	ID                     string `json:"id"`
+	Hostname               string `json:"hostname"`
+	CertificateFingerprint string `json:"certificate_fingerprint"`
+	Status                 string `json:"status"`
+	LastSeenAt             int64  `json:"last_seen_at"`
+	CreatedAt              int64  `json:"created_at"`
+	CertificateExpiresAt   int64  `json:"certificate_expires_at"`
+}
+type EnrollmentRequest struct {
+	Token    string `json:"token"`
+	Hostname string `json:"hostname"`
+	CSR      []byte `json:"csr"`
+}
+type EnrollmentResponse struct {
+	NodeID      string `json:"node_id"`
+	Certificate string `json:"certificate"`
+}
+type RenewalRequest struct {
+	CSR []byte `json:"csr"`
+}
+type Heartbeat struct {
+	Hostname string `json:"hostname"`
+}
+
+func KnownTask(t TaskType) bool {
+	return t == SystemInfo || t == SystemMetrics || t == ServiceStatus || t == NetworkListeners || t == ProcessList || t == SSHAudit
+}
+func ResourceID(s string) bool {
+	return len(s) <= 32 && identity.Valid(s) && s[0] != '_' && s[0] != '-'
+}
+func (t Task) Resource() (string, error) {
+	var p struct {
+		ServiceID string `json:"service_id"`
+		ProfileID string `json:"profile_id"`
+	}
+	field := "service_id"
+	if t.Type == SSHAudit {
+		field = "profile_id"
+	} else if t.Type != ServiceStatus {
+		return "", errors.New("task has no resource")
+	}
+	if err := strictjson.Decode(t.Params, &p, 256, field); err != nil {
+		return "", err
+	}
+	id := p.ServiceID
+	if t.Type == SSHAudit {
+		id = p.ProfileID
+	}
+	if !ResourceID(id) {
+		return "", errors.New("invalid resource ID")
+	}
+	return id, nil
+}
+func ValidateParams(kind TaskType, p json.RawMessage) error {
+	switch kind {
+	case SystemInfo, SystemMetrics, ProcessList, NetworkListeners:
+		return strictjson.Decode(p, &struct{}{}, 256)
+	case ServiceStatus, SSHAudit:
+		_, err := (Task{Type: kind, Params: p}).Resource()
+		return err
+	default:
+		return errors.New("unsupported task type")
+	}
+}
+func (t Task) Validate() error {
+	if !identity.Valid(t.ID) || !identity.Valid(t.NodeID) || t.CreatedAt <= 0 || t.DispatchExpiresAt > MaxUnixTime || t.DispatchExpiresAt <= t.CreatedAt || t.DispatchExpiresAt-t.CreatedAt > MaxLifetime {
+		return errors.New("invalid task identity or lifetime")
+	}
+	if t.ExecutionTimeoutMS < 1 || t.ExecutionTimeoutMS > MaxExecutionTimeoutMS || t.ResultDueAt <= t.CreatedAt || t.ResultDueAt > t.DispatchExpiresAt+MaxExecutionTimeoutMS/1000+ResultGraceSeconds {
+		return errors.New("invalid execution budget or result due time")
+	}
+	if t.Status != Pending && t.Status != Accepted && t.Status != Running && !Terminal(t.Status) {
+		return errors.New("invalid task status")
+	}
+	return ValidateParams(t.Type, t.Params)
+}
+func DecodeTask(b []byte) (Task, error) {
+	var t Task
+	if err := strictjson.Decode(b, &t, MaxPayloadBytes, "id", "node_id", "task_type", "parameters", "status", "created_at", "dispatch_expires_at", "execution_timeout_ms", "result_due_at"); err != nil {
+		return t, err
+	}
+	return t, t.Validate()
+}
+func DecodeTaskRequest(b []byte) (TaskRequest, error) {
+	var r TaskRequest
+	if err := strictjson.Decode(b, &r, MaxPayloadBytes, "node_id", "task_type", "parameters", "ttl_seconds", "execution_timeout_ms"); err != nil {
+		return r, err
+	}
+	if !identity.Valid(r.NodeID) || r.TTLSeconds < 10 || r.TTLSeconds > MaxLifetime || r.ExecutionTimeoutMS < 1 || r.ExecutionTimeoutMS > MaxExecutionTimeoutMS {
+		return r, errors.New("invalid node or TTL")
+	}
+	return r, ValidateParams(r.Type, r.Params)
+}
+func (r Result) Validate() error {
+	if !identity.Valid(r.TaskID) || !identity.Valid(r.NodeID) || !Terminal(r.Status) || !CleanText(r.Error, 128) || r.CompletedAt <= 0 || len(r.Payload) > MaxResultBytes-1024 {
+		return errors.New("invalid result")
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(r.Payload, &fields) != nil || fields == nil {
+		return errors.New("result payload must be an object")
+	}
+	names := make([]string, 0, len(fields))
+	for k := range fields {
+		names = append(names, k)
+	}
+	if err := strictjson.Decode(r.Payload, &fields, MaxResultBytes, names...); err != nil {
+		return err
+	}
+	if r.Status == Succeeded && r.Error != "" || r.Status != Succeeded && len(fields) != 0 {
+		return errors.New("invalid result outcome")
+	}
+	return nil
+}
+func DecodeResult(b []byte) (Result, error) {
+	var r Result
+	if err := strictjson.Decode(b, &r, MaxResultBytes, "task_id", "node_id", "status", "payload", "error", "completed_at"); err != nil {
+		return r, err
+	}
+	return r, r.Validate()
+}
+func (r Result) CheckAssignment(t Task) error {
+	if r.TaskID != t.ID || r.NodeID != t.NodeID {
+		return errors.New("result assignment mismatch")
+	}
+	if r.Status != Succeeded {
+		return nil
+	}
+	switch t.Type {
+	case SystemInfo:
+		v, e := DecodeInformation(r.Payload)
+		if e != nil {
+			return e
+		}
+		return v.Validate(r.CompletedAt)
+	case SystemMetrics:
+		_, e := DecodeMeasurements(r.Payload)
+		return e
+	case SSHAudit:
+		v, e := DecodeSSHReport(r.Payload, r.CompletedAt)
+		if e != nil {
+			return e
+		}
+		id, _ := t.Resource()
+		if v.ProfileID != id {
+			return errors.New("SSH profile mismatch")
+		}
+	case ServiceStatus:
+		v, e := DecodeServiceReport(r.Payload, r.CompletedAt)
+		if e != nil {
+			return e
+		}
+		id, _ := t.Resource()
+		if v.ServiceID != id {
+			return errors.New("service mismatch")
+		}
+	case ProcessList:
+		return ValidateProcesses(r.Payload)
+	case NetworkListeners:
+		return ValidateListeners(r.Payload)
+	default:
+		return errors.New("unsupported result")
+	}
+	return nil
+}
+func NewResult(t Task, s TaskStatus, code string) Result {
+	return Result{TaskID: t.ID, NodeID: t.NodeID, Status: s, Payload: json.RawMessage(`{}`), Error: code, CompletedAt: time.Now().Unix()}
 }

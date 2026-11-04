@@ -8,14 +8,13 @@ import (
 )
 
 func inspectionResult(kind TaskType) Result {
-	r, _ := DecodeResult(resultSeed())
-	r.Type = kind
+	r := Result{TaskID: "task-1", NodeID: "node-1", CompletedAt: 2}
 	r.Status = Succeeded
-	r.ErrorCode = ""
+	r.Error = ""
 	if kind == SSHAudit {
-		r.Data, _ = json.Marshal(SSHReport{ProfileID: "host", ObservedAt: 1, Coverage: "complete", Files: []SSHFileObservation{{ID: "keys", Kind: "authorized_keys", Status: "ok", MetadataAvailable: true, Metadata: FileMetadata{Mode: 0600, Size: 100}, SHA256: strings.Repeat("a", 64), Baseline: "unconfigured", Keys: []KeyObservation{{Line: 1, Type: "ssh-ed25519", Fingerprint: "SHA256:" + strings.Repeat("A", 43)}}, Directives: []DirectiveObservation{}, Findings: []string{}}}})
+		r.Payload, _ = json.Marshal(SSHReport{ProfileID: "host", ObservedAt: 1, Coverage: "complete", Files: []SSHFileObservation{{ID: "keys", Kind: "authorized_keys", Status: "ok", MetadataAvailable: true, Metadata: FileMetadata{Mode: 0600, Size: 100}, SHA256: strings.Repeat("a", 64), Baseline: "unconfigured", Keys: []KeyObservation{{Line: 1, Type: "ssh-ed25519", Fingerprint: "SHA256:" + strings.Repeat("A", 43)}}, Directives: []DirectiveObservation{}, Findings: []string{}}}})
 	} else {
-		r.Data, _ = json.Marshal(ServiceReport{ServiceID: "host", ObservedAt: 1, Available: true, Unit: "sshd.service", LoadState: "loaded", ActiveState: "active", SubState: "running"})
+		r.Payload, _ = json.Marshal(ServiceReport{ServiceID: "host", ObservedAt: 1, Available: true, Unit: "sshd.service", LoadState: "loaded", ActiveState: "active", SubState: "running"})
 	}
 	return r
 }
@@ -23,10 +22,10 @@ func TestInspectionSchemasRejectNestedOrUnboundedData(t *testing.T) {
 	for _, kind := range []TaskType{SSHAudit, ServiceStatus} {
 		r := inspectionResult(kind)
 		b, _ := json.Marshal(r)
-		if _, err := DecodeResult(b); err != nil {
+		if _, err := decodeInspectionResult(b, kind); err != nil {
 			t.Fatal(err)
 		}
-		pairs := [][2]string{{`"observed_at":1`, `"observed_at":3`}, {`"data":{`, `"data":{"path":"/etc/shadow",`}}
+		pairs := [][2]string{{`"observed_at":1`, `"observed_at":3`}, {`"payload":{`, `"payload":{"path":"/etc/shadow",`}}
 		if kind == SSHAudit {
 			pairs = append(pairs, [][2]string{
 				{`"metadata":{`, `"metadata":{"secret":true,`}, {`"line":1`, `"line":1,"line":1`},
@@ -42,9 +41,17 @@ func TestInspectionSchemasRejectNestedOrUnboundedData(t *testing.T) {
 			if bytes.Equal(b, bad) {
 				t.Fatal("invalid test mutation")
 			}
-			if _, err := DecodeResult(bad); err == nil {
+			if _, err := decodeInspectionResult(bad, kind); err == nil {
 				t.Fatalf("accepted %s", bad)
 			}
 		}
 	}
+}
+
+func decodeInspectionResult(b []byte, kind TaskType) (Result, error) {
+	r, e := DecodeResult(b)
+	if e != nil {
+		return r, e
+	}
+	return r, r.CheckAssignment(Task{ID: r.TaskID, NodeID: r.NodeID, Type: kind, Params: map[TaskType]json.RawMessage{SSHAudit: json.RawMessage(`{"profile_id":"host"}`), ServiceStatus: json.RawMessage(`{"service_id":"host"}`)}[kind]})
 }

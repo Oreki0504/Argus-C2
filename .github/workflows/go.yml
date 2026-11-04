@@ -1,31 +1,8 @@
-name: Go validation
-
+name: Diagnostics validation
 on: [push, pull_request]
-
 permissions:
   contents: read
-
 jobs:
-  deployment:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: '1.27.2'
-          cache: false
-      - name: Build deployment fixture
-        run: |
-          mkdir -p .cache/deployment-bin
-          for command in server agent localctl probectl enroll renew signctl pkictl cli devsign; do
-            CGO_ENABLED=0 go build -trimpath -o ".cache/deployment-bin/$command" "./cmd/$command"
-          done
-          python3 -m py_compile test/deployment/check_service.py test/deployment/systemd_smoke.py
-      - name: Native systemd isolation and recovery exercises
-        run: sudo env GITHUB_ACTIONS=true python3 test/deployment/systemd_smoke.py --disposable-ci
   test:
     strategy:
       fail-fast: false
@@ -39,39 +16,58 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: false
-      - name: Build
-        run: go build ./...
-      - name: Static checks
-        run: go vet ./...
-      - name: Unit and TLS integration tests
-        run: go test ./... -count=1
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./... -count=1
       - name: Race detector
         if: runner.os == 'Linux'
         run: go test -race ./... -count=1
-      - name: Native systemd read-only query
+      - name: Native systemd collector
         if: runner.os == 'Linux'
         env:
           ARGUS_REQUIRE_SYSTEMD: '1'
-        run: go test ./internal/service -run '^TestLiveSystemdReadOnly$' -count=1 -v
+        run: go test ./internal/collectors/services -run '^TestLiveSystemdReadOnly$' -count=1 -v
       - name: Vulnerability scan
         if: runner.os == 'Linux'
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
-      - name: Fuzz smoke tests
+      - name: Fuzz parsing and filesystem-adjacent protocols
         if: runner.os == 'Linux'
         run: |
           go test ./internal/strictjson -run '^$' -fuzz '^FuzzDecode$' -fuzztime=10s -parallel=2
           go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeTask$' -fuzztime=10s -parallel=2
-          go test ./internal/signing -run '^$' -fuzz '^FuzzVerify$' -fuzztime=10s -parallel=2
-          go test ./internal/signing -run '^$' -fuzz '^FuzzTrustSet$' -fuzztime=10s -parallel=2
-          go test ./internal/signing -run '^$' -fuzz '^FuzzVerifyTrusted$' -fuzztime=10s -parallel=2
-          go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeHeartbeat$' -fuzztime=10s -parallel=2
           go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeResult$' -fuzztime=10s -parallel=2
+          go test ./internal/protocol -run '^$' -fuzz '^FuzzDecodeMeasurements$' -fuzztime=10s -parallel=2
           go test ./internal/enrollment -run '^$' -fuzz '^FuzzParseCSR$' -fuzztime=10s -parallel=2
-          go test ./internal/tlsconfig -run '^$' -fuzz '^FuzzCertificateBundle$' -fuzztime=10s -parallel=2
-          go test ./internal/protocol -run '^$' -fuzz '^FuzzRenewalMessages$' -fuzztime=10s -parallel=2
-          go test ./internal/sshaudit -run '^$' -fuzz '^FuzzSSHParsers$' -fuzztime=10s -parallel=2
-          go test ./internal/service -run '^$' -fuzz '^FuzzDBusResponseGuard$' -fuzztime=10s -parallel=2
-          go test ./internal/management -run '^$' -fuzz '^FuzzManagementRequests$' -fuzztime=10s -parallel=2
-          go test ./internal/adminauth -run '^$' -fuzz '^FuzzPasswordHashParsing$' -fuzztime=10s -parallel=2
+          go test ./internal/collectors/ssh -run '^$' -fuzz '^FuzzSSHParsers$' -fuzztime=10s -parallel=2
+          go test ./internal/collectors/services -run '^$' -fuzz '^FuzzDBusResponseGuard$' -fuzztime=10s -parallel=2
+      - name: Five-agent command workflow
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p bin
+          for command in server agent argus; do
+            CGO_ENABLED=0 go build -trimpath -o "bin/$command" "./cmd/$command"
+          done
+          python3 test/deployment/cli_smoke.py --bin ./bin
+  deployment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Build deployment binaries
+        run: |
+          mkdir -p bin
+          for command in server agent argus; do
+            CGO_ENABLED=0 go build -trimpath -o "bin/$command" "./cmd/$command"
+          done
+          go test -c -o bin/agent-state.test ./internal/agent
+          python3 -m py_compile test/deployment/cli_smoke.py test/deployment/systemd_smoke.py
+      - name: Disposable native systemd deployment
+        run: sudo env GITHUB_ACTIONS=true python3 test/deployment/systemd_smoke.py --disposable-ci --bin ./bin

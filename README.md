@@ -1,131 +1,79 @@
 # Argus-C2
 
-A self-hosted remote administration and incident-response control plane for Linux VPS infrastructure you own and administer.
+[简体中文](README.zh-CN.md)
 
-Argus-C2 is planned as a Go-based system comprising a central server, lightweight node probes, and an administration CLI. Its scope covers system visibility, SSH configuration checks, authorized-key auditing, and explicitly authorized, narrowly defined maintenance tasks.
+Argus-C2 is a self-hosted Linux fleet diagnostics project. Administrators explicitly enroll nodes, request predefined read-only diagnostics through a CLI, and inspect node health and task results. Each agent connects outbound with its own client certificate and runs as a non-root user.
 
-The central design goal is: **compromising the management server must not give an attacker arbitrary command execution or arbitrary filesystem write access across enrolled nodes.** Each probe independently validates incoming tasks against a locally controlled policy that defines its maximum authority.
+**Status: under development, before an MVP release.** Enrollment, mTLS, task dispatch, local policy enforcement, persistent results, client certificate renewal, and node disabling are implemented and locally tested. Deployment and sustained operation on five independent VPS instances remain unvalidated. The documentation describes the current implementation and its validation limits.
 
-**Project status**
+## Implemented diagnostics
 
-Phases 1 through 7 establish a tested local deployment baseline: explicit enrollment, persistent identities, mTLS heartbeats, and signed dispatch of four read-only tasks: `system.info`, `system.metrics`, `ssh.audit`, and `service.status`. A separate HTTPS management API and CLI use Argon2id passwords, revocable sessions, and Admin/ReadOnly roles. Root-controlled systemd units add separate non-root accounts, credentials, resource limits, and native recovery exercises. Probes enforce local opt-in, policy, replay protection, execution limits, and durable results. Both ends keep bounded hash-chained audit records. This remains a loopback-only development prototype, not a production-ready multi-VPS release. The full capabilities below remain the roadmap.
+| Task | Data | Parameters |
+| --- | --- | --- |
+| `system.info` | OS platform, architecture, hostname, kernel, boot time | `{}` |
+| `system.metrics` | CPU, memory, configured disk paths and network interfaces | `{}` |
+| `service.status` | Status of a locally allowlisted, already loaded systemd service | `{"service_id":"journal"}` |
+| `network.listeners` | Local TCP listeners and unconnected UDP sockets | `{}` |
+| `process.list` | Bounded process IDs, names, states, and UIDs | `{}` |
+| `ssh.audit` | Limited observations of explicitly mapped SSH configuration or authorized-key files | `{"profile_id":"host"}` |
 
-Phase 8 adds authenticated, idempotent client-certificate renewal and local task-signing-key rotation without resetting replay state. Versioned public trust sets, bounded overlap, explicit retirement, and audited maintenance preserve node identity and pending results. Offline PKI tooling, local expiry health reports, server/issuer replacement, and root-transition recovery tests now complete the local lifecycle baseline. Fleet rollout and independent security qualification remain pending. See the [TLS credential guide](docs/phase-8-implementation.md), [signer rotation guide](docs/phase-8-signer-rotation.md), [PKI and recovery guide](docs/phase-8-pki-recovery.md), and [Phase 1 architecture and security design](docs/phase-1-design.md).
+The example policy enables only system information and metrics. Other collectors require local opt-in. `SUCCEEDED` means a collector returned a valid report; inspect `available`, `coverage`, and `code` to determine whether the data is usable. Heartbeats update the hostname and last-seen time; they do not upload metrics. See [Collectors and results](docs/collectors.md).
 
-Start with the [Phase 7 Linux service guide](docs/phase-7-implementation.md) for installation permissions, systemd restrictions, and restore quarantine. The [Phase 6 guide](docs/phase-6-implementation.md) covers CLI authentication and roles; [Phase 5](docs/phase-5-implementation.md) covers inspection, and [Phase 4](docs/phase-4-implementation.md) provides enrollment/dispatch setup. Earlier guides retain their historical scope. The toolchain baseline is Go 1.27.2, with pinned dependencies in go.mod/go.sum.
+## Three programs
 
-**Architecture**
+| Program | Responsibility |
+| --- | --- |
+| `server` | Initialize a single CA and database, serve the HTTPS API, create database backups |
+| `agent` | Enroll, poll, enforce local policy, collect diagnostics, retry results, renew its certificate |
+| `argus` | List nodes, create tasks, inspect results, issue enrollment tokens, disable nodes |
 
 ```mermaid
 flowchart LR
-    Admin[Administrator] --> CLI[Administration CLI]
-    CLI -->|HTTPS / administrator authentication| Server[Central server]
+    Admin[Administrator] --> CLI[argus]
+    CLI -->|HTTPS + administrator token| Server[server]
     Server --> DB[(SQLite)]
-    Server --> ServerAudit[Server audit log]
-
-    subgraph VPS[Explicitly enrolled Linux VPS]
-        Probe[Node probe] --> Policy[Local policy and task validation]
-        Policy --> Collector[Predefined task handlers]
-        Collector --> Resources[Allowed system data and files]
-        Policy --> LocalAudit[Local audit log]
-    end
-
-    Probe -->|Outbound mTLS / polling, heartbeats, results| Server
-    Server -.->|Signed task in polling response| Probe
+    Agent[agent] -->|Outbound mTLS: heartbeat, poll, results| Server
+    Agent --> Policy[Local policy]
+    Policy --> Collectors[Fixed read-only collectors]
+    Agent --> State[(Deduplication and pending results)]
 ```
 
-| Component | Responsibility |
+Named administrator tokens have `Admin` or `ReadOnly` roles. Agents use individual node certificates, with disabling checked on every node request. Tasks bind a node and a unique ID, with separate dispatch deadlines and collection budgets; persistent execution records handle repeated delivery. Interrupted work can become `UNKNOWN`. Exactly-once execution is not promised.
+
+There is no remote shell, arbitrary command or script execution, file manager, dynamic plugin loading, remediation, or remote self-update interface. The server is the trusted task-delivery authority. Fixed collectors and local policy restrict the diagnostics it can request, but the project does not claim to withstand a fully compromised management server or node root. See [Security boundaries](docs/security.md).
+
+## Getting started
+
+Build from the repository root with Go **1.27.3**:
+
+```sh
+mkdir -p bin
+for command in server agent argus; do
+  CGO_ENABLED=0 go build -trimpath -o "bin/$command" "./cmd/$command"
+done
+```
+
+Follow the [local quick start](docs/quickstart.md) to complete a single-node workflow. Use [Linux deployment](docs/deployment.md) when preparing authorized test hosts. Agent enrollment, execution, and renewal require a non-root Linux user. Windows builds and selected tests do not establish Windows agent deployment support.
+
+## Documentation
+
+All primary documents are maintained in English. Chinese supplements are available for the README, quick start, and configuration reference.
+
+| Document | Purpose |
 | --- | --- |
-| Central server | Node enrollment, identity management, administrator authentication, task dispatch, result queries, and auditing |
-| Node probe | Initiate outbound connections, independently enforce local policy, collect approved data, and maintain a local audit log |
-| Administration CLI | Inspect nodes and results, submit allowed tasks, and manage enrollment and node status |
-| Read-only web dashboard | Optional later interface for viewing data already collected |
+| [Quick start](docs/quickstart.md) · [中文](docs/quickstart.zh-CN.md) | Build, enroll, and obtain the first result |
+| [CLI reference](docs/cli.md) | Arguments, ordering, defaults, output, and exit behavior |
+| [Configuration](docs/configuration.md) · [中文](docs/configuration.zh-CN.md) | Server, agent, administrator, and local policy fields |
+| [Collectors and results](docs/collectors.md) | Report semantics, availability, and permissions |
+| [HTTP API](docs/api.md) | Authentication, requests, responses, pagination, and limits |
+| [Architecture and state](docs/architecture.md) | Task code path, SQLite model, and failure behavior |
+| [Security boundaries](docs/security.md) | Trust assumptions, credentials, audit, and limitations |
+| [Linux deployment](docs/deployment.md) | Accounts, permissions, systemd, and enrollment |
+| [Operations](docs/operations.md) | Accounts, renewal, logs, backup, recovery, and troubleshooting |
+| [Development and validation](docs/validation.md) | Test commands, evidence, CI, and remaining fleet acceptance |
 
-Probes expose no inbound network management port. In code and protocol identifiers, `agent` refers to the resident node client; this documentation calls it a probe.
+Local result maintenance can list, export, retry, or explicitly discard report contents while retaining deduplication. Protocol version 1 is checked on every agent request; node listings expose the agent build. Local `storage` commands report database/WAL size, available space, and agent result capacity. See [Operations](docs/operations.md).
 
-**Planned capabilities**
+## Validation status
 
-The MVP focuses on read-only queries and auditing. Each node locally defines which files, logs, services, and users are in scope.
-
-| Task | Purpose | Planned scope |
-| --- | --- | --- |
-| `system.info` | Report operating system, kernel, architecture, and boot time | MVP |
-| `system.metrics` | Report CPU, memory, disk, and network metrics | MVP |
-| `process.list` | Report limited process information, excluding environment variables and process memory | MVP |
-| `network.listeners` | Report listening ports on the local node | MVP |
-| `service.status` | Query allowlisted service status | MVP |
-| `log.read` | Read a bounded tail of an allowlisted log | MVP |
-| `file.hash` | Calculate the SHA-256 digest of an allowlisted file | MVP |
-| `ssh.audit` | Inspect configured SSH settings, authorized-key fingerprints, file ownership, and permissions | MVP, subject to local read permissions |
-| `service.restart` | Restart an explicitly allowed service | Post-MVP; disabled by default and subject to a separate security review |
-| `package.updates` | Inspect update availability using local package metadata | Post-MVP, with distribution-specific adapters |
-
-SSH auditing does not modify `authorized_keys`. Implemented reports contain bounded fingerprints, metadata, local baseline comparisons, and selected static configuration observations. They identify coverage gaps and do not claim to resolve effective sshd configuration. Service queries inspect only locally mapped, already loaded units. Reads requiring additional privilege remain unavailable; a [separate helper design](docs/phase-5-helper-design.md) records future review requirements, and no privileged helper is implemented.
-
-**Security design**
-
-- **Explicit enrollment and individual identities.** A short-lived, single-use token enrolls a node. Each probe receives its own client certificate, uses mTLS afterward, and can have its certificates revoked or its identity disabled.
-- **Locally controlled authority.** Tasks have predefined types and strict parameter schemas. Unknown types, extra arguments, unauthorized resources, and oversized requests must be rejected. The server cannot remotely expand allowlists or replace trust anchors.
-- **Least privilege.** Probes run under a dedicated non-root account with systemd hardening. Local administrators control program files and security policy. Privileged helpers expose only explicitly defined operations.
-- **Signatures and replay protection.** Tasks bind a node identity, enrollment epoch, request ID, and validity window. Signature verification and persistent deduplication prevent repeated execution; tasks left in an uncertain state after a crash are not automatically rerun.
-- **Separated administrator roles.** Admin can submit existing tasks and perform node/token administration. ReadOnly can inspect existing data but cannot initiate tasks. Authentication uses Argon2id password hashing and revocable sessions, with live authorization and mutations in the same transaction. Account provisioning stays local; optional TOTP remains unimplemented.
-- **Independent auditing and limits.** Both server and probe record operations and outcomes. Probes independently limit execution time, concurrency, read volume, and response size. Audit logs exclude passwords, tokens, and private keys.
-
-A task signature proves that a trusted key signed the message. If the server and signing key are compromised, containment still depends on the probe's local policy. An attacker may obtain data already authorized for upload, falsify the central view, or affect availability. The design does not claim protection when node root, the kernel, or the probe itself is already compromised.
-
-Audit records are maintained at both ends with tamper-detection measures. A server-local log and hash chain cannot independently establish trustworthy history after full server compromise. See the [complete design](docs/phase-1-design.md) for assumptions, recovery behavior, and validation requirements.
-
-**Scope boundaries**
-
-The project is intended for machines you own or are explicitly authorized to administer. Its protocol deliberately excludes:
-
-- Arbitrary shells, remote terminals, generic command execution, uploaded scripts, and arbitrary scheduled commands.
-- Arbitrary file reads or writes, file managers, and remote modification of SSH authorized keys, accounts, or security configuration.
-- Remote expansion of local privileges, dynamic payload or plugin delivery, and server-driven probe self-updates.
-- Automatic discovery or mass enrollment, unrelated-host scanning, lateral movement, proxy tunnels, and port forwarding.
-- Stealth, malicious persistence, log clearing, security-product evasion, privilege escalation, and process injection.
-- Credential or browser-data collection, keylogging, screenshots, and process-memory capture.
-
-**Roadmap**
-
-| Phase | Deliverables | Status |
-| --- | --- | --- |
-| 1 | Threat model, architecture, protocol, trust boundaries, and MVP scope | Design documented |
-| 2 | Go module, shared protocol types, node identity, and mTLS | Implemented; local development only |
-| 3 | Enrollment, heartbeats, system information, and basic metrics | Implemented; local development only |
-| 4 | Typed task dispatch, local policy, persistent deduplication, and auditing | Implemented for two read-only task types; local development only |
-| 5 | SSH configuration and authorized-key auditing, service status | Implemented with explicit local opt-in, bounded observations, and coverage gaps; local development only |
-| 6 | Administration CLI, administrator authentication, and RBAC | Implemented with local account provisioning and revocable sessions; optional TOTP deferred |
-| 7 | Linux deployment hardening, security tests, fuzzing, and documentation | Local systemd baseline and recovery exercises implemented; production rollout remains out of scope |
-| 8 | Identity and credential lifecycle | Local baseline implemented: TLS renewal, signer rotation, offline PKI, expiry health and recovery exercises; fleet rollout and independent security qualification pending |
-
-Each phase starts by explaining its scope, design rationale, and security risks before implementation and validation. Identity checks and input validation accompany the interfaces that need them. Management interfaces remain restricted to local or isolated development environments until authentication, authorization, and auditing are complete.
-
-Current tests cover strict parsing and signatures, certificate/enrollment boundaries, heartbeat identity binding, real mTLS task delivery, persistent replay protection, concurrent duplicates, interrupted-task recovery, local policy rejection, audit tampering and write failures, result limits and acknowledgments, and disabled nodes on established connections. Inspection tests cover file/link/rotation boundaries, redacted observations, baseline drift, bounded D-Bus decoding, and a real Linux systemd query. Administration tests add backend RBAC, session revocation/expiry, persistent login limits, credential storage, and audit transaction failures. Lifecycle tests cover TLS renewal, signer trust migration, key retirement, immutable dispatched bytes and pending results across rotation, constrained offline issuance, health reports, pooled TLS expiry, and local dual-root replacement. Native Ubuntu deployment CI verifies operational PKI and online server/issuer replacement alongside local maintenance flows, unchanged service isolation, cgroup limits, all four tasks, cold restore quarantine, and fresh enrollment. Linux/Windows tests, the Linux race detector, vulnerability checks, and bounded fuzz tests remain enabled.
-
-**Repository contents**
-
-```text
-cmd/                      Server, probe, enrollment, development keys, local operator tools
-internal/                 Protocol, TLS, enrollment, SQLite, policy, task engine, audit, collectors
-schemas/                  Versioned protocol JSON Schemas
-examples/                 Explicit local telemetry and task policy
-deploy/linux/             Reviewed systemd units, sysusers definitions, enrollment drop-in
-test/integration/         Real mTLS connection tests
-test/deployment/          Disposable-VM service isolation and recovery exercises
-.github/workflows/        Linux and Windows validation
-docs/
-  phase-1-design.md        Target architecture and security design
-  phase-2-implementation.md Implemented scope and local development guide
-  phase-3-implementation.md Enrollment, heartbeat, storage, and telemetry guide
-  phase-4-implementation.md Typed tasks, local policy, replay state, and audit guide
-  phase-5-implementation.md SSH observations, local resource mappings, and service status
-  phase-5-helper-design.md Privileged helper constraints; no helper implemented
-  phase-6-implementation.md Administrator CLI, authentication, sessions, and RBAC
-  phase-7-implementation.md Linux service hardening, installation, and restore quarantine
-  phase-8-implementation.md TLS credential generations, renewal, local activation, and retirement
-  phase-8-signer-rotation.md Local signer trust migration, overlap, and retirement
-  phase-8-pki-recovery.md   Offline PKI, health snapshots, and local authority replacement
-```
-
-The target API, enrollment flow, task format, and security requirements are documented in the [design specification](docs/phase-1-design.md). Follow the [Linux service guide](docs/phase-7-implementation.md) to qualify an isolated deployment and the [administration guide](docs/phase-6-implementation.md) to manage the existing read-only task flow. Scheduled expiry notifications, unattended credential installation, automatic retention, off-host auditing, and multi-host deployment remain future work.
+Local work has exercised unit and real TLS integration tests, race detection, vet, bounded fuzzing, and an actual-binary workflow with five local agents. A native systemd deployment CI fixture is provided; its status must be checked against a specific CI run. Five local agents do not replace deployment, sustained testing, and resource measurement on five independent VPS instances.

@@ -1,173 +1,179 @@
-// Package enrollment issues narrowly scoped probe identities from signed CSRs.
+// Package enrollment implements one enrollment authority and ordinary X.509 renewal.
 package enrollment
 
 import (
-	"bytes"
-	"crypto/ed25519"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/asn1"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/localfile"
-	"github.com/Oreki0504/Argus-C2/internal/signing"
-	"github.com/Oreki0504/Argus-C2/internal/tlsconfig"
 )
 
 type Issuer struct {
-	cert       *x509.Certificate
-	key        ed25519.PrivateKey
-	pem        []byte
-	lifetime   time.Duration
-	validUntil time.Time
+	Certificate *x509.Certificate
+	Key         *ecdsa.PrivateKey
+	Lifetime    time.Duration
 }
 
-func (i *Issuer) Certificate() *x509.Certificate { return i.cert }
-
-// Configured once before serving. The development default remains 12 hours;
-// longer lifetimes require explicit local configuration and a usable issuer.
-func (i *Issuer) SetLifetime(lifetime time.Duration) error {
-	if lifetime < time.Hour || lifetime > 30*24*time.Hour || lifetime%time.Second != 0 {
-		return errors.New("certificate lifetime must be 1 hour through 30 days in whole seconds")
+func serial() *big.Int {
+	n, e := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if e != nil {
+		panic(e)
 	}
-	i.lifetime = lifetime
-	return nil
+	return n.Add(n, big.NewInt(1))
 }
-
-func (i *Issuer) CheckTaskKey(key ed25519.PrivateKey) error { return signing.Distinct(key, i.cert) }
-
-func LoadIssuer(certPath, keyPath, caPath string) (*Issuer, error) {
-	certPEM, err := localfile.Read(certPath, 16384, false)
-	if err != nil {
-		return nil, err
-	}
-	keyPEM, err := localfile.Read(keyPath, 16384, true)
-	if err != nil {
-		return nil, err
-	}
-	pair, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return nil, errors.New("invalid issuer credentials")
-	}
-	if len(pair.Certificate) != 1 {
-		return nil, errors.New("expected one issuing CA certificate")
-	}
-	cert, err := x509.ParseCertificate(pair.Certificate[0])
-	if err != nil {
-		return nil, err
-	}
-	key, ok := pair.PrivateKey.(ed25519.PrivateKey)
-	if !ok || tlsconfig.CheckIssuerProfile(cert) != nil {
-		return nil, errors.New("issuer must be a non-root, client-auth-only Ed25519 CA with path length zero")
-	}
-	roots, err := tlsconfig.LoadRoots(caPath)
-	if err != nil {
-		return nil, err
-	}
-	chains, err := cert.Verify(x509.VerifyOptions{Roots: roots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}})
-	if err != nil || len(chains) == 0 || len(chains[0]) < 2 {
-		return nil, errors.New("issuer must chain to the separately provisioned root CA")
-	}
-	validUntil := cert.NotAfter
-	for _, c := range chains[0] {
-		if c.NotAfter.Before(validUntil) {
-			validUntil = c.NotAfter
-		}
-	}
-	return &Issuer{cert: cert, key: key, pem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), validUntil: validUntil}, nil
+func certPEM(der []byte) []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
-
-func ParseCSR(der []byte) (*x509.CertificateRequest, error) {
-	if len(der) == 0 || len(der) > 2048 {
+func KeyPEM(key *ecdsa.PrivateKey) ([]byte, error) {
+	b, e := x509.MarshalPKCS8PrivateKey(key)
+	if e != nil {
+		return nil, e
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: b}), nil
+}
+func Load(certPath, keyPath string) (*Issuer, error) {
+	c, e := localfile.Read(certPath, 16384, false)
+	if e != nil {
+		return nil, e
+	}
+	k, e := localfile.Read(keyPath, 16384, true)
+	if e != nil {
+		return nil, e
+	}
+	pair, e := tls.X509KeyPair(c, k)
+	if e != nil {
+		return nil, e
+	}
+	cert, e := x509.ParseCertificate(pair.Certificate[0])
+	if e != nil {
+		return nil, e
+	}
+	key, ok := pair.PrivateKey.(*ecdsa.PrivateKey)
+	if !ok || !cert.IsCA || cert.KeyUsage&x509.KeyUsageCertSign == 0 || time.Now().Before(cert.NotBefore) || !time.Now().Before(cert.NotAfter) {
+		return nil, errors.New("invalid enrollment authority")
+	}
+	return &Issuer{cert, key, 30 * 24 * time.Hour}, nil
+}
+func ParseCSR(b []byte) (*x509.CertificateRequest, error) {
+	if len(b) == 0 || len(b) > 4096 {
 		return nil, errors.New("invalid CSR size")
 	}
-	csr, err := x509.ParseCertificateRequest(der)
-	if err != nil {
-		return nil, errors.New("invalid CSR")
+	c, e := x509.ParseCertificateRequest(b)
+	if e != nil {
+		return nil, e
 	}
-	if err := csr.CheckSignature(); err != nil {
-		return nil, errors.New("invalid CSR proof of possession")
+	if e = c.CheckSignature(); e != nil {
+		return nil, e
 	}
-	// x509 exposes only attributes it understands. Inspect the signed ASN.1
-	// sequence as well so unknown attributes cannot bypass the empty-CSR rule.
-	var info struct {
-		Version    int
-		Subject    asn1.RawValue
-		PublicKey  asn1.RawValue
-		Attributes []asn1.RawValue `asn1:"optional,tag:0"`
+	key, ok := c.PublicKey.(*ecdsa.PublicKey)
+	if !ok || key.Curve != elliptic.P256() || len(c.Extensions) > 0 || len(c.Subject.Names) > 0 || len(c.Attributes) > 0 {
+		return nil, errors.New("CSR must contain only a P-256 public key")
 	}
-	rest, err := asn1.Unmarshal(csr.RawTBSCertificateRequest, &info)
-	if err != nil || len(rest) != 0 || info.Version != 0 || len(info.Attributes) != 0 || !bytes.Equal(csr.RawSubject, []byte{0x30, 0x00}) {
-		return nil, errors.New("CSR subject and attributes must be empty")
-	}
-	if _, ok := csr.PublicKey.(ed25519.PublicKey); !ok || len(csr.Subject.Names) != 0 || len(csr.Extensions) != 0 || len(csr.Attributes) != 0 || len(csr.DNSNames) != 0 || len(csr.IPAddresses) != 0 || len(csr.EmailAddresses) != 0 || len(csr.URIs) != 0 {
-		return nil, errors.New("CSR must contain only an Ed25519 public key")
-	}
-	return csr, nil
+	return c, nil
 }
-
-func (i *Issuer) Issue(csr *x509.CertificateRequest, n identity.Node) ([]byte, *x509.Certificate, error) {
-	if csr == nil {
-		return nil, nil, errors.New("CSR is required")
-	}
-	checked, err := ParseCSR(csr.Raw)
-	if err != nil {
-		return nil, nil, err
-	}
-	u, err := n.URI()
-	if err != nil {
-		return nil, nil, err
+func (i *Issuer) Issue(csr []byte, id string) (string, *x509.Certificate, error) {
+	c, e := ParseCSR(csr)
+	if e != nil {
+		return "", nil, e
 	}
 	now := time.Now()
-	until := i.validUntil
-	if until.IsZero() {
-		until = i.cert.NotAfter
+	until := now.Add(i.Lifetime)
+	if until.After(i.Certificate.NotAfter) {
+		until = i.Certificate.NotAfter
 	}
-	if now.Before(i.cert.NotBefore) || !now.Add(time.Minute).Before(until) {
-		return nil, nil, errors.New("issuing CA is outside its usable validity window")
+	if now.Before(i.Certificate.NotBefore) || until.Sub(now) < time.Hour {
+		return "", nil, errors.New("enrollment authority expires too soon")
 	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return nil, nil, err
+	t := &x509.Certificate{SerialNumber: serial(), NotBefore: now.Add(-time.Minute), NotAfter: until, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, URIs: []*url.URL{identity.URI(id)}}
+	der, e := x509.CreateCertificate(rand.Reader, t, i.Certificate, c.PublicKey, i.Key)
+	if e != nil {
+		return "", nil, e
 	}
-	serial.Add(serial, big.NewInt(1))
-	lifetime := i.lifetime
-	if lifetime == 0 {
-		lifetime = 12 * time.Hour
-	}
-	expires := now.Add(lifetime)
-	if expires.After(until) {
-		expires = until
-	}
-	notBefore := now.Add(-time.Minute)
-	if notBefore.Before(i.cert.NotBefore) {
-		notBefore = i.cert.NotBefore
-	}
-	template := &x509.Certificate{SerialNumber: serial, NotBefore: notBefore, NotAfter: expires,
-		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, URIs: []*url.URL{u}}
-	der, err := x509.CreateCertificate(rand.Reader, template, i.cert, checked.PublicKey, i.key)
-	if err != nil {
-		return nil, nil, err
-	}
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		return nil, nil, err
-	}
-	chain := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	chain = append(chain, i.pem...)
-	return chain, cert, nil
+	cert, e := x509.ParseCertificate(der)
+	return string(certPEM(der)), cert, e
+}
+func CSR(key *ecdsa.PrivateKey) ([]byte, error) {
+	return x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, key)
 }
 
-// CheckTransport compares key material, not filenames or certificate subjects.
-func (i *Issuer) CheckTransport(cert *x509.Certificate) error {
-	if cert == nil || bytes.Equal(i.cert.RawSubjectPublicKeyInfo, cert.RawSubjectPublicKeyInfo) {
-		return errors.New("transport and certificate-issuance keys must be distinct")
+// Initialize writes a single CA and a distinct server leaf. Existing files are never overwritten.
+func Initialize(dir string, hosts []string) error {
+	if len(hosts) == 0 {
+		return errors.New("server hostnames are required")
+	}
+	if e := os.Mkdir(dir, 0700); e != nil && !os.IsExist(e) {
+		return e
+	}
+	key, e := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if e != nil {
+		return e
+	}
+	now := time.Now()
+	root := &x509.Certificate{SerialNumber: serial(), Subject: pkix.Name{CommonName: "Argus fleet CA"}, NotBefore: now.Add(-time.Minute), NotAfter: now.AddDate(5, 0, 0), IsCA: true, BasicConstraintsValid: true, MaxPathLenZero: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign}
+	der, e := x509.CreateCertificate(rand.Reader, root, root, &key.PublicKey, key)
+	if e != nil {
+		return e
+	}
+	root, e = x509.ParseCertificate(der)
+	if e != nil {
+		return e
+	}
+	rootKey, e := KeyPEM(key)
+	if e != nil {
+		return e
+	}
+	serverKey, e := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if e != nil {
+		return e
+	}
+	leaf := &x509.Certificate{SerialNumber: serial(), NotBefore: now.Add(-time.Minute), NotAfter: now.AddDate(1, 0, 0), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	for _, h := range hosts {
+		if h == "" {
+			return errors.New("empty server name")
+		}
+		if ip := net.ParseIP(h); ip != nil {
+			leaf.IPAddresses = append(leaf.IPAddresses, ip)
+		} else {
+			leaf.DNSNames = append(leaf.DNSNames, h)
+		}
+	}
+	leafDER, e := x509.CreateCertificate(rand.Reader, leaf, root, &serverKey.PublicKey, key)
+	if e != nil {
+		return e
+	}
+	serverPEM, e := KeyPEM(serverKey)
+	if e != nil {
+		return e
+	}
+	for _, f := range []struct {
+		name string
+		b    []byte
+	}{{"ca.pem", certPEM(der)}, {"ca-key.pem", rootKey}, {"server.pem", certPEM(leafDER)}, {"server-key.pem", serverPEM}} {
+		out, e := os.OpenFile(filepath.Join(dir, f.name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if e != nil {
+			return e
+		}
+		_, e = out.Write(f.b)
+		ce := out.Close()
+		if e != nil {
+			return e
+		}
+		if ce != nil {
+			return ce
+		}
 	}
 	return nil
 }
