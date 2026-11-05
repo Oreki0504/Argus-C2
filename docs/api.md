@@ -10,7 +10,7 @@ This page describes the current `/v1` routes. Access is HTTPS-only; the applicat
 - Node routes: a TLS client certificate verified against the trusted CA, with matching node identity, certificate fingerprint, validity, and active status. An administrator token cannot replace this certificate.
 - Enrollment: no existing client certificate is required; submit a time-limited enrollment token and CSR in JSON.
 
-For request bodies, `Content-Type` must be exactly `application/json`; a `charset` suffix is currently rejected. Requests must be JSON objects with the required fields. Duplicate keys, unknown top-level fields, `null`, trailing JSON, and excessive nesting are rejected. Send `{}` for an empty request object, not zero bytes or `null`. Go type validators enforce additional field constraints.
+For request bodies, `Content-Type` must parse as `application/json`. An optional UTF-8 charset (including `application/json; charset=utf-8`) is accepted. Duplicate Content-Type headers, malformed media types, non-JSON types, and non-UTF-8 charset declarations are rejected. Requests must be JSON objects with the required fields. Duplicate keys, unknown top-level fields, `null`, trailing JSON, and excessive nesting are rejected. Send `{}` for an empty request object, not zero bytes or `null`. Go type validators enforce additional field constraints.
 
 Timestamps are Unix seconds. Task states are uppercase; node states are lowercase. Successful responses normally use HTTP 200, including creation requests. Empty task polls return 204. Responses set `Cache-Control: no-store`.
 
@@ -33,7 +33,23 @@ The server returns `X-Argus-Protocol-Version: 1`. The agent verifies it before p
 | `GET /v1/tasks/{id}` | ReadOnly/Admin | None | Object with `task` and `result`; `result` is omitted until one is stored |
 | `GET /v1/audit?after=SEQUENCE` | ReadOnly/Admin | None | Audit array, at most 200 entries |
 
-`nodes` and `tasks` sort by ascending random ID. Continue with the last ID from the previous page. This is neither creation-time ordering nor a stable live-update cursor. `audit` uses nonnegative numeric IDs, starting after 0 by default. Audit IDs increase monotonically, but retention can leave gaps. There are no `limit`, node-filter, task-cancellation, node-enabling, record-deletion, or remote user-management routes.
+`nodes` and `tasks` sort by ascending random ID. Continue with the last ID from the previous page. This is neither creation-time ordering nor a stable live-update cursor. `audit` uses nonnegative numeric IDs, starting after 0 by default. Audit IDs increase monotonically, but retention can leave gaps. Task filtering and bounded newest-first pages are opt-in as described below; other lists retain their existing pagination. There are no task-cancellation, node-enabling, record-deletion, or remote user-management routes.
+
+### Newest task pages
+
+`GET /v1/tasks?order=newest&limit=20` returns `{"items":[...],"next_cursor":"..."}`; `next_cursor` is omitted at the end. This mode sorts descending by `(created_at, id)` and accepts:
+
+| Parameter | Meaning |
+| --- | --- |
+| `node_id` | Exact node ID |
+| `status` | One uppercase task state |
+| `created_after` / `created_before` | Inclusive Unix-second creation bounds; 0 or omission disables that bound |
+| `limit` | 1–200; default 20 |
+| `cursor` | Opaque continuation from the previous page; retain the same filters |
+
+The cursor contains the last creation time and ID and is bound to the filters. It is not an authentication token. Status/time/node filters run in SQLite with matching creation-order indexes. Duplicate or unknown query parameters, invalid ranges/status/cursors, or mixing `after` with newest mode return 400. Legacy `order=id` (or omitted order) accepts only `after` and returns the original array shape. Time bounds and node IDs are validated before database work.
+
+This is keyset pagination, not a frozen snapshot. New rows or changing statuses can affect a later page; refresh the first page to observe recent work. Removing a cursor's task through retention does not invalidate its time/ID continuation. Admin and ReadOnly have the same query access; page parameters never grant mutation permissions.
 
 ### Create a task
 
@@ -132,9 +148,9 @@ Hostnames must be nonempty, contain no control characters, and fit within 255 by
 
 The result must belong to a task assigned to the certificate's node. Allowed statuses are `SUCCEEDED`, `FAILED`, and `UNKNOWN`. A success has an empty `error`, and its payload is validated against the task type and resource ID. Failed/unknown payloads must be empty objects; insignificant whitespace such as `{ }` is accepted.
 
-The complete result is limited to 65,536 bytes, its payload to 64,512 bytes, and `error` to 128 bytes without control characters. Local agent limits may be lower. `completed_at` is a positive Unix timestamp supplied by the agent, not proof of trusted server time.
+The complete result is limited to 65,536 bytes, its payload to 64,512 bytes, and `error` to 128 bytes without control characters. Local agent limits may be lower. `completed_at` is a positive Unix timestamp supplied by the agent, not proof of trusted server time. The server separately stores `received_at` on first commit; identical retries do not change it. Management task views expose `result_received_at` and `execution_authorized_at` when present; these are not fields agents may submit.
 
-The server accepts terminal results for `ACCEPTED/RUNNING/UNKNOWN` tasks that have no stored result. Results cannot be submitted directly for `PENDING` tasks. Typed comparison ignores JSON object-key order and whitespace, preserves exact integer values and array order, and includes error and completion time. Retransmitting the same result succeeds; a different terminal result cannot overwrite it. Whether an unknown outcome can later be resolved depends on whether a result row already exists.
+The server accepts FAILED/UNKNOWN results for `ACCEPTED/RUNNING/UNKNOWN` tasks that have no stored result. SUCCEEDED requires a persisted prior execution grant and current RUNNING or UNKNOWN status; ACCEPTED → SUCCEEDED is rejected with 409 / `task_rejected`. Results cannot be submitted directly for `PENDING` tasks. Typed comparison ignores JSON object-key order and whitespace, preserves exact integer values and array order, and includes error and completion time. Retransmitting the same result succeeds; a different terminal result cannot overwrite it. Whether an unknown outcome can later be resolved depends on whether a result row already exists.
 
 ## Sizes, timeouts, and errors
 

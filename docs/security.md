@@ -27,6 +27,8 @@ Every node operation checks certificate validity, fingerprints, and disabled sta
 
 Administrator configuration stores only SHA-256 digests of tokens generated from a cryptographically secure random source. This is not password authentication. Give each administrator a separate token and use ReadOnly for observation. To revoke an account, remove its record and restart the server; configuration changes are not hot-reloaded.
 
+Browser session authentication remains a [design](web-design.md), not an implemented endpoint. Current bearer-token revocation still takes effect on server restart. Standard JSON media-type parsing and task-list filtering do not add browser credential storage or cookie authentication.
+
 ## Single CA and renewal
 
 Initialization creates a self-signed CA and a separate server key and certificate. Defaults are five years for the CA, one year for the server certificate, and 30 days for agent certificates, bounded by CA expiry. Certificate lifetimes are code defaults, not JSON settings.

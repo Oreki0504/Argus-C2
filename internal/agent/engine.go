@@ -9,6 +9,7 @@ import (
 	"github.com/Oreki0504/Argus-C2/internal/collectors"
 	"github.com/Oreki0504/Argus-C2/internal/policy"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
+	"github.com/Oreki0504/Argus-C2/internal/transport"
 )
 
 type Engine struct {
@@ -51,7 +52,17 @@ func (e *Engine) Process(ctx context.Context, t protocol.Task, running func(cont
 		r.Error = "local_policy_denied"
 	default:
 		if err = running(ctx, t.ID); err != nil {
-			return protocol.Result{}, err
+			// The server may never redeliver this assignment. Reconcile locally
+			// now, without depending on another poll or a process restart.
+			r = protocol.NewResult(t, protocol.Unknown, "execution_authorization_uncertain")
+			var rejection *transport.APIError
+			if errors.As(err, &rejection) && rejection.ExecutionRejection() {
+				r = protocol.NewResult(t, protocol.Failed, "execution_authorization_rejected")
+			}
+			e.State.interrupted[t.ID] = r
+			finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return r, errors.Join(err, e.State.recover(finishCtx))
 		}
 		if err = e.State.markRunning(ctx, t.ID); err != nil {
 			e.State.interruption(t, "running_persistence_interrupted")

@@ -68,15 +68,16 @@ done
 | [安全边界](docs/security.md) | 信任假设、凭证、审计和限制 |
 | [Linux 部署](docs/deployment.md) | 账户、权限、systemd 与注册 |
 | [日常运维](docs/operations.md) | 账号、续期、日志、备份恢复和排障 |
+| [Frontend 准备](docs/web-design.md) | 会话设计与当前任务查询约定 |
 | [开发与验证](docs/validation.md) | 测试命令、证据、CI 与后续验收 |
 
 本地结果维护支持列出、导出、重试和显式删除报告内容，删除后仍保留去重依据。每次节点请求检查协议版本 1，节点列表可观察 Agent 构建版本。本地 `storage` 命令报告数据库/WAL 大小、可用空间及 Agent 结果容量。详见[运维说明](docs/operations.md)。
 
-Server 历史清理由操作员手动执行：`server prune` 默认预览、保留 30 天，添加 `-apply -backup PATH` 后先生成验证过的快照，再删除符合条件的任务和结果。未完成任务及没有结果的 UNKNOWN 会保留。时间计算边界与恢复后果见[运维说明](docs/operations.md#server-history-retention)。
+Server 历史清理由操作员手动执行：`server prune` 默认预览、保留 30 天，添加 `-apply -backup PATH` 后先生成验证过的快照，再删除符合条件的任务和结果。未完成任务继续保留；无结果 UNKNOWN 默认在 90 天后可清理，已收到报告从 Server 首次接收日起保留 30 天。时间计算边界与恢复后果见[运维说明](docs/operations.md#server-history-retention)。
 
 `argus health` 检查 Server 数据库连接；节点 `active` 表示获得授权，`last_seen_at` 表示最近收到心跳的时间；任务 `SUCCEEDED` 表示有合法报告。它们都不能直接解释为节点健康，报告的数据可用性与覆盖范围需要单独判断。详见[状态语义](docs/architecture.md#status-dimensions)。
 
-Server 与 Agent 数据库分别要求 Schema 101 及各自的组件标识；旧数据库会被拒绝，不自动转换。升级前保留状态并遵循[升级与恢复流程](docs/operations.md#database-compatibility-and-upgrades)。Offline Root + Online Intermediate 目前是 [PKI 规划](docs/security.md#offline-root-and-online-intermediate-plan)，当前仍使用在线根 CA。
+Server 要求 Schema 102，Agent 保持 Schema 101，组件标识各自独立；Server 的旧 Schema 101 会被拒绝，不自动转换。升级前保留状态并遵循[升级与恢复流程](docs/operations.md#database-compatibility-and-upgrades)。Offline Root + Online Intermediate 目前是 [PKI 规划](docs/security.md#offline-root-and-online-intermediate-plan)，当前仍使用在线根 CA。
 
 ## 验证状态
 

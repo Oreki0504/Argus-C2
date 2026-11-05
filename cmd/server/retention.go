@@ -17,7 +17,8 @@ import (
 func pruneCommand(args []string, out io.Writer) error {
 	f := flag.NewFlagSet("prune", flag.ContinueOnError)
 	file := f.String("config", "/etc/argus-c2/server.json", "server configuration")
-	days := f.Int("retain-days", database.DefaultRetentionDays, "retain task history for at least this many days after its deadlines")
+	days := f.Int("retain-days", database.DefaultRetentionDays, "retain terminal results for this many days after server receipt")
+	unknownDays := f.Int("unknown-days", database.DefaultUnknownRetentionDays, "retain UNKNOWN without a result for this many days after task deadlines")
 	limit := f.Int("limit", 200, "maximum completed tasks per batch, 1-1000")
 	apply := f.Bool("apply", false, "delete the eligible batch; default is preview only")
 	backup := f.String("backup", "", "new verified snapshot file required with -apply")
@@ -54,9 +55,9 @@ func pruneCommand(args []string, out io.Writer) error {
 	defer cancel()
 	var p database.PruneReport
 	if *apply {
-		p, err = s.Prune(ctx, *days, *limit, *backup)
+		p, err = s.Prune(ctx, *days, *unknownDays, *limit, *backup)
 	} else {
-		p, err = s.PreviewPrune(ctx, *days, *limit)
+		p, err = s.PreviewPrune(ctx, *days, *unknownDays, *limit)
 	}
 	if err != nil {
 		return err

@@ -21,7 +21,7 @@ func seedHistory(t *testing.T, s *Store, id string, status protocol.TaskStatus, 
 		t.Fatal(err)
 	}
 	if result {
-		_, err = s.DB.Exec("INSERT INTO results VALUES(?,'node',?,'{}','',?)", id, status, due)
+		_, err = s.DB.Exec("INSERT INTO results(task_id,node_id,status,payload,error,completed_at,received_at) VALUES(?,'node',?,'{}','',?,?)", id, status, due, due)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,11 +49,11 @@ func TestPrunePreviewBoundariesAndBackupRestore(t *testing.T) {
 		seedHistory(t, s, "keep-"+string(status), status, cutoff-1, false)
 	}
 	seedHistory(t, s, "boundary", protocol.Succeeded, cutoff, true)
-	seedHistory(t, s, "later-completion", protocol.Succeeded, cutoff-1, true)
-	if _, err := s.DB.Exec("UPDATE results SET completed_at=? WHERE task_id='later-completion'", cutoff+1); err != nil {
+	seedHistory(t, s, "later-receipt", protocol.Succeeded, cutoff-1, true)
+	if _, err := s.DB.Exec("UPDATE results SET received_at=? WHERE task_id='later-receipt'", cutoff+1); err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.PreviewPrune(t.Context(), DefaultRetentionDays, 2)
+	p, err := s.PreviewPrune(t.Context(), DefaultRetentionDays, 90, 2)
 	if err != nil || len(p.Items) != 2 || p.Cutoff != cutoff || p.Applied {
 		t.Fatal(p, err)
 	}
@@ -65,7 +65,7 @@ func TestPrunePreviewBoundariesAndBackupRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	backup := filepath.Join(dir, "argus.db")
-	p, err = s.Prune(t.Context(), 30, 1000, backup)
+	p, err = s.Prune(t.Context(), 30, 90, 1000, backup)
 	if err != nil || !p.Applied || p.Deleted != 3 {
 		t.Fatal(p, err)
 	}
@@ -90,7 +90,7 @@ func TestPrunePreviewBoundariesAndBackupRestore(t *testing.T) {
 		t.Fatal("backup lost candidates")
 	}
 	for _, v := range [][2]int{{0, 1}, {36501, 1}, {30, 0}, {30, 1001}} {
-		if _, err = s.PreviewPrune(t.Context(), v[0], v[1]); err == nil {
+		if _, err = s.PreviewPrune(t.Context(), v[0], 90, v[1]); err == nil {
 			t.Fatal("invalid bounds accepted", v)
 		}
 	}
@@ -120,7 +120,7 @@ func TestPruneBackupAndTransactionFailuresPreserveHistory(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			p, err := s.Prune(t.Context(), 30, 200, backup)
+			p, err := s.Prune(t.Context(), 30, 90, 200, backup)
 			if err == nil || p.Applied || p.Deleted != 0 {
 				t.Fatal(p, err)
 			}
@@ -140,7 +140,7 @@ func TestPruneBackupAndTransactionFailuresPreserveHistory(t *testing.T) {
 func TestPruneFrozenBatchAndStaleCandidate(t *testing.T) {
 	s := fixture(t)
 	seedHistory(t, s, "old", protocol.Succeeded, 1, true)
-	p, err := s.PreviewPrune(t.Context(), 30, 200)
+	p, err := s.PreviewPrune(t.Context(), 30, 90, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestStaleSecondCandidateRollsBackEarlierDeletion(t *testing.T) {
 	s := fixture(t)
 	seedHistory(t, s, "a", protocol.Succeeded, 1, true)
 	seedHistory(t, s, "b", protocol.Succeeded, 1, true)
-	p, err := s.PreviewPrune(t.Context(), 30, 200)
+	p, err := s.PreviewPrune(t.Context(), 30, 90, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestPrunedTaskCannotBeGrantedOrAcknowledgeLateResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedHistory(t, s, "old", protocol.Failed, 1, true)
-	if _, err := s.Prune(t.Context(), 30, 200, filepath.Join(t.TempDir(), "backup.db")); err != nil {
+	if _, err := s.Prune(t.Context(), 30, 90, 200, filepath.Join(t.TempDir(), "backup.db")); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Running(t.Context(), c, "old"); !errors.Is(err, ErrTaskNotFound) {

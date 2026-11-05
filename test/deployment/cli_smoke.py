@@ -108,7 +108,7 @@ def main():
             command("server", "backup", "-config", server_dir / "server.json", "-out", backup)
             assert backup.stat().st_size > 0 and backup.stat().st_mode & 0o077 == 0
             preview = command("server", "prune", "-config", server_dir / "server.json", json_result=True)
-            assert preview["retain_days"] == 30 and preview["limit"] == 200
+            assert preview["retain_days"] == 30 and preview["unknown_days"] == 90 and preview["limit"] == 200
             assert not preview["applied"] and preview["items"] == []
             assert command("server", "prune", "-config", server_dir / "server.json",
                            "-apply", check=False).returncode != 0
@@ -118,6 +118,14 @@ def main():
             assert applied["applied"] and applied["deleted"] == 0
             assert prune_backup.stat().st_size > 0 and prune_backup.stat().st_mode & 0o077 == 0
             assert len(cli("tasks", json_result=True)) == len(jobs)
+            newest = cli("tasks", "-order", "newest", "-node", nodes[0]["id"],
+                         "-status", "SUCCEEDED", "-limit", "2", json_result=True)
+            assert len(newest["items"]) == 2 and newest["next_cursor"]
+            following = cli("tasks", "-order", "newest", "-node", nodes[0]["id"],
+                            "-status", "SUCCEEDED", "-limit", "2", "-cursor", newest["next_cursor"], json_result=True)
+            assert len(following["items"]) == 1 and not following.get("next_cursor")
+            certificates = command("server", "certificates", "-config", server_dir / "server.json", json_result=True)
+            assert len(certificates["certificates"]) == 2 and all(c["status"] == "ok" for c in certificates["certificates"])
             storage = command("server", "storage", "-config", server_dir / "server.json", json_result=True)
             assert storage["database_bytes"] > 0 and storage["filesystem_available"]
             records = command("agent", "results", "-config", agents[0], json_result=True)
@@ -166,6 +174,7 @@ def main():
                               "server_restart": "passed", "agent_restart": "passed", "backup": "passed",
                               "local_maintenance": "passed", "account_revocation": "passed", "storage": "passed",
                               "retention_preview_and_recent_history": "passed",
+                              "task_time_pagination": "passed", "certificate_monitor": "passed",
                               "batch_submit_to_inspection_seconds": round(max(latencies), 3),
                               "total_seconds": round(time.monotonic() - started, 3)}, indent=2))
         finally:

@@ -69,20 +69,31 @@ sudo -u argus-agent /usr/local/libexec/argus-c2/agent renew \
 sudo systemctl start argus-c2-agent
 ```
 
-With more than seven days remaining, renewal returns the existing certificate; command success does not mean a replacement was issued. Renewal happens before pending-result uploads and heartbeats, so a failure can prevent the rest of that cycle. Renewal cannot repair a leaked key, an expired certificate, or lost state; disable and reenroll those identities.
+With more than seven days remaining, renewal returns the existing certificate; command success does not mean a replacement was issued. Automatic renewal has a separate five-second budget. If it fails while the current certificate remains valid, a warning is logged and result uploads, heartbeat, and polling continue. Renewal retries are scheduled at most five minutes apart, sooner as expiry approaches; explicit `agent renew` still reports errors directly. Expired or not-yet-valid certificates cannot use this fallback. Renewal cannot repair a leaked key, an expired certificate, or lost state; disable and reenroll those identities.
 
 The CA defaults to five years and the server certificate to one year. There is no automatic server-certificate renewal command. Before expiry, use standard PKI tools to issue a certificate under the same trusted CA with the required SANs and serverAuth purpose. Stop the server, install its matching certificate and key, check credentials, and restart. Preserve recovery material. Replacing the CA requires separately arranging node trust and identities; there is no automatic trust-root switch.
 
+Monitor the public certificates from a local scheduled check:
+
+```sh
+sudo -u argus-server /usr/local/libexec/argus-c2/server certificates \
+  -config /etc/argus-c2/server.json -warn-before 720h
+```
+
+The command prints server/issuer validity and fingerprints and exits nonzero if either is within 30 days of expiry, expired, or not yet valid. It needs no private-key access and installs no scheduler; connect it to existing host monitoring. It checks files on disk, so separately verify the served certificate after rotation. A successful `argus health` alone is not a certificate-lifetime check.
+
+For repeatable same-root server leaf rotation: back up the old leaf/key separately, issue a new distinct server key and leaf with the same required SANs/serverAuth, validate it with a private configuration, stop the service, install the matching pair with existing ownership/modes, and restart. Check the served fingerprint, management access, an already enrolled agent heartbeat, and pending-result delivery. Roll back to the preserved unexpired pair if validation fails; never disable TLS verification. [The rotation integration test](../test/integration/server_rotation_test.go) exercises reconnect and upload with unchanged node identity and rejection of an expired replacement. A stolen old leaf remains trusted until expiry or explicit trust replacement; see [incident response](security.md#online-root-exposure-and-incident-response).
+
 ## Database compatibility and upgrades
 
-Both components currently require Schema **101**, independently versioned. Server databases have SQLite application ID `0x41524753` (`ARGS`); agent databases use `0x41524741` (`ARGA`). A version-101 database from the other component is still incompatible. Pre-101 and other unsupported versions are rejected; startup never resets or converts them. Do not change `PRAGMA user_version` to bypass the check.
+The server requires Schema **102**; the agent remains on Schema **101**, independently versioned. Server databases have SQLite application ID `0x41524753` (`ARGS`); agent databases use `0x41524741` (`ARGA`). Server Schema 101 is incompatible with 102 because it lacks trusted receipt and durable execution-authorization timestamps and the task-query indexes. Wrong-component and other unsupported versions are rejected; startup never resets or converts them. Do not change `PRAGMA user_version` to bypass the check.
 
 Before replacing binaries:
 
 1. Record the old/new commit, protocol version, each component's schema version, and current configuration. Protocol 1 compatibility does not imply database compatibility.
 2. Create a verified server snapshot with the old compatible binary. Separately preserve configuration, CA/TLS material, account configuration, and revocations since the snapshot. Stop each agent before preserving its entire identity/state directory; retain the old binaries.
 3. Test the new binaries against **copies** in an isolated environment, with agent access blocked. Check schema acceptance, administration, result reads, and restart behavior. Never run a copied agent identity alongside the original.
-4. For compatible Schema 101 updates, stop services, install binaries, run appropriate configuration checks, restart, and inspect heartbeat/report behavior before broader rollout.
+4. For updates compatible with each component's current schema, stop services, install binaries, run appropriate configuration checks, restart, and inspect heartbeat/report behavior before broader rollout.
 5. For incompatible development state, keep it archived. Use a specifically reviewed one-time conversion only if one exists; none is shipped here. Otherwise initialize a separate deployment and explicitly reenroll nodes with new identities. Do not silently discard pending results or reuse a certificate with a new agent database.
 
 There is no historical migration chain, downgrade framework, or general migration command before MVP. Rollback requires a binary that supports the database being restored and the identity reconciliation below; restoring both agent and server snapshots can break deduplication continuity.
@@ -105,29 +116,29 @@ A database snapshot excludes the CA private key, server certificate and key, `ad
 
 ## Server history retention
 
-No background job deletes task history. Run `server prune` as the server service user; default behavior is preview, retaining 30 days with at most 200 candidate pairs. `-retain-days` accepts 1–36,500 and `-limit` accepts 1–1,000. A candidate must have matching terminal task/result records (`SUCCEEDED`, `FAILED`, or persisted `UNKNOWN`) and all three timestamps strictly before the cutoff: `dispatch_expires_at`, `result_due_at`, and `result.completed_at`. Unfinished tasks and UNKNOWN without a result are retained regardless of age.
+No background job deletes task history. Run `server prune` as the server service user; default behavior is preview, retaining 30 days with at most 200 candidate tasks. `-retain-days` and `-unknown-days` each accept 1–36,500 and `-limit` accepts 1–1,000. Matching terminal task/result records (`SUCCEEDED`, `FAILED`, or persisted `UNKNOWN`) qualify only when server `received_at` is strictly older than the result cutoff. UNKNOWN without a result uses a separate `-unknown-days` interval, default 90 days, measured after the later of its dispatch and result deadlines. Active PENDING/ACCEPTED/RUNNING records remain protected; preview does not run expiry maintenance.
 
-The cutoff is server time minus the chosen number of 24-hour days. **This is retention after task deadlines, not a guarantee of 30 days after result receipt.** Schema 101 has no trusted result-receipt timestamp. An agent's later completion timestamp only postpones eligibility. A newly received, old report can therefore qualify immediately; inspect/export it or use a longer retention interval before applying. Synchronize server time.
+Each cutoff is server time minus its configured number of 24-hour days. **Result retention starts at first server receipt**, including delayed uploads and server-generated terminal reports. Old or future Agent `completed_at` values do not affect eligibility; duplicate uploads never refresh `received_at`. A late result arriving for an UNKNOWN candidate before deletion invalidates that frozen candidate and aborts the entire batch. Synchronize server time; substantial server clock jumps can affect age calculations.
 
 ```sh
 sudo -u argus-server /usr/local/libexec/argus-c2/server prune \
-  -config /etc/argus-c2/server.json -retain-days 30 -limit 200
+  -config /etc/argus-c2/server.json -retain-days 30 -unknown-days 90 -limit 200
 ```
 
-Review the returned task IDs, node IDs, statuses, and Unix cutoff. To apply, first create the private backup directory shown in Online backup, then choose a new snapshot path:
+Review the returned task IDs, node IDs, statuses, `has_result`, server `retained_at`, and both Unix cutoffs. To apply, first create the private backup directory shown in Online backup, then choose a new snapshot path:
 
 ```sh
 ARGUS_PRUNE_BACKUP="/var/lib/argus-c2-server/backups/pre-prune-$(date -u +%Y%m%dT%H%M%SZ).db"
 sudo -u argus-server /usr/local/libexec/argus-c2/server prune \
-  -config /etc/argus-c2/server.json -retain-days 30 -limit 200 \
+  -config /etc/argus-c2/server.json -retain-days 30 -unknown-days 90 -limit 200 \
   -apply -backup "$ARGUS_PRUNE_BACKUP"
 ```
 
 Apply recomputes and freezes a bounded candidate list, creates a verified nonoverwriting snapshot, then revalidates and deletes the batch in one transaction. Results arriving after the list was frozen cannot join that batch. The returned JSON is the applied list, which can differ from a previous preview. A stale candidate, backup failure, audit failure, or failed deletion aborts cleanup; a successful backup can remain after a later transaction failure. Inspect the error and current state before retrying with a new backup path. Run one cleanup operator at a time.
 
-Each removed pair produces a `task.prune` audit event with its IDs and original terminal state. Prior audit is not cascaded away, but appending events still enforces the existing 100,000-event capacity. Export audit pages to separately protected storage when longer evidence retention is required. Backups contain deleted reports and require their own retention and access policy; pruning is not secure erasure and may not shrink the SQLite file. Freed pages can be reused. No automatic VACUUM or backup deletion is performed.
+Each removed task (with or without a result) produces a `task.prune` audit event with its IDs and original terminal state. Prior audit is not cascaded away, but appending events still enforces the existing 100,000-event capacity. Export audit pages to separately protected storage when longer evidence retention is required. Backups contain deleted reports and require their own retention and access policy; pruning is not secure erasure and may not shrink the SQLite file. Freed pages can be reused. No automatic VACUUM or backup deletion is performed.
 
-Deleted tasks disappear from management queries. Late repeated result uploads receive explicit `task_not_found` and remain on the agent as held reports for operator attention. No false acknowledgment, task recreation, or recollection occurs. Agent deduplication is unchanged; expired assignments remain ineligible for execution even after local deduplication cleanup. New tasks always receive newly generated IDs.
+Deleted tasks disappear from management queries. Late repeated result uploads receive explicit `task_not_found` and remain on the agent as held reports for operator attention. This also applies when a result arrives after a resultless UNKNOWN has been pruned. No false acknowledgment, task recreation, or recollection occurs. Agent deduplication is unchanged; expired assignments remain ineligible for execution even after local deduplication cleanup. New tasks always receive newly generated IDs.
 
 For recovery, inspect the pre-prune snapshot in isolation first. Restoring it to production rolls back **all** server state, including later tasks, enrollments, renewals, and disabling; follow the full restore procedure below. Never overwrite a live database or manually insert a task with the old ID to make an upload pass. Local result discard remains a separate explicit operator action.
 
@@ -178,7 +189,7 @@ After resolving the cause, `agent result-retry -config /etc/argus-c2/agent.json 
 
 Discard preserves the assignment and deduplication record; it does not cancel the server task or acknowledge delivery. A server without the report may remain UNKNOWN. Discarded content cannot be uploaded or reconstructed by recollecting. The agent never discards results because retries are exhausted. Restart the agent after maintenance.
 
-`server storage -config /etc/argus-c2/server.json`, run as the server service user, reports database/WAL file sizes and available filesystem space without loading service credentials. The agent storage command additionally reports pending/held count, reserved-plus-actual bytes, held count, and discarded count. On Linux, space warnings mean less than 64 MiB or 10% of filesystem capacity is available. These warnings are observations, not reservations or guarantees of write success. Task/result history has no automatic server retention policy.
+`server storage -config /etc/argus-c2/server.json`, run as the server service user, reports database/WAL file sizes and available filesystem space without loading service credentials. The agent storage command additionally reports pending/held count, reserved-plus-actual bytes, held count, and discarded count. On Linux, space warnings mean less than 64 MiB or 10% of filesystem capacity is available. These warnings are observations, not reservations or guarantees of write success. Task/result history is cleaned manually with `server prune`; no scheduler is installed.
 
 ## Troubleshooting
 
@@ -195,6 +206,7 @@ Discard preserves the assignment and deduplication record; it does not cancel th
 | Held `task_not_found` / `result_conflict` | Server may have restored an old snapshot or pruned that history; inspect/export the report and reconcile using local maintenance |
 | HTTP 426 / incompatible protocol | Use a supported matching deployment; pending data is retained and must not be reset |
 | `local_policy_denied` | Task type and resource mapping are not both permitted; update local policy and restart the agent |
+| `execution_authorization_rejected` / `execution_authorization_uncertain` | Grant denied or response uncertain; no collection starts, a terminal local report is retained for reconciliation without redelivery |
 | `task_from_future` / `task_expired` | Clock or TTL issue; synchronize time, then create a new task |
 | `collector_timeout` | CPU sampling, system bus, or local resource delay; check sampling and execution budgets |
 | `result_too_large` | Valid report exceeds the local limit; adjust scope or budget; raw truncated output is not uploaded |

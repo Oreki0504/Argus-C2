@@ -19,6 +19,15 @@ type APIError struct {
 	Code   string
 }
 
+// ExecutionRejection recognizes a denial from the execution-grant endpoint.
+// Unclassified HTTP responses and transport errors leave the grant uncertain.
+func (e *APIError) ExecutionRejection() bool {
+	return e.Status == 409 && e.Code == "state_conflict" ||
+		e.Status == 404 && e.Code == "task_not_found" ||
+		e.Status == 401 && e.Code == "unauthorized" ||
+		e.Status == 403 && e.Code == "forbidden"
+}
+
 // ResultRejection only classifies explicit, scoped business failures. HTTP
 // status alone (including 404/5xx) never discards or parks a result.
 func (e *APIError) ResultRejection() bool {
@@ -86,7 +95,7 @@ func Request(ctx context.Context, c *http.Client, base, token, method, path stri
 			Error string `json:"error"`
 			Code  string `json:"code"`
 		}
-		if readErr == nil && res.Header.Get("Content-Type") == "application/json" && strictjson.Decode(raw, &body, 1024, "error", "code") == nil && knownErrorCode(body.Code) {
+		if readErr == nil && len(res.Header.Values("Content-Type")) == 1 && strictjson.MediaType(res.Header.Get("Content-Type")) && strictjson.Decode(raw, &body, 1024, "error", "code") == nil && knownErrorCode(body.Code) {
 			failure.Code = body.Code
 		}
 		return nil, failure

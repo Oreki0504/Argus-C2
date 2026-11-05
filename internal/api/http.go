@@ -85,8 +85,7 @@ func (s *Server) Handler() http.Handler {
 		reply(w, out, e)
 	}))
 	mux.HandleFunc("GET /v1/tasks", s.admin(false, func(w http.ResponseWriter, r *http.Request, u auth.User) {
-		out, e := s.Store.Tasks(r.Context(), r.URL.Query().Get("after"))
-		reply(w, out, e)
+		s.tasks(w, r)
 	}))
 	mux.HandleFunc("GET /v1/tasks/{id}", s.admin(false, func(w http.ResponseWriter, r *http.Request, u auth.User) {
 		out, e := s.Store.Task(r.Context(), r.PathValue("id"))
@@ -216,7 +215,7 @@ func (s *Server) node(next func(http.ResponseWriter, *http.Request, *x509.Certif
 }
 func body(w http.ResponseWriter, r *http.Request, limit int) ([]byte, error) {
 	defer r.Body.Close()
-	if r.Header.Get("Content-Type") != "application/json" {
+	if len(r.Header.Values("Content-Type")) != 1 || !strictjson.MediaType(r.Header.Get("Content-Type")) {
 		return nil, errors.New("expected JSON")
 	}
 	return strictjson.Read(http.MaxBytesReader(w, r.Body, int64(limit)), limit)

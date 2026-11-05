@@ -12,7 +12,7 @@ import (
 
 func TestIncompatibleStateIsPreserved(t *testing.T) {
 	for _, component := range []string{"server", "agent"} {
-		for _, mismatch := range []string{"schema", "component", "empty_component"} {
+		for _, mismatch := range []string{"schema", "previous_schema", "component", "empty_component"} {
 			t.Run(component+"/"+mismatch, func(t *testing.T) {
 				dir := filepath.Join(t.TempDir(), "state")
 				name, version, application := "argus.db", database.SchemaVersion, 0x41524753
@@ -21,6 +21,8 @@ func TestIncompatibleStateIsPreserved(t *testing.T) {
 				}
 				if mismatch == "schema" {
 					version++
+				} else if mismatch == "previous_schema" {
+					version--
 				} else if component == "server" {
 					application = 0x41524741
 				} else {

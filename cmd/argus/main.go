@@ -43,7 +43,13 @@ func run() error {
 	resource := sub.String("resource", "", "local service/profile ID")
 	ttl := sub.Int("ttl", 300, "dispatch validity in seconds")
 	executionTimeout := sub.Duration("execution-timeout", 10*time.Second, "collector budget, 1ms to 30s; also bounded by agent policy")
-	after := sub.String("after", "", "pagination cursor")
+	after := sub.String("after", "", "legacy pagination cursor")
+	order := sub.String("order", "id", "task listing: id or newest")
+	cursor := sub.String("cursor", "", "newest task page cursor")
+	status := sub.String("status", "", "task status filter with -order newest")
+	limit := sub.Int("limit", 20, "newest task page size, 1-200")
+	createdAfter := sub.Int64("created-after", 0, "inclusive task creation lower bound, Unix seconds")
+	createdBefore := sub.Int64("created-before", 0, "inclusive task creation upper bound, Unix seconds")
 	timeout := sub.Duration("timeout", 5*time.Minute, "wait deadline")
 	out := sub.String("out", "", "new private token file")
 	name := sub.String("name", "", "administrator name")
@@ -82,7 +88,21 @@ func run() error {
 	case "nodes":
 		path = "/v1/nodes?after=" + url.QueryEscape(*after)
 	case "tasks":
-		path = "/v1/tasks?after=" + url.QueryEscape(*after)
+		if *order == "id" {
+			if *node != "" || *status != "" || *cursor != "" || *createdAfter != 0 || *createdBefore != 0 || *limit != 20 {
+				return errors.New("task filters require -order newest")
+			}
+			path = "/v1/tasks?after=" + url.QueryEscape(*after)
+		} else if *order == "newest" && *after == "" {
+			q := database.TaskQuery{NodeID: *node, Status: protocol.TaskStatus(*status), CreatedAfter: *createdAfter, CreatedBefore: *createdBefore, Limit: *limit, Cursor: *cursor}
+			if e = q.Validate(); e != nil {
+				return e
+			}
+			values := url.Values{"order": {"newest"}, "node_id": {*node}, "status": {*status}, "cursor": {*cursor}, "limit": {fmt.Sprint(*limit)}, "created_after": {fmt.Sprint(*createdAfter)}, "created_before": {fmt.Sprint(*createdBefore)}}
+			path = "/v1/tasks?" + values.Encode()
+		} else {
+			return errors.New("invalid task order or mixed cursors")
+		}
 	case "health":
 		path = "/v1/health"
 	case "audit":

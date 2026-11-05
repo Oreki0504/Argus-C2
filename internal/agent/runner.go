@@ -25,6 +25,7 @@ type Runner struct {
 	Client          *http.Client
 	Engine          *Engine
 	cert            *x509.Certificate
+	nextRenewal     time.Time
 }
 
 func Open(server, ca, dir string, p policy.Policy) (*Runner, error) {
@@ -66,7 +67,7 @@ func Open(server, ca, dir string, p policy.Policy) (*Runner, error) {
 		state.Close()
 		return nil, e
 	}
-	return &Runner{server, ca, dir, client, &Engine{State: state, Policy: p}, cert}, nil
+	return &Runner{Server: server, CA: ca, Dir: dir, Client: client, Engine: &Engine{State: state, Policy: p}, cert: cert}, nil
 }
 func (r *Runner) Close() error { r.Client.CloseIdleConnections(); return r.Engine.State.Close() }
 func (r *Runner) request(ctx context.Context, path string, v any) ([]byte, error) {
@@ -110,9 +111,25 @@ func (r *Runner) Step(ctx context.Context) error {
 	if e := r.Engine.State.Recover(ctx); e != nil {
 		return e
 	}
-	if time.Until(r.cert.NotAfter) < 7*24*time.Hour {
-		if e := r.Renew(ctx); e != nil {
-			return e
+	now := time.Now()
+	if now.Before(r.cert.NotBefore) || !now.Before(r.cert.NotAfter) {
+		return errors.New("agent certificate is not currently valid; reenrollment required")
+	}
+	if time.Until(r.cert.NotAfter) < 7*24*time.Hour && !now.Before(r.nextRenewal) {
+		// A renewal endpoint outage must not consume the whole communication
+		// cycle or suppress uploads/heartbeats using a still-valid certificate.
+		renewCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := r.Renew(renewCtx)
+		cancel()
+		r.nextRenewal = time.Now().Add(min(5*time.Minute, max(time.Second, time.Until(r.cert.NotAfter)/2)))
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if !time.Now().Before(r.cert.NotAfter) {
+				return err
+			}
+			slog.Warn("certificate renewal failed; valid identity remains in use", "error", err, "certificate_expires_at", r.cert.NotAfter.Unix())
 		}
 	}
 	flushErr := r.flush(ctx)

@@ -68,15 +68,16 @@ Follow the [local quick start](docs/quickstart.md) to complete a single-node wor
 | [Security boundaries](docs/security.md) | Trust assumptions, credentials, audit, and limitations |
 | [Linux deployment](docs/deployment.md) | Accounts, permissions, systemd, and enrollment |
 | [Operations](docs/operations.md) | Accounts, renewal, logs, backup, recovery, and troubleshooting |
+| [Frontend preparation](docs/web-design.md) | Proposed sessions and current task-query contract |
 | [Development and validation](docs/validation.md) | Test commands, evidence, CI, and remaining fleet acceptance |
 
 Local result maintenance can list, export, retry, or explicitly discard report contents while retaining deduplication. Protocol version 1 is checked on every agent request; node listings expose the agent build. Local `storage` commands report database/WAL size, available space, and agent result capacity. See [Operations](docs/operations.md).
 
-Server history cleanup is manual: `server prune` previews a bounded batch with a 30-day default; `-apply -backup PATH` creates a verified snapshot before deleting eligible tasks and results. Active work and UNKNOWN without a stored result remain. See [Operations](docs/operations.md#server-history-retention) for the age boundary and recovery consequences.
+Server history cleanup is manual: `server prune` previews a bounded batch with a 30-day default; `-apply -backup PATH` creates a verified snapshot before deleting eligible tasks and results. Active work remains protected; UNKNOWN without a result becomes eligible after 90 days by default. Received reports retain 30 days from first server receipt. See [Operations](docs/operations.md#server-history-retention) for the age boundary and recovery consequences.
 
 `argus health` checks the server's database connection. Node `active` means authorized, and `last_seen_at` records the latest heartbeat. Task `SUCCEEDED` means a valid report, whose availability and coverage must be inspected separately. None is a host-health verdict. See [Status dimensions](docs/architecture.md#status-dimensions).
 
-Server and agent databases independently require Schema 101 and their own component ID. Older databases are rejected without automatic conversion. Preserve state and follow the [upgrade and recovery procedure](docs/operations.md#database-compatibility-and-upgrades). An offline root with an online intermediate is a [PKI plan](docs/security.md#offline-root-and-online-intermediate-plan), not the current deployment model.
+Server requires Schema 102; agent remains on Schema 101, with separate component IDs. Server Schema 101 and other unsupported versions are rejected without automatic conversion. Preserve state and follow the [upgrade and recovery procedure](docs/operations.md#database-compatibility-and-upgrades). An offline root with an online intermediate is a [PKI plan](docs/security.md#offline-root-and-online-intermediate-plan), not the current deployment model.
 
 ## Validation status
 

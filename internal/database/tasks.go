@@ -115,7 +115,7 @@ func (s *Store) Running(ctx context.Context, c *x509.Certificate, id string) err
 		if t.Status != protocol.Accepted || t.DispatchExpiresAt <= now {
 			return ErrConflict
 		}
-		if e = updateOne(ctx, tx, "UPDATE tasks SET status='RUNNING',result_due_at=? WHERE id=? AND status='ACCEPTED'", now+int64((t.ExecutionTimeoutMS+999)/1000)+protocol.ResultGraceSeconds, id); e != nil {
+		if e = updateOne(ctx, tx, "UPDATE tasks SET status='RUNNING',result_due_at=?,execution_authorized_at=? WHERE id=? AND status='ACCEPTED'", now+int64((t.ExecutionTimeoutMS+999)/1000)+protocol.ResultGraceSeconds, now, id); e != nil {
 			return e
 		}
 		return Audit(ctx, tx, node, "task.run", node, id, "running")
@@ -160,7 +160,16 @@ func (s *Store) SubmitResult(ctx context.Context, c *x509.Certificate, r protoco
 		if t.Status != protocol.Accepted && t.Status != protocol.Running && t.Status != protocol.Unknown {
 			return ErrTaskRejected
 		}
-		if e = insertResult(ctx, tx, r); e != nil {
+		if r.Status == protocol.Succeeded {
+			var authorizedAt int64
+			if e = tx.QueryRowContext(ctx, "SELECT execution_authorized_at FROM tasks WHERE id=?", t.ID).Scan(&authorizedAt); e != nil {
+				return e
+			}
+			if authorizedAt == 0 || t.Status == protocol.Accepted {
+				return ErrTaskRejected
+			}
+		}
+		if e = insertResult(ctx, tx, r, s.now().Unix()); e != nil {
 			return e
 		}
 		if e = updateOne(ctx, tx, "UPDATE tasks SET status=? WHERE id=? AND status IN ('ACCEPTED','RUNNING','UNKNOWN')", r.Status, t.ID); e != nil {
@@ -169,8 +178,8 @@ func (s *Store) SubmitResult(ctx context.Context, c *x509.Certificate, r protoco
 		return Audit(ctx, tx, node, "task.complete", node, t.ID, string(r.Status))
 	})
 }
-func insertResult(ctx context.Context, tx *sql.Tx, r protocol.Result) error {
-	_, e := tx.ExecContext(ctx, "INSERT INTO results(task_id,node_id,status,payload,error,completed_at) VALUES(?,?,?,?,?,?)", r.TaskID, r.NodeID, r.Status, string(r.Payload), r.Error, r.CompletedAt)
+func insertResult(ctx context.Context, tx *sql.Tx, r protocol.Result, receivedAt int64) error {
+	_, e := tx.ExecContext(ctx, "INSERT INTO results(task_id,node_id,status,payload,error,completed_at,received_at) VALUES(?,?,?,?,?,?,?)", r.TaskID, r.NodeID, r.Status, string(r.Payload), r.Error, r.CompletedAt, receivedAt)
 	return e
 }
 
@@ -199,8 +208,10 @@ func resultTx(ctx context.Context, tx *sql.Tx, id string) (protocol.Result, erro
 }
 
 type TaskView struct {
-	Task   protocol.Task    `json:"task"`
-	Result *protocol.Result `json:"result,omitempty"`
+	Task                  protocol.Task    `json:"task"`
+	Result                *protocol.Result `json:"result,omitempty"`
+	ExecutionAuthorizedAt int64            `json:"execution_authorized_at,omitempty"`
+	ResultReceivedAt      int64            `json:"result_received_at,omitempty"`
 }
 
 func (s *Store) Task(ctx context.Context, id string) (TaskView, error) {
@@ -217,9 +228,15 @@ func (s *Store) Task(ctx context.Context, id string) (TaskView, error) {
 		if e != nil {
 			return e
 		}
+		if e = tx.QueryRowContext(ctx, "SELECT execution_authorized_at FROM tasks WHERE id=?", id).Scan(&v.ExecutionAuthorizedAt); e != nil {
+			return e
+		}
 		r, e := resultTx(ctx, tx, id)
 		if e == nil {
 			v.Result = &r
+			if e = tx.QueryRowContext(ctx, "SELECT received_at FROM results WHERE task_id=?", id).Scan(&v.ResultReceivedAt); e != nil {
+				return e
+			}
 		} else if !errors.Is(e, sql.ErrNoRows) {
 			return e
 		}
@@ -272,7 +289,7 @@ func expire(ctx context.Context, tx *sql.Tx, now int64) error {
 		status := protocol.Unknown
 		if t.Status == protocol.Pending {
 			status = protocol.Failed
-			if e = insertResult(ctx, tx, protocol.NewResult(t, status, "expired_before_dispatch")); e != nil {
+			if e = insertResult(ctx, tx, protocol.NewResult(t, status, "expired_before_dispatch"), now); e != nil {
 				return e
 			}
 		}
@@ -285,7 +302,7 @@ func expire(ctx context.Context, tx *sql.Tx, now int64) error {
 	}
 	return nil
 }
-func finishOutstanding(ctx context.Context, tx *sql.Tx, id, code string) error {
+func finishOutstanding(ctx context.Context, tx *sql.Tx, id, code string, now int64) error {
 	rows, e := tx.QueryContext(ctx, "SELECT "+taskColumns+" FROM tasks WHERE node_id=? AND status IN ('PENDING','ACCEPTED','RUNNING')", id)
 	if e != nil {
 		return e
@@ -309,7 +326,7 @@ func finishOutstanding(ctx context.Context, tx *sql.Tx, id, code string) error {
 		if t.Status == protocol.Pending {
 			status = protocol.Failed
 		}
-		if e = insertResult(ctx, tx, protocol.NewResult(t, status, code)); e != nil {
+		if e = insertResult(ctx, tx, protocol.NewResult(t, status, code), now); e != nil {
 			return e
 		}
 		if e = updateOne(ctx, tx, "UPDATE tasks SET status=? WHERE id=? AND status=?", status, t.ID, t.Status); e != nil {

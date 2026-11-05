@@ -31,7 +31,7 @@
 
 文件整体最多 8 KiB。服务端启动验证证书用途、信任链和有效期。仓库 systemd 单元通过 `LoadCredential` 提供三个秘密文件，实际配置见[部署指南](deployment.md)，不要直接把上面的文件权限放宽给服务用户。
 
-历史保留不使用 JSON 配置项，也没有自动清理定时器；使用本地 `server prune` 命令，默认预览并保留 30 天，具体边界见[运维说明](operations.md#server-history-retention)。当前 `ca` / `issuer_key` 对应在线根 CA，[中间 CA 方案](security.md#offline-root-and-online-intermediate-plan) 尚未实现为可用配置。
+历史保留不使用 JSON 配置项，也没有自动清理定时器；使用本地 `server prune` 命令，默认只预览，已接收结果从首次接收日起保留 30 天，无结果 UNKNOWN 从任务截止后保留 90 天，具体边界见[运维说明](operations.md#server-history-retention)。当前 `ca` / `issuer_key` 对应在线根 CA，[中间 CA 方案](security.md#offline-root-and-online-intermediate-plan) 尚未实现为可用配置。
 
 ## 管理员配置
 

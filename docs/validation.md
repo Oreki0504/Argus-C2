@@ -141,10 +141,28 @@ The existing workflow runs the new regression tests without a separate testing f
 | CLI preview/apply boundary | [server retention tests](../cmd/server/retention_test.go): defaults, invalid arguments, service-credential independence, required backup and nonoverwrite; existing binary smoke checks default preview and protection of recent history |
 | Partial collector output | [network tests](../internal/collectors/network/linux_test.go) and [process tests](../internal/collectors/process/linux_test.go): read errors after valid data, Scanner overflow, malformed rows, and cancellation |
 
-Schema remains 101 and protocol remains 1; no new report fields or PKI implementation are introduced. Health semantics and Offline Root + Online Intermediate are documented against the current implementation, with the latter explicitly a future design.
+That refinement kept both schemas at 101 and protocol at 1; no collector report fields or PKI implementation were introduced. The subsequent review fixes below move only the server database to Schema 102. Health semantics and Offline Root + Online Intermediate are documented against the current implementation, with the latter explicitly a future design.
 
 Local verification on 2026-11-05 passed build, vet, all tests, full race tests, Windows cross-compilation, and the existing five-agent actual-binary workflow (15 P0 tasks, restart, backup, local maintenance, account revocation, storage). The binary workflow took 2.008 seconds, including 0.974 seconds for its batch execution/inspection measure; these are local observations, not VPS performance targets. All 14 Markdown documents were checked for local links/anchors, fenced JSON, and shell syntax. The final network-cancellation adjustment passed targeted race checks, and the binary smoke also passed the added default-preview/backup/recent-history assertions. The vulnerability scan found zero reachable vulnerabilities (one advisory in an unused part of a required module). Native Windows execution and disposable systemd/ENOSPC acceptance of this change require its new GitHub Actions run.
 
 ## Maintaining documentation with code
 
 Update [cli.md](cli.md) when changing command arguments; [configuration.md](configuration.md), [api.md](api.md), and relevant schemas when changing fields or limits; [collectors.md](collectors.md) when changing reports; and [architecture.md](architecture.md) and [operations.md](operations.md) when changing state or recovery behavior. Update this page from actual test records, and describe planned behavior as pending until implemented and verified.
+
+## Review follow-up coverage
+
+The review of `9c77f2b` led to Server Schema 102 (Agent Schema 101 and protocol 1 remain). The preceding baseline passed [run 42018199745](https://github.com/Oreki0504/Argus-C2/actions/runs/42018199745); the changes below require their own commit-specific CI result.
+
+| Review concern | Regression evidence |
+| --- | --- |
+| Failed execution grant without future redelivery | [authorization_test.go](../internal/agent/authorization_test.go) and [grant_recovery_test.go](../test/integration/grant_recovery_test.go): explicit denial, timeout, dropped grant response, server expiry, persistence barrier, capacity reservation, restart/no recollection |
+| Renewal outage while certificate is valid | [renewal_availability_test.go](../test/integration/renewal_availability_test.go): result upload, heartbeat and new work continue, retries are spaced, disabling remains enforced; [runner_test.go](../internal/agent/runner_test.go) rejects expired identity before network use |
+| Success requires prior execution authorization | [lifecycle_test.go](../internal/database/lifecycle_test.go): ACCEPTED success refusal, authorized/unauthorized UNKNOWN late reports, retained grant timestamp |
+| Trusted retention and bounded UNKNOWN history | Same lifecycle tests: old/future completion claims, first receipt immutability, 30/90-day boundaries, late receipt invalidates frozen cleanup, task_not_found after prune |
+| Server Schema 101 incompatibility | [schema_test.go](../test/integration/schema_test.go): current-1/current+1 and foreign component rejection preserve state |
+| Newest task pages and standard JSON Content-Type | [task_query_test.go](../internal/database/task_query_test.go), [web_api_test.go](../test/integration/web_api_test.go): same-second ordering, cursor/filter binding, concurrent inserts, ReadOnly query, malformed bounds/media types |
+| Server certificate lifecycle | [certificates_test.go](../cmd/server/certificates_test.go) and [server_rotation_test.go](../test/integration/server_rotation_test.go): public-file monitoring, expiring/expired/future validity, same-root leaf/key replacement, reconnect and pending result upload |
+
+The existing workflow discovers these Go tests; the actual-binary smoke covers the added CLI commands. No Web Session or Frontend implementation is claimed. Five-host/72-hour acceptance remains deferred; GitHub Actions covers the current disposable deployment stage.
+
+Local verification of this review follow-up on 2026-11-05 passed build, vet, all tests, full race tests, Windows cross-compilation, and govulncheck (zero reachable vulnerabilities; one advisory in an unused part of a required module). The existing five-agent binary workflow passed all 15 P0 tasks plus pagination, certificate monitoring, retention preview, backup, restart, maintenance, and account checks (3.773 seconds total; 1.579 seconds for its batch observation, not a fleet performance claim). The final pruned-UNKNOWN/held-result TLS regression also passed with race detection. All 15 Markdown files passed local-link/anchor and fenced JSON/shell checks. Native Windows execution and systemd/ENOSPC validation remain commit-specific GitHub Actions checks.

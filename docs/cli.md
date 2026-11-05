@@ -22,7 +22,8 @@ For `argus`, put `-server`, `-ca`, and `-token-file` **before** the subcommand. 
 | `run` | `-config /etc/argus-c2/server.json`; optional `-check` | Serve HTTPS; `-check` exits after loading the database, accounts, and credentials without binding a port |
 | `backup` | `-config /etc/argus-c2/server.json`; required `-out PATH` | Create a consistent database snapshot without overwriting an existing file; verify integrity/schema and sync it |
 | `storage` | `-config /etc/argus-c2/server.json` | Report database/WAL sizes, filesystem space, and warnings without loading service credentials |
-| `prune` | `-config /etc/argus-c2/server.json`; `-retain-days 30`; `-limit 200`; optional `-apply -backup PATH` | Preview eligible terminal task/result pairs; apply only after creating a verified new snapshot |
+| `certificates` | `-config /etc/argus-c2/server.json`; `-warn-before 720h` | Read public server/issuer certificates, report validity, exit nonzero for expiring/expired/not-yet-valid certificates |
+| `prune` | `-config /etc/argus-c2/server.json`; `-retain-days 30`; `-unknown-days 90`; `-limit 200`; optional `-apply -backup PATH` | Preview eligible terminal task/result pairs; apply only after creating a verified new snapshot |
 
 `-hosts` is a comma-separated certificate DNS/IP list. `-listen` writes the initial configuration; when running, the address comes from the JSON `listen` field.
 
@@ -30,7 +31,9 @@ Initialization creates `ca.pem`, `ca-key.pem`, `server.pem`, `server-key.pem`, `
 
 `backup` validates the complete configuration structure and opens the database, but does not load the administrator file or TLS/CA private keys. It can use the normal service configuration when invoked by a user with access to the state directory. Use a private output directory, preferably mode 0700; the output file is created exclusively with mode 0600. A failed backup may leave an incomplete output file; treat only a successful command as a verified snapshot. Credentials and configuration are not part of the snapshot.
 
-`prune` accepts 1–36,500 retention days and 1–1,000 records per batch. Age is measured against task deadlines and result completion, not server receipt time. It outputs JSON with `retain_days`, Unix `cutoff`, `limit`, candidate `items` (task ID, node ID, status), `applied`, and `deleted`; a successful apply also reports `backup`. Preview does not expire tasks or delete rows. Apply recomputes candidates, so inspect its returned list; it does not replay an earlier preview. Its overall timeout is two minutes. `-backup` without `-apply`, a missing private backup directory, or an existing backup file is rejected. Like `backup`, it loads configuration structure and state without service credentials. See [Operations](operations.md#server-history-retention) before deletion.
+`prune` accepts 1–36,500 days independently for each retention interval and 1–1,000 records per batch. Result age starts at first server receipt; resultless UNKNOWN age uses the later task deadline. It outputs JSON with `retain_days`, `unknown_days`, Unix `cutoff`/`unknown_cutoff`, `limit`, candidate `items` (task ID, node ID, status, `has_result`, `retained_at`), `applied`, and `deleted`; a successful apply also reports `backup`. Preview does not expire tasks or delete rows. Apply recomputes candidates, so inspect its returned list; it does not replay an earlier preview. Its overall timeout is two minutes. `-backup` without `-apply`, a missing private backup directory, or an existing backup file is rejected. Like `backup`, it loads configuration structure and state without service credentials. See [Operations](operations.md#server-history-retention) before deletion.
+
+`certificates` reads only public server/issuer certificate files and configuration, without opening the database or loading private keys/accounts. JSON includes `checked_at`, certificate names, SHA-256 fingerprints, `not_before`, `not_after`, and `status` (`ok`, `expiring`, `expired`, `not_yet_valid`). `-warn-before` accepts 1h–8760h (default 720h/30 days). An attention status prints the report then exits 1; parse/read errors also exit 1. This is a local expiry check, not chain validation, automatic renewal, or proof of which certificate a running process currently serves.
 
 ## agent
 
@@ -54,7 +57,7 @@ Stop the agent before maintenance: all these commands require the existing exclu
 
 Enrollment, execution, renewal, and maintenance require Linux and reject root. Configuration checking runs before those checks, so root can use `run -check` to validate local files.
 
-A cycle performs renewal if needed, pending-result upload, heartbeat, one task poll, validation/collection, and result upload/acknowledgment. `-once` does not drain the queue: it handles at most one newly delivered task and also succeeds when there is no task.
+A cycle performs due renewal, pending-result upload, heartbeat, one task poll, validation/collection, and result upload/acknowledgment. Failed automatic renewal does not stop normal work while the current certificate remains valid; it warns and schedules another bounded attempt. Explicit `renew` still returns its error. `-once` does not drain the queue: it handles at most one newly delivered task and also succeeds when there is no task.
 
 Continuous `run` logs and retries errors inside the cycle. `-once` and `renew` return the error directly. Credential/state loading failures occur before the loop and cause an exit. Processes opening agent state share an exclusive lock; stop the service before manual renewal.
 
@@ -74,6 +77,7 @@ Continuous `run` logs and retries errors inside the cycle. `-once` and `renew` r
 | --- | --- | --- | --- |
 | `nodes` | Optional `-after ID` | ReadOnly | Node array, up to 200 per page |
 | `tasks` | Optional `-after ID` | ReadOnly | Task array without results, up to 200 per page |
+| `tasks -order newest` | `-node ID`, `-status STATE`, `-created-after UNIX`, `-created-before UNIX`, `-limit 20`, `-cursor TOKEN` | ReadOnly | `{items,next_cursor?}` in descending creation time/ID order; 1–200 records |
 | `result` | `-task ID` | ReadOnly | Current `{task, result?}`; querying a failed task can still exit 0 |
 | `wait` | `-task ID`, `-timeout 5m` | ReadOnly | Wait for `SUCCEEDED`, `FAILED`, or `UNKNOWN`; only success exits 0 |
 | `create` | `-node ID`, `-type system.info`, `-ttl 300`, `-execution-timeout 10s`, `-resource ID` where required | Admin | Created task object |
@@ -84,6 +88,8 @@ Continuous `run` logs and retries errors inside the cycle. `-once` and `renew` r
 | `new-user` | `-name NAME`, `-role ReadOnly`, `-out PATH` | Local operation | Save a token and print its account record; installation in the server account file is manual |
 
 Admin includes all ReadOnly queries. Task TTL is 10–3600 seconds for first execution authorization; `-execution-timeout` is a whole number of milliseconds from `1ms` to `30s`, capped again by agent policy; enrollment-token TTL is 60–3600 seconds. Service and SSH tasks require `-resource`; parameterless tasks should omit it. There is no arbitrary JSON-parameter, command, script, or file-upload flag.
+
+Newest task filters require `-order newest`; do not combine `-after` and `-cursor`. Time bounds are inclusive Unix seconds; 0 disables the corresponding bound. Reuse the returned cursor with the same filters. The default `tasks` array remains available for existing scripts. See [API pagination](api.md#newest-task-pages) for live-listing semantics.
 
 ## Common calls
 

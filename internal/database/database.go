@@ -41,17 +41,20 @@ func (s *Store) now() time.Time {
 	return time.Now()
 }
 
-const SchemaVersion = 101
+const SchemaVersion = 102
 const applicationID = 0x41524753 // ARGS
 
 const schema = `
 CREATE TABLE nodes(id TEXT PRIMARY KEY,hostname TEXT NOT NULL,certificate_fingerprint TEXT NOT NULL UNIQUE,status TEXT NOT NULL CHECK(status IN ('active','disabled')),last_seen_at INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,certificate_expires_at INTEGER NOT NULL,certificate TEXT NOT NULL,previous_fingerprint TEXT NOT NULL DEFAULT '',previous_until INTEGER NOT NULL DEFAULT 0,protocol_version INTEGER NOT NULL DEFAULT 1,agent_version TEXT NOT NULL DEFAULT 'unknown');
 CREATE TABLE enrollment_tokens(digest TEXT PRIMARY KEY,expires_at INTEGER NOT NULL,node_id TEXT REFERENCES nodes(id),csr_fingerprint TEXT NOT NULL DEFAULT '');
-CREATE TABLE tasks(id TEXT PRIMARY KEY,node_id TEXT NOT NULL REFERENCES nodes(id),task_type TEXT NOT NULL,parameters TEXT NOT NULL CHECK(json_valid(parameters)),status TEXT NOT NULL CHECK(status IN ('PENDING','ACCEPTED','RUNNING','SUCCEEDED','FAILED','UNKNOWN')),created_at INTEGER NOT NULL,dispatch_expires_at INTEGER NOT NULL,execution_timeout_ms INTEGER NOT NULL,result_due_at INTEGER NOT NULL);
-CREATE INDEX tasks_node_status ON tasks(node_id,status,created_at);
-CREATE TABLE results(task_id TEXT PRIMARY KEY REFERENCES tasks(id),node_id TEXT NOT NULL REFERENCES nodes(id),status TEXT NOT NULL,payload TEXT NOT NULL CHECK(json_valid(payload)),error TEXT NOT NULL,completed_at INTEGER NOT NULL);
+CREATE TABLE tasks(id TEXT PRIMARY KEY,node_id TEXT NOT NULL REFERENCES nodes(id),task_type TEXT NOT NULL,parameters TEXT NOT NULL CHECK(json_valid(parameters)),status TEXT NOT NULL CHECK(status IN ('PENDING','ACCEPTED','RUNNING','SUCCEEDED','FAILED','UNKNOWN')),created_at INTEGER NOT NULL,dispatch_expires_at INTEGER NOT NULL,execution_timeout_ms INTEGER NOT NULL,result_due_at INTEGER NOT NULL,execution_authorized_at INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX tasks_node_status ON tasks(node_id,status,created_at DESC,id DESC);
+CREATE INDEX tasks_created ON tasks(created_at DESC,id DESC);
+CREATE INDEX tasks_node_created ON tasks(node_id,created_at DESC,id DESC);
+CREATE INDEX tasks_status_created ON tasks(status,created_at DESC,id DESC);
+CREATE TABLE results(task_id TEXT PRIMARY KEY REFERENCES tasks(id),node_id TEXT NOT NULL REFERENCES nodes(id),status TEXT NOT NULL,payload TEXT NOT NULL CHECK(json_valid(payload)),error TEXT NOT NULL,completed_at INTEGER NOT NULL,received_at INTEGER NOT NULL CHECK(received_at>0));
 CREATE TABLE audit_events(id INTEGER PRIMARY KEY AUTOINCREMENT,timestamp INTEGER NOT NULL,actor TEXT NOT NULL,action TEXT NOT NULL,node_id TEXT NOT NULL,task_id TEXT NOT NULL,status TEXT NOT NULL);
-PRAGMA user_version=101;PRAGMA application_id=1095911251;`
+PRAGMA user_version=102;PRAGMA application_id=1095911251;`
 
 func Open(dir string, create bool) (*Store, error) {
 	db, e := localdb.Open(dir, "argus.db", create)
@@ -234,7 +237,7 @@ func (s *Store) Disable(ctx context.Context, actor, id string) error {
 		if n == 0 {
 			return ErrNotFound
 		}
-		if e = finishOutstanding(ctx, tx, id, "node_disabled"); e != nil {
+		if e = finishOutstanding(ctx, tx, id, "node_disabled", s.now().Unix()); e != nil {
 			return e
 		}
 		return Audit(ctx, tx, actor, "node.disable", id, "", "succeeded")
