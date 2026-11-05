@@ -107,6 +107,17 @@ def main():
             backup = root / "fleet-backup.db"
             command("server", "backup", "-config", server_dir / "server.json", "-out", backup)
             assert backup.stat().st_size > 0 and backup.stat().st_mode & 0o077 == 0
+            preview = command("server", "prune", "-config", server_dir / "server.json", json_result=True)
+            assert preview["retain_days"] == 30 and preview["limit"] == 200
+            assert not preview["applied"] and preview["items"] == []
+            assert command("server", "prune", "-config", server_dir / "server.json",
+                           "-apply", check=False).returncode != 0
+            prune_backup = root / "pre-prune.db"
+            applied = command("server", "prune", "-config", server_dir / "server.json",
+                              "-apply", "-backup", prune_backup, json_result=True)
+            assert applied["applied"] and applied["deleted"] == 0
+            assert prune_backup.stat().st_size > 0 and prune_backup.stat().st_mode & 0o077 == 0
+            assert len(cli("tasks", json_result=True)) == len(jobs)
             storage = command("server", "storage", "-config", server_dir / "server.json", json_result=True)
             assert storage["database_bytes"] > 0 and storage["filesystem_available"]
             records = command("agent", "results", "-config", agents[0], json_result=True)
@@ -154,6 +165,7 @@ def main():
             print(json.dumps({"nodes": 5, "p0_tasks_succeeded": len(jobs),
                               "server_restart": "passed", "agent_restart": "passed", "backup": "passed",
                               "local_maintenance": "passed", "account_revocation": "passed", "storage": "passed",
+                              "retention_preview_and_recent_history": "passed",
                               "batch_submit_to_inspection_seconds": round(max(latencies), 3),
                               "total_seconds": round(time.monotonic() - started, 3)}, indent=2))
         finally:

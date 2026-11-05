@@ -51,7 +51,6 @@ func collect(ctx context.Context, open func(string) (io.ReadCloser, error)) (pro
 			out.Coverage = "partial"
 			continue
 		}
-		out.Available = true
 		e = read(ctx, f, kind, &out)
 		f.Close()
 		if e != nil {
@@ -69,7 +68,7 @@ func collect(ctx context.Context, open func(string) (io.ReadCloser, error)) (pro
 	if out.Truncated && out.Available {
 		out.Coverage = "partial"
 	}
-	return out, nil
+	return out, ctx.Err()
 }
 func read(ctx context.Context, r io.Reader, kind string, out *protocol.Listeners) error {
 	limited := &io.LimitedReader{R: r, N: 2 * 1024 * 1024}
@@ -77,8 +76,12 @@ func read(ctx context.Context, r io.Reader, kind string, out *protocol.Listeners
 	s.Buffer(make([]byte, 4096), 8192)
 	if !s.Scan() {
 		out.Coverage = "partial"
-		return s.Err()
+		if errors.Is(s.Err(), bufio.ErrTooLong) {
+			out.Truncated = true
+		}
+		return ctx.Err()
 	}
+	out.Available = true
 	lines := 0
 	for s.Scan() {
 		if e := ctx.Err(); e != nil {
@@ -95,6 +98,11 @@ func read(ctx context.Context, r io.Reader, kind string, out *protocol.Listeners
 			out.Coverage = "partial"
 			continue
 		}
+		state, err := strconv.ParseUint(f[3], 16, 8)
+		if err != nil || state < 1 || state > 12 {
+			out.Coverage = "partial"
+			continue
+		}
 		want := "0A"
 		if strings.HasPrefix(kind, "udp") {
 			want = "07"
@@ -103,7 +111,9 @@ func read(ctx context.Context, r io.Reader, kind string, out *protocol.Listeners
 			continue
 		}
 		addr, port, e := address(f[1])
-		if e != nil || port == 0 {
+		ipv6 := strings.HasSuffix(kind, "6")
+		rawAddress, _, _ := strings.Cut(f[1], ":")
+		if e != nil || port == 0 || ipv6 && len(rawAddress) != 32 || !ipv6 && len(rawAddress) != 8 {
 			out.Coverage = "partial"
 			continue
 		}
@@ -113,5 +123,13 @@ func read(ctx context.Context, r io.Reader, kind string, out *protocol.Listeners
 		out.Truncated = true
 		out.Coverage = "partial"
 	}
-	return s.Err()
+	// A damaged table must not erase valid observations from this or other
+	// tables. Cancellation remains a task-level failure; I/O gaps are partial.
+	if s.Err() != nil {
+		out.Coverage = "partial"
+		if errors.Is(s.Err(), bufio.ErrTooLong) {
+			out.Truncated = true
+		}
+	}
+	return ctx.Err()
 }

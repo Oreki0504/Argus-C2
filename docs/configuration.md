@@ -31,6 +31,8 @@ File and directory paths inside configuration must be canonical absolute paths. 
 
 The file is limited to 8 KiB. Startup checks the server certificate's purpose, chain, and validity. The supplied systemd unit delivers three secret files using `LoadCredential`; use the paths in [Deployment](deployment.md) instead of making the source keys broadly readable.
 
+History retention has no JSON field or automatic schedule: use the local `server prune` command, defaulting to a 30-day preview. See [Operations](operations.md#server-history-retention). The current `ca`/`issuer_key` pair is an online root; the [intermediate design](security.md#offline-root-and-online-intermediate-plan) is not a supported configuration yet.
+
 ## Administrator configuration
 
 The shape is `{"users":[account records]}`. Generate records with the command below instead of substituting the digest of an ordinary password:

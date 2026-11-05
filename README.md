@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md)
 
-Argus-C2 is a self-hosted Linux fleet diagnostics project. Administrators explicitly enroll nodes, request predefined read-only diagnostics through a CLI, and inspect node health and task results. Each agent connects outbound with its own client certificate and runs as a non-root user.
+Argus-C2 is a self-hosted Linux fleet diagnostics project. Administrators explicitly enroll nodes, request predefined read-only diagnostics through a CLI, and inspect heartbeat observations and task results. Each agent connects outbound with its own client certificate and runs as a non-root user.
 
 **Status: under development, before an MVP release.** Enrollment, mTLS, task dispatch, local policy enforcement, persistent results, client certificate renewal, and node disabling are implemented and locally tested. Deployment and sustained operation on five independent VPS instances remain unvalidated. The documentation describes the current implementation and its validation limits.
 
@@ -23,7 +23,7 @@ The example policy enables only system information and metrics. Other collectors
 
 | Program | Responsibility |
 | --- | --- |
-| `server` | Initialize a single CA and database, serve the HTTPS API, create database backups |
+| `server` | Initialize a single online CA and database, serve HTTPS, back up state, preview/apply history cleanup |
 | `agent` | Enroll, poll, enforce local policy, collect diagnostics, retry results, renew its certificate |
 | `argus` | List nodes, create tasks, inspect results, issue enrollment tokens, disable nodes |
 
@@ -57,8 +57,6 @@ Follow the [local quick start](docs/quickstart.md) to complete a single-node wor
 
 ## Documentation
 
-All primary documents are maintained in English. Chinese supplements are available for the README, quick start, and configuration reference.
-
 | Document | Purpose |
 | --- | --- |
 | [Quick start](docs/quickstart.md) · [中文](docs/quickstart.zh-CN.md) | Build, enroll, and obtain the first result |
@@ -74,6 +72,12 @@ All primary documents are maintained in English. Chinese supplements are availab
 
 Local result maintenance can list, export, retry, or explicitly discard report contents while retaining deduplication. Protocol version 1 is checked on every agent request; node listings expose the agent build. Local `storage` commands report database/WAL size, available space, and agent result capacity. See [Operations](docs/operations.md).
 
+Server history cleanup is manual: `server prune` previews a bounded batch with a 30-day default; `-apply -backup PATH` creates a verified snapshot before deleting eligible tasks and results. Active work and UNKNOWN without a stored result remain. See [Operations](docs/operations.md#server-history-retention) for the age boundary and recovery consequences.
+
+`argus health` checks the server's database connection. Node `active` means authorized, and `last_seen_at` records the latest heartbeat. Task `SUCCEEDED` means a valid report, whose availability and coverage must be inspected separately. None is a host-health verdict. See [Status dimensions](docs/architecture.md#status-dimensions).
+
+Server and agent databases independently require Schema 101 and their own component ID. Older databases are rejected without automatic conversion. Preserve state and follow the [upgrade and recovery procedure](docs/operations.md#database-compatibility-and-upgrades). An offline root with an online intermediate is a [PKI plan](docs/security.md#offline-root-and-online-intermediate-plan), not the current deployment model.
+
 ## Validation status
 
-Local work has exercised unit and real TLS integration tests, race detection, vet, bounded fuzzing, and an actual-binary workflow with five local agents. A native systemd deployment CI fixture is provided; its status must be checked against a specific CI run. Five local agents do not replace deployment, sustained testing, and resource measurement on five independent VPS instances.
+Local work has exercised unit and real TLS integration tests, race detection, vet, bounded fuzzing, and an actual-binary workflow with five local agents. [CI run 41864153776](https://github.com/Oreki0504/Argus-C2/actions/runs/41864153776) passed for baseline `8fe8997`, including Windows tests, native systemd deployment, and isolated filesystem ENOSPC recovery. That evidence is commit-specific; see [Validation](docs/validation.md) for subsequent changes. Five local agents do not replace deployment, 72-hour operation, and resource measurement on five independent VPS instances.

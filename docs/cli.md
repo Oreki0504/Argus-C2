@@ -22,12 +22,15 @@ For `argus`, put `-server`, `-ca`, and `-token-file` **before** the subcommand. 
 | `run` | `-config /etc/argus-c2/server.json`; optional `-check` | Serve HTTPS; `-check` exits after loading the database, accounts, and credentials without binding a port |
 | `backup` | `-config /etc/argus-c2/server.json`; required `-out PATH` | Create a consistent database snapshot without overwriting an existing file; verify integrity/schema and sync it |
 | `storage` | `-config /etc/argus-c2/server.json` | Report database/WAL sizes, filesystem space, and warnings without loading service credentials |
+| `prune` | `-config /etc/argus-c2/server.json`; `-retain-days 30`; `-limit 200`; optional `-apply -backup PATH` | Preview eligible terminal task/result pairs; apply only after creating a verified new snapshot |
 
 `-hosts` is a comma-separated certificate DNS/IP list. `-listen` writes the initial configuration; when running, the address comes from the JSON `listen` field.
 
 Initialization creates `ca.pem`, `ca-key.pem`, `server.pem`, `server-key.pem`, `admins.json`, `admin.token`, `server.json`, and `state/argus.db`. The initial administrator is named `admin` and has the `Admin` role.
 
 `backup` validates the complete configuration structure and opens the database, but does not load the administrator file or TLS/CA private keys. It can use the normal service configuration when invoked by a user with access to the state directory. Use a private output directory, preferably mode 0700; the output file is created exclusively with mode 0600. A failed backup may leave an incomplete output file; treat only a successful command as a verified snapshot. Credentials and configuration are not part of the snapshot.
+
+`prune` accepts 1–36,500 retention days and 1–1,000 records per batch. Age is measured against task deadlines and result completion, not server receipt time. It outputs JSON with `retain_days`, Unix `cutoff`, `limit`, candidate `items` (task ID, node ID, status), `applied`, and `deleted`; a successful apply also reports `backup`. Preview does not expire tasks or delete rows. Apply recomputes candidates, so inspect its returned list; it does not replay an earlier preview. Its overall timeout is two minutes. `-backup` without `-apply`, a missing private backup directory, or an existing backup file is rejected. Like `backup`, it loads configuration structure and state without service credentials. See [Operations](operations.md#server-history-retention) before deletion.
 
 ## agent
 

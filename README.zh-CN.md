@@ -17,13 +17,13 @@ Argus-C2 是一个自托管的 Linux 节点诊断项目。管理员显式注册�
 | `process.list` | 有限的进程 ID、名称、状态和 UID | `{}` |
 | `ssh.audit` | 显式映射的 SSH 配置或授权公钥文件的有限观察 | `{"profile_id":"host"}` |
 
-示例策略只启用系统信息和指标，其他采集器需在节点本地放行。`SUCCEEDED` 表示采集器返回合法报告；具体数据是否可用，还要检查 `available`、`coverage`、`code`。心跳只更新主机名和最后在线时间，不自动上传指标。详见[采集器与结果](docs/collectors.md)。
+示例策略只启用系统信息和指标，其他采集器需在节点本地放行。`SUCCEEDED` 表示采集器返回合法报告；具体数据是否可用，还要检查 `available`、`coverage`、`code`。心跳只更新主机名和最近收到心跳的时间，不自动上传指标。详见[采集器与结果](docs/collectors.md)。
 
 ## 三个程序
 
 | 程序 | 职责 |
 | --- | --- |
-| `server` | 初始化单一 CA 和数据库，提供 HTTPS API，生成数据库备份 |
+| `server` | 初始化单一在线 CA 和数据库，提供 HTTPS API、数据库备份、历史清理预览和执行 |
 | `agent` | 注册、轮询、本地策略检查、采集、结果补传和证书续期 |
 | `argus` | 查询节点、创建任务、读取结果、发放注册 token、禁用节点 |
 
@@ -72,6 +72,12 @@ done
 
 本地结果维护支持列出、导出、重试和显式删除报告内容，删除后仍保留去重依据。每次节点请求检查协议版本 1，节点列表可观察 Agent 构建版本。本地 `storage` 命令报告数据库/WAL 大小、可用空间及 Agent 结果容量。详见[运维说明](docs/operations.md)。
 
+Server 历史清理由操作员手动执行：`server prune` 默认预览、保留 30 天，添加 `-apply -backup PATH` 后先生成验证过的快照，再删除符合条件的任务和结果。未完成任务及没有结果的 UNKNOWN 会保留。时间计算边界与恢复后果见[运维说明](docs/operations.md#server-history-retention)。
+
+`argus health` 检查 Server 数据库连接；节点 `active` 表示获得授权，`last_seen_at` 表示最近收到心跳的时间；任务 `SUCCEEDED` 表示有合法报告。它们都不能直接解释为节点健康，报告的数据可用性与覆盖范围需要单独判断。详见[状态语义](docs/architecture.md#status-dimensions)。
+
+Server 与 Agent 数据库分别要求 Schema 101 及各自的组件标识；旧数据库会被拒绝，不自动转换。升级前保留状态并遵循[升级与恢复流程](docs/operations.md#database-compatibility-and-upgrades)。Offline Root + Online Intermediate 目前是 [PKI 规划](docs/security.md#offline-root-and-online-intermediate-plan)，当前仍使用在线根 CA。
+
 ## 验证状态
 
-本地已执行单元与真实 TLS 集成测试、race、vet、短时 fuzz，以及五个本地 Agent 的实际命令流程。仓库提供原生 systemd 部署 CI 脚本，其结果应以具体 CI 运行记录为准。本地五个 Agent 不能替代五台独立 VPS 的部署、持续测试和资源测量。
+本地已执行单元与真实 TLS 集成测试、race、vet、短时 fuzz，以及五个本地 Agent 的实际命令流程。基线 `8fe8997` 的 [CI 41864153776](https://github.com/Oreki0504/Argus-C2/actions/runs/41864153776) 已通过，包括 Windows 测试、原生 systemd 部署及隔离文件系统 ENOSPC 恢复；该证据只对应那个提交，后续修改见[验证记录](docs/validation.md)。本地五个 Agent 不能替代五台独立 VPS 的部署、72 小时持续测试和资源测量。

@@ -16,16 +16,27 @@ import (
 )
 
 func Collect(ctx context.Context) (protocol.Processes, error) {
-	out := protocol.Processes{Items: []protocol.Process{}}
 	dir, e := os.Open("/proc")
 	if e != nil {
-		return out, nil
+		return protocol.Processes{Items: []protocol.Process{}}, ctx.Err()
 	}
 	defer dir.Close()
-	out.Available = true
+	return collect(ctx, dir.Readdirnames, func(name string) ([]byte, error) {
+		return localfile.Read("/proc/"+name+"/status", 16384, false)
+	})
+}
+
+func collect(ctx context.Context, namesPage func(int) ([]string, error), status func(string) ([]byte, error)) (protocol.Processes, error) {
+	out := protocol.Processes{Items: []protocol.Process{}}
 	scanned := 0
 	for {
-		names, e := dir.Readdirnames(128)
+		if e := ctx.Err(); e != nil {
+			return out, e
+		}
+		names, e := namesPage(128)
+		if len(names) > 0 || e == nil || errors.Is(e, io.EOF) {
+			out.Available = true
+		}
 		for _, name := range names {
 			if e := ctx.Err(); e != nil {
 				return out, e
@@ -33,25 +44,29 @@ func Collect(ctx context.Context) (protocol.Processes, error) {
 			scanned++
 			if scanned > 8192 || len(out.Items) >= 256 {
 				out.Truncated = true
-				return out, nil
+				return out, ctx.Err()
 			}
 			pid, e := strconv.Atoi(name)
 			if e != nil || pid <= 0 {
 				continue
 			}
-			b, e := localfile.Read("/proc/"+name+"/status", 16384, false)
+			b, e := status(name)
 			if e != nil {
+				out.Truncated = true
 				continue
 			}
 			if p, ok := parse(pid, string(b)); ok {
 				out.Items = append(out.Items, p)
+			} else {
+				out.Truncated = true
 			}
 		}
 		if errors.Is(e, io.EOF) {
-			return out, nil
+			return out, ctx.Err()
 		}
 		if e != nil {
-			return out, e
+			out.Truncated = true
+			return out, ctx.Err()
 		}
 	}
 }
@@ -80,5 +95,5 @@ func parse(pid int, s string) (protocol.Process, bool) {
 			}
 		}
 	}
-	return p, uid && p.Name != "" && protocol.CleanText(p.Name, 64) && len(p.State) == 1
+	return p, pid > 0 && uid && p.Name != "" && protocol.CleanText(p.Name, 64) && len(p.State) == 1 && strings.ContainsAny(p.State, "RSDZTtXxKWPI")
 }

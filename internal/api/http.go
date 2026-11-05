@@ -13,6 +13,7 @@ import (
 	"github.com/Oreki0504/Argus-C2/internal/auth"
 	"github.com/Oreki0504/Argus-C2/internal/database"
 	"github.com/Oreki0504/Argus-C2/internal/enrollment"
+	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
 	"github.com/Oreki0504/Argus-C2/internal/strictjson"
 )
@@ -204,10 +205,12 @@ func (s *Server) node(next func(http.ResponseWriter, *http.Request, *x509.Certif
 			return
 		}
 		c := r.TLS.PeerCertificates[0]
-		if _, e := s.Store.Authorize(r.Context(), c); e != nil {
-			reply(w, nil, e)
+		if _, e := identity.FromCertificate(c); e != nil {
+			problem(w, 401, "invalid node identity")
 			return
 		}
+		// Fingerprint, validity and disabled status are checked in the same
+		// transaction as each node operation, including requests on reused TLS.
 		next(w, r, c)
 	}
 }

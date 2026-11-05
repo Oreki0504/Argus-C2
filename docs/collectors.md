@@ -67,7 +67,7 @@ Parameters are `{}`. Reads the current network namespace's `/proc/net` tables in
 
 The report is `{"available":true,"coverage":"complete","truncated":false,"items":[...]}`. Each item contains only `protocol`, `address`, and `port`, with no PID or socket owner. Output is limited to 256 items; each table has a 2 MiB read limit and an 8,192-line processing limit. Reaching the item or line limit marks the report truncated.
 
-`coverage` is `complete`, `partial`, or `unavailable`. Missing protocol tables, malformed skipped observations, and bounded reads produce partial coverage. `available` means at least one table was opened; all tables inaccessible gives unavailable coverage. `truncated` indicates an application read/item bound. Complete coverage applies only to these tables in the current namespace, never to every namespace or socket on the host. An empty partial list is not evidence of no listeners. Implementation: [network](../internal/collectors/network/).
+`coverage` is `complete`, `partial`, or `unavailable`. Missing tables, malformed skipped observations (including invalid state or address family), and read/Scanner failures produce partial coverage while retaining earlier valid entries and continuing with other tables. `available` means at least one table header was read; opening a table that immediately fails is insufficient. `truncated` indicates a byte, item, line-count, or 8,192-byte Scanner token bound. Ordinary I/O failures imply partial coverage without necessarily setting truncated. Context cancellation remains a task-level failure. Complete coverage applies only to these tables in the current namespace, never to every namespace or socket on the host. An empty partial list is not evidence of no listeners. Implementation: [network](../internal/collectors/network/).
 
 ## process.list
 
@@ -75,7 +75,7 @@ Parameters are `{}`. Enumerates visible `/proc` entries and reads process `statu
 
 Items contain `pid`, `name`, a single-character `state`, and `uid`. The collector does not read command-line arguments, environment variables, open files, process memory, or executable contents. Processes that exit during collection, unreadable files, and parse failures are skipped without an itemized error list. Ordering and a complete, consistent process snapshot are not guaranteed.
 
-`available` means `/proc` could be opened, not that every process was visible. The supplied agent systemd unit uses `ProtectProc=invisible`, typically limiting visibility to processes accessible to the service UID. `truncated` describes application item limits, not permission-related omissions. Implementation: [process](../internal/collectors/process/).
+`available` means directory entries were obtained or enumeration reached a clean empty end, not that every process was visible. `truncated` marks any known omission: item/scan limits, unreadable or vanished status files, malformed metadata, or interrupted directory reads. Valid earlier entries survive ordinary I/O errors; context cancellation remains a task failure. The existing protocol fields are retained, without a new process coverage field. The supplied agent systemd unit uses `ProtectProc=invisible`, typically limiting visibility to processes accessible to the service UID. Hidden entries cannot be counted, so even `truncated:false` does not promise host-wide completeness. Implementation: [process](../internal/collectors/process/).
 
 ## ssh.audit
 

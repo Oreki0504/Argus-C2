@@ -33,7 +33,10 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return errors.New("usage: server init|run|backup|storage [flags]")
+		return errors.New("usage: server init|run|backup|storage|prune [flags]")
+	}
+	if os.Args[1] == "prune" {
+		return pruneCommand(os.Args[2:], os.Stdout)
 	}
 	f := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
 	dir := f.String("dir", "", "new private server directory")

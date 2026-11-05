@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [Architecture](architecture.md) · [Deployment](deployment.md)
 
-Argus-C2 is under development and has not reached an MVP release. This page distinguishes test coverage, recorded local runs, and acceptance still requiring another environment. The local regression checks below passed. Actual filesystem exhaustion and native service deployment still require the disposable deployment job; sustained acceptance on five independent Linux VPS instances remains pending until test hosts are available.
+Argus-C2 is under development and has not reached an MVP release. This page distinguishes test coverage, recorded runs, and remaining acceptance. Baseline `8fe8997` passed [GitHub Actions run 41864153776](https://github.com/Oreki0504/Argus-C2/actions/runs/41864153776), including actual filesystem exhaustion and native systemd deployment. Subsequent changes need their own run; baseline success is not evidence for an untested working tree. GitHub Actions is the current acceptance environment. Five independent VPS instances and a 72-hour observation window remain a separate deferred stage.
 
 ## Build environment
 
@@ -126,10 +126,24 @@ The implementation separates dispatch expiry, collection duration, and inferred 
 
 Build, vet, ordinary tests, full race tests, Windows cross-build, the seven ten-second fuzz targets, native read-only systemd queries, the current vulnerability scan, and the expanded five-agent binary workflow passed locally. Subsequent state-transition and schema changes also passed targeted race checks. Administrator-token verification reuses the existing authentication system and adds rotation/revocation, restart behavior, role, permissions, and log checks.
 
-Two environment-dependent items remain open:
+The environment-dependent deployment gap was closed for baseline `8fe8997` on 2026-11-05 by [run 41864153776](https://github.com/Oreki0504/Argus-C2/actions/runs/41864153776). Linux and Windows jobs and the deployment check completed successfully; [deployment check 126693853310](https://github.com/Oreki0504/Argus-C2/actions/runs/41864153776/job/126693853310) confirmed native service installation, collection/restarts, and `TestFilesystemFullRecovery` on an isolated 16 MiB tmpfs. SQLite `max_page_count` tests remain separate from this real ENOSPC test. The ordinary suite still skips filesystem exhaustion outside its dedicated disposable environment.
 
-1. **Actual filesystem ENOSPC and native service deployment.** `TestSQLiteFullBeforeAcceptanceNeverCollects` passed using SQLite's real `max_page_count` exhaustion, and trigger-injected failures cover persistence windows. These are separate from [disk_linux_test.go](../internal/agent/disk_linux_test.go), which is wired into the disposable deployment job but has not been executed here. This host cannot create the required isolated mount without interactive privileged access. The ordinary suite skips that test; no host disk was filled, and live read-only systemd queries do not prove service deployment.
-2. **Five independent VPS instances.** Hosts have not been supplied. Real deployment, sustained operation (proposed first window: 72 hours), network disruption, actual renewal-window recovery, revocation, isolated restore, disk pressure, and measured resource/latency behavior remain unverified. Five local identities are not five VPS instances.
+Five independent VPS instances remain deferred. Real deployment on those hosts, 72-hour operation, network disruption, actual renewal-window recovery, revocation, isolated restore, disk pressure, and measured resource/latency behavior are unverified. Five local identities and a short GitHub Actions run do not establish those results. In particular, default agent certificates live 30 days, so a new deployment's 72-hour run alone cannot exercise the seven-day renewal window; plan a separately authorized certificate-lifetime fixture or a later observation window.
+
+## Current refinement coverage
+
+The existing workflow runs the new regression tests without a separate testing framework:
+
+| Change | Evidence |
+| --- | --- |
+| Middleware performs TLS identity/protocol checks without duplicate DB authorization | [http_test.go](../internal/api/http_test.go); existing integration disable/renew/grant/result races verify final transactional authorization |
+| Manual 30-day server history cleanup | [retention_test.go](../internal/database/retention_test.go): cutoff, protected active/UNKNOWN records, bounded preview, backup restore, failed backup/audit/delete rollback, frozen/stale batches, late upload and grant rejection |
+| CLI preview/apply boundary | [server retention tests](../cmd/server/retention_test.go): defaults, invalid arguments, service-credential independence, required backup and nonoverwrite; existing binary smoke checks default preview and protection of recent history |
+| Partial collector output | [network tests](../internal/collectors/network/linux_test.go) and [process tests](../internal/collectors/process/linux_test.go): read errors after valid data, Scanner overflow, malformed rows, and cancellation |
+
+Schema remains 101 and protocol remains 1; no new report fields or PKI implementation are introduced. Health semantics and Offline Root + Online Intermediate are documented against the current implementation, with the latter explicitly a future design.
+
+Local verification on 2026-11-05 passed build, vet, all tests, full race tests, Windows cross-compilation, and the existing five-agent actual-binary workflow (15 P0 tasks, restart, backup, local maintenance, account revocation, storage). The binary workflow took 2.008 seconds, including 0.974 seconds for its batch execution/inspection measure; these are local observations, not VPS performance targets. All 14 Markdown documents were checked for local links/anchors, fenced JSON, and shell syntax. The final network-cancellation adjustment passed targeted race checks, and the binary smoke also passed the added default-preview/backup/recent-history assertions. The vulnerability scan found zero reachable vulnerabilities (one advisory in an unused part of a required module). Native Windows execution and disposable systemd/ENOSPC acceptance of this change require its new GitHub Actions run.
 
 ## Maintaining documentation with code
 

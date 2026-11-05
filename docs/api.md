@@ -73,7 +73,9 @@ IDs accept 1–64 ASCII letters, digits, `_`, or `-`; generated IDs use a secure
 
 Fields are `id`, `hostname`, `certificate_fingerprint`, `status`, `last_seen_at`, `created_at`, `certificate_expires_at`, `protocol_version`, and `agent_version`. Status is `active` or `disabled`, with no computed online/offline state. A newly enrolled node has `last_seen_at: 0` until its first heartbeat. Certificate expiry does not automatically change its database status to disabled, but requests are rejected.
 
-Disabling rejects subsequent node requests, including requests on existing TLS connections. It stores failed results for `PENDING` tasks and unknown results for in-flight `ACCEPTED/RUNNING` tasks. Tasks already marked `UNKNOWN` by expiry do not receive a result from disabling. There is no reenable endpoint.
+Disabling rejects subsequent valid node operations, including on existing TLS connections. TLS identity and protocol checks occur in middleware; fingerprint, validity, and active-status checks occur in each business transaction. Invalid request bodies may return 400 before database authorization. Disabling stores failed results for `PENDING` tasks and unknown results for in-flight `ACCEPTED/RUNNING` tasks. Tasks already marked `UNKNOWN` by expiry do not receive a result from disabling. There is no reenable endpoint.
+
+The health endpoint tests the server's database connection, not write capacity or node health. Interpret heartbeat recency, task execution, and diagnostic availability separately; see [Status dimensions](architecture.md#status-dimensions).
 
 ### Audit object
 
@@ -89,7 +91,9 @@ Disabling rejects subsequent node requests, including requests on existing TLS c
 }
 ```
 
-Audit `status` describes the operation outcome and need not match the task-state enum. Actions currently include `enrollment.create`, `node.enroll`, `node.renew`, `node.disable`, `task.create`, `task.accept`, `task.run`, `task.expire`, and `task.complete`. Queries, heartbeats, authentication failures, and local CLI account generation do not create corresponding audit rows. This records important state changes, not every access.
+Audit `status` describes the operation outcome and need not match the task-state enum. Actions currently include `enrollment.create`, `node.enroll`, `node.renew`, `node.disable`, `task.create`, `task.accept`, `task.run`, `task.expire`, `task.complete`, and `task.prune`. Pruning records `actor: local-operator` and the removed task's terminal status. Queries, heartbeats, authentication failures, and local CLI account generation do not create corresponding audit rows. This records important state changes, not every access.
+
+History cleanup is a local server command, with no HTTP deletion route. A pruned task is absent from listings and returns 404 on inspection. Later uploads receive explicit 404 / `task_not_found`, moving the agent's retained result to `held`; they are not acknowledged or recollected. Audit IDs remain queryable subject to the existing audit capacity. See [retention](operations.md#server-history-retention).
 
 ## Enrollment and renewal
 

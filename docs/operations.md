@@ -25,7 +25,7 @@ sudo journalctl -u argus-c2-server --since '30 minutes ago' --no-pager
 
 Runtime logs are structured JSON, but the API does not log every rejection in detail or audit every access. Journald may not contain the internal cause of each HTTP error. The agent message `agent cycle failed; will retry` means the loop will continue retrying.
 
-Database audit retains approximately 100,000 events. Task and result history has no automatic cleanup. Host journald settings control log retention; unit `LogRateLimit*` settings limit output rate, not retained disk usage. Monitor both state-directory space and host logs.
+Database audit retains approximately 100,000 events. Task and result history has manual, backup-first cleanup as described below. Host journald settings control log retention; unit `LogRateLimit*` settings limit output rate, not retained disk usage. Monitor both state-directory space and host logs.
 
 ## Administrator tokens
 
@@ -73,6 +73,20 @@ With more than seven days remaining, renewal returns the existing certificate; c
 
 The CA defaults to five years and the server certificate to one year. There is no automatic server-certificate renewal command. Before expiry, use standard PKI tools to issue a certificate under the same trusted CA with the required SANs and serverAuth purpose. Stop the server, install its matching certificate and key, check credentials, and restart. Preserve recovery material. Replacing the CA requires separately arranging node trust and identities; there is no automatic trust-root switch.
 
+## Database compatibility and upgrades
+
+Both components currently require Schema **101**, independently versioned. Server databases have SQLite application ID `0x41524753` (`ARGS`); agent databases use `0x41524741` (`ARGA`). A version-101 database from the other component is still incompatible. Pre-101 and other unsupported versions are rejected; startup never resets or converts them. Do not change `PRAGMA user_version` to bypass the check.
+
+Before replacing binaries:
+
+1. Record the old/new commit, protocol version, each component's schema version, and current configuration. Protocol 1 compatibility does not imply database compatibility.
+2. Create a verified server snapshot with the old compatible binary. Separately preserve configuration, CA/TLS material, account configuration, and revocations since the snapshot. Stop each agent before preserving its entire identity/state directory; retain the old binaries.
+3. Test the new binaries against **copies** in an isolated environment, with agent access blocked. Check schema acceptance, administration, result reads, and restart behavior. Never run a copied agent identity alongside the original.
+4. For compatible Schema 101 updates, stop services, install binaries, run appropriate configuration checks, restart, and inspect heartbeat/report behavior before broader rollout.
+5. For incompatible development state, keep it archived. Use a specifically reviewed one-time conversion only if one exists; none is shipped here. Otherwise initialize a separate deployment and explicitly reenroll nodes with new identities. Do not silently discard pending results or reuse a certificate with a new agent database.
+
+There is no historical migration chain, downgrade framework, or general migration command before MVP. Rollback requires a binary that supports the database being restored and the identity reconciliation below; restoring both agent and server snapshots can break deduplication continuity.
+
 ## Online backup
 
 Database backup uses SQLite `VACUUM INTO`, including WAL data committed at snapshot time. It does not copy a database file while it is being written. In a systemd deployment, run it as the service user to avoid creating root-owned SQLite sidecars:
@@ -88,6 +102,34 @@ sudo -u argus-server /usr/local/libexec/argus-c2/server backup \
 `backup` loads the configuration structure and database without reading `/run/credentials` paths, so the actual service configuration can be used. The output must not exist and its parent should be private. The file is created exclusively with mode 0600, checked with SQLite integrity/schema validation, then synced. Failure can leave an incomplete output; only a successful backup is a verified snapshot. A busy database can exceed the two-second busy timeout. Keep the original state and retry during lower activity; do not delete WAL files to resolve locking.
 
 A database snapshot excludes the CA private key, server certificate and key, `admins.json`, raw administrator tokens, and agent configuration and policy. Back up those materials separately with restricted access. Copy snapshots to independent storage: the directory above is a snapshot destination on the same host and cannot protect against host or disk loss.
+
+## Server history retention
+
+No background job deletes task history. Run `server prune` as the server service user; default behavior is preview, retaining 30 days with at most 200 candidate pairs. `-retain-days` accepts 1–36,500 and `-limit` accepts 1–1,000. A candidate must have matching terminal task/result records (`SUCCEEDED`, `FAILED`, or persisted `UNKNOWN`) and all three timestamps strictly before the cutoff: `dispatch_expires_at`, `result_due_at`, and `result.completed_at`. Unfinished tasks and UNKNOWN without a result are retained regardless of age.
+
+The cutoff is server time minus the chosen number of 24-hour days. **This is retention after task deadlines, not a guarantee of 30 days after result receipt.** Schema 101 has no trusted result-receipt timestamp. An agent's later completion timestamp only postpones eligibility. A newly received, old report can therefore qualify immediately; inspect/export it or use a longer retention interval before applying. Synchronize server time.
+
+```sh
+sudo -u argus-server /usr/local/libexec/argus-c2/server prune \
+  -config /etc/argus-c2/server.json -retain-days 30 -limit 200
+```
+
+Review the returned task IDs, node IDs, statuses, and Unix cutoff. To apply, first create the private backup directory shown in Online backup, then choose a new snapshot path:
+
+```sh
+ARGUS_PRUNE_BACKUP="/var/lib/argus-c2-server/backups/pre-prune-$(date -u +%Y%m%dT%H%M%SZ).db"
+sudo -u argus-server /usr/local/libexec/argus-c2/server prune \
+  -config /etc/argus-c2/server.json -retain-days 30 -limit 200 \
+  -apply -backup "$ARGUS_PRUNE_BACKUP"
+```
+
+Apply recomputes and freezes a bounded candidate list, creates a verified nonoverwriting snapshot, then revalidates and deletes the batch in one transaction. Results arriving after the list was frozen cannot join that batch. The returned JSON is the applied list, which can differ from a previous preview. A stale candidate, backup failure, audit failure, or failed deletion aborts cleanup; a successful backup can remain after a later transaction failure. Inspect the error and current state before retrying with a new backup path. Run one cleanup operator at a time.
+
+Each removed pair produces a `task.prune` audit event with its IDs and original terminal state. Prior audit is not cascaded away, but appending events still enforces the existing 100,000-event capacity. Export audit pages to separately protected storage when longer evidence retention is required. Backups contain deleted reports and require their own retention and access policy; pruning is not secure erasure and may not shrink the SQLite file. Freed pages can be reused. No automatic VACUUM or backup deletion is performed.
+
+Deleted tasks disappear from management queries. Late repeated result uploads receive explicit `task_not_found` and remain on the agent as held reports for operator attention. No false acknowledgment, task recreation, or recollection occurs. Agent deduplication is unchanged; expired assignments remain ineligible for execution even after local deduplication cleanup. New tasks always receive newly generated IDs.
+
+For recovery, inspect the pre-prune snapshot in isolation first. Restoring it to production rolls back **all** server state, including later tasks, enrollments, renewals, and disabling; follow the full restore procedure below. Never overwrite a live database or manually insert a task with the old ID to make an upload pass. Local result discard remains a separate explicit operator action.
 
 ## Restore the server database
 
@@ -150,7 +192,7 @@ Discard preserves the assignment and deduplication record; it does not cancel th
 | Repeated agent HTTP 401 | Disabled node, expired/mismatched certificate, or server restored to older identity state |
 | Management CLI HTTP 401/403 | Invalid/unloaded account token or ReadOnly attempting a mutation; restart the server after account changes |
 | HTTP 409 | Full queue, disabled node, result conflict, or invalid transition; query current state first |
-| Held `task_not_found` / `result_conflict` | Server may have restored an old snapshot; inspect/export the retained report and reconcile it using local maintenance |
+| Held `task_not_found` / `result_conflict` | Server may have restored an old snapshot or pruned that history; inspect/export the report and reconcile using local maintenance |
 | HTTP 426 / incompatible protocol | Use a supported matching deployment; pending data is retained and must not be reset |
 | `local_policy_denied` | Task type and resource mapping are not both permitted; update local policy and restart the agent |
 | `task_from_future` / `task_expired` | Clock or TTL issue; synchronize time, then create a new task |

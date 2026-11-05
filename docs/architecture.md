@@ -12,9 +12,20 @@ Argus-C2 uses one server, SQLite, and Linux agents that poll for work. The serve
 | `agent` | Local policy, collection, deduplication, result retries, renewal | `probe.db`, private key, and client certificate |
 | `argus` | Management requests, JSON output, waiting for results | Local administrator token file; no login-session database |
 
-The server has one HTTPS listener. Enrollment and management routes do not require a client certificate: they check enrollment and administrator tokens respectively. Every agent route requires a verified client certificate. Node requests also check certificate validity, identity fingerprints, and the database disable flag after the TLS handshake.
+The server has one HTTPS listener. Enrollment and management routes do not require a client certificate: they check enrollment and administrator tokens respectively. Every agent route requires a verified client certificate. Node middleware validates the identity URI and protocol metadata without querying SQLite. Each business operation then checks certificate validity, fingerprints, and the disable flag inside the same transaction as its state change, including renewal. A malformed body may be rejected before that transaction; it cannot perform an authorized operation.
 
 Agents do not listen on a management port. Each cycle renews the certificate if needed, uploads pending results, sends a heartbeat, then polls for and executes at most one task. The normal delay comes from local policy. Failures double the delay up to 60 seconds, plus less than one second of jitter. A heartbeat body carries `hostname`; request headers carry protocol/build metadata. The server records the receipt time and metadata. Metrics require a separate task.
+
+## Status dimensions
+
+| Dimension | Observation | What it establishes |
+| --- | --- | --- |
+| Server Health | Authenticated `GET /v1/health` returns `status: ok` after SQLite `PingContext` | The endpoint responded and its DB connection check passed; not a disk-write, CA-expiry, or fleet-health check |
+| Node Online | `last_seen_at` is the server's last heartbeat receipt time, or 0 before the first heartbeat | Recent communication only; `active/disabled` is authorization state, not online/offline |
+| Task Execution | `PENDING`, `ACCEPTED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `UNKNOWN` | Delivery/execution outcome for one assignment; success does not rate the host |
+| Diagnostic Availability | Report `available`, `coverage`, `truncated`, `code`, and per-resource fields | Which observations were usable and where coverage was incomplete |
+
+There is no computed online field or universal stale-heartbeat threshold. Choose an observation window that includes the configured poll delay, request/collection time, and retry backoff. A recent heartbeat cannot guarantee current connectivity. An active node can be offline, and a SUCCEEDED service query can report `available:false`.
 
 ## Following a task
 
@@ -64,7 +75,7 @@ There are two forms of `UNKNOWN`:
 
 `dispatch_expires_at` is the last instant for first server execution authorization. `execution_timeout_ms` is 1–30,000 ms, further limited by local policy. Its monotonic duration starts after successful authorization and durable local RUNNING. `result_due_at` initially equals dispatch expiry plus 60 seconds; first execution authorization sets it to server time plus the execution budget rounded up to seconds, plus 60 seconds. Authorization retries never extend it.
 
-Result due time only triggers an UNKNOWN inference. It is not a permanent upload cutoff. A still-authorized node can submit a late result while the task has no stored result, and an identical committed result remains retryable. Expiry maintenance is transactional and request-driven.
+Result due time only triggers an UNKNOWN inference. It is not a permanent upload cutoff. A still-authorized node can submit a late result while the task has no stored result, and an identical committed result remains retryable while retained. Explicit history pruning ends that retry guarantee for deleted rows; later uploads receive `task_not_found`. Expiry maintenance is transactional and request-driven.
 
 ## Result delivery and local disposal
 
@@ -107,9 +118,11 @@ Storage uses standard SQLite transactions, foreign keys, WAL, `synchronous(FULL)
 | Audit | Old entries are removed by increasing ID on append; approximately 100,000 events are retained |
 | Agent pending/held results | Acceptance atomically reserves one 64 KiB result; total count is at most 1,000 and reserved plus actual UTF-8 result bytes at most 32 MiB |
 | Agent acknowledged/discarded records | Deduplication remains until more than 24 hours after dispatch expiry; expired tasks still cannot execute after cleanup |
-| Server task and result history | No automatic deletion or configurable retention period; monitor database growth |
+| Server task and result history | Manual `server prune`: preview by default; 30-day age, 200-record batch by default, maximum 1,000; explicit apply requires a verified backup |
 
 These application limits are not disk quotas. Full filesystems, I/O failures, and extended outages can still affect availability.
+
+Pruning requires matching terminal task/result rows and dispatch deadline, result deadline, and result completion time all strictly older than the cutoff. Unfinished work and UNKNOWN without a result stay in place. The batch is frozen before backup and rechecked in the deletion transaction; audit failure, stale candidates, or failed deletes roll back the entire batch. `task.prune` records IDs and original terminal state. Prior audit remains subject to its existing 100,000-event bound. Cleanup does not reset agent deduplication, reenroll nodes, or permit caller-selected task IDs. See [retention and recovery](operations.md#server-history-retention).
 
 ## Code map
 
