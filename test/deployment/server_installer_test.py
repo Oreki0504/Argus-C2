@@ -124,6 +124,81 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.text('hello', '你好'), '你好')
             read.assert_not_called()
 
+    @contextlib.contextmanager
+    def update_preflight_host(self, *, component='server', installed=False, load_state='not-found'):
+        installer.mkdir(installer.path('/run/systemd/system'))
+        account = SimpleNamespace(pw_name='argus-' + component, pw_uid=os.geteuid(), pw_gid=os.getegid())
+        with patch.object(installer.shutil, 'which', return_value='/usr/bin/tool'), \
+                patch.object(installer.pwd, 'getpwnam', **({'return_value': account} if installed else {'side_effect': KeyError})), \
+                patch.object(installer.grp, 'getgrnam', side_effect=KeyError), \
+                patch.object(installer, 'run', return_value=subprocess.CompletedProcess([], 0, (load_state + '\n').encode(), b'')) as run:
+            yield run
+
+    def test_update_on_uninstalled_host_explains_first_install_in_selected_language(self):
+        for component in ('server', 'agent'):
+            for language in ('en', 'zh-CN'):
+                with self.subTest(component=component, language=language), patch.object(installer, 'LANGUAGE', language), \
+                        self.update_preflight_host(component=component) as run:
+                    with self.assertRaises(installer.UpdatePreflightError) as caught:
+                        installer.update_plan(component, 'amd64')
+                    with contextlib.redirect_stderr(io.StringIO()) as output:
+                        installer.report_failure(caught.exception, updating=True)
+                message = output.getvalue()
+                if component == 'server':
+                    self.assertIn('Run this downloaded script without --update server' if language == 'en' else '请去掉 --update server', message)
+                else:
+                    self.assertIn('Generate an Agent installation command' if language == 'en' else '生成安装命令', message)
+                self.assertIn('No package was downloaded' if language == 'en' else '未下载更新包', message)
+                self.assertNotIn('Traceback', message)
+                self.assertNotIn('/var/lib/argus-c2-updates', message)
+                run.assert_called_once_with(['systemctl', 'show', f'argus-c2-{component}.service', '--property=LoadState', '--value'], check=False)
+        self.assertFalse(installer.path('/var/lib/argus-c2-updates').exists())
+
+    def test_acme_preparation_after_early_failure_is_not_a_server_installation(self):
+        sentinel = installer.path('/etc/argus-c2/acme/account')
+        installer.mkdir(sentinel.parent, 0o700)
+        sentinel.write_text('preserve account')
+        installer.mkdir(installer.path('/opt/argus-certbot/bin'))
+        with self.update_preflight_host():
+            with self.assertRaisesRegex(installer.UpdatePreflightError, 'Server is not installed'):
+                installer.update_plan('server', 'amd64')
+        self.assertEqual(sentinel.read_text(), 'preserve account')
+
+    def test_missing_account_with_existing_identity_is_incomplete_not_a_fresh_install(self):
+        sentinel = installer.path('/var/lib/argus-c2-server/argus.db')
+        installer.mkdir(sentinel.parent, 0o700)
+        sentinel.write_bytes(b'existing database')
+        with self.update_preflight_host():
+            with self.assertRaisesRegex(installer.UpdatePreflightError, 'service account argus-server is missing') as caught:
+                installer.update_plan('server', 'amd64')
+        self.assertNotIn('without --update server', str(caught.exception))
+        self.assertEqual(sentinel.read_bytes(), b'existing database')
+
+    def test_loaded_unit_or_orphaned_group_counts_as_incomplete_installation(self):
+        for loaded in (True, False):
+            with self.subTest(loaded=loaded), self.update_preflight_host(load_state='loaded' if loaded else 'not-found'):
+                with patch.object(installer.grp, 'getgrnam', **({'side_effect': KeyError} if loaded else {'return_value': object()})):
+                    with self.assertRaisesRegex(installer.UpdatePreflightError, 'Existing server installation records'):
+                        installer.update_plan('server', 'amd64')
+
+    def test_missing_config_or_state_has_actionable_preflight_error(self):
+        for component in ('server', 'agent'):
+            config = installer.path(f'/etc/argus-c2/{component}.json')
+            with self.subTest(component=component), self.update_preflight_host(component=component, installed=True, load_state='loaded'):
+                with self.assertRaisesRegex(installer.UpdatePreflightError, str(config)):
+                    installer.update_plan(component, 'amd64')
+                installer.mkdir(config.parent)
+                state = installer.path(f'/var/lib/argus-c2-{component}')
+                config.write_text(json.dumps({'state_dir': str(state)}))
+                with self.assertRaisesRegex(installer.UpdatePreflightError, str(state)):
+                    installer.update_plan(component, 'amd64')
+                self.assertFalse(installer.path('/var/lib/argus-c2-updates').exists())
+
+    def test_indeterminate_service_state_does_not_recommend_reinstallation(self):
+        with self.update_preflight_host(load_state=''):
+            with self.assertRaisesRegex(installer.UpdatePreflightError, 'Cannot determine'):
+                installer.update_plan('server', 'amd64')
+
     def update_fixture(self, component='agent', active=True):
         state = installer.path('/var/lib/argus-c2-' + component)
         installer.mkdir(state, 0o700)

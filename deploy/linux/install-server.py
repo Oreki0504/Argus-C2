@@ -51,6 +51,10 @@ class InstallError(Exception):
     pass
 
 
+class UpdatePreflightError(InstallError):
+    """Update was rejected before downloading a bundle or changing a service."""
+
+
 def text(en, zh):
     return zh if LANGUAGE == 'zh-CN' else en
 
@@ -621,6 +625,9 @@ def report_failure(error, updating=False):
     # Do not print raw HTTP/ACME exceptions, which can contain request URLs.
     print(str(error) if isinstance(error, InstallError) else f'Installation failed ({type(error).__name__}).', file=sys.stderr)
     if updating:
+        if isinstance(error, UpdatePreflightError):
+            print(text('Update stopped during installation checks. No package was downloaded and no service was stopped or changed.', '更新在安装状态检查阶段中止。未下载更新包，也未停止或更改任何服务。'), file=sys.stderr)
+            return
         print(text('Update did not complete. Preserve the existing state and inspect the private update records under /var/lib/argus-c2-updates.', '更新未完成。请保留现有状态，并检查 /var/lib/argus-c2-updates 中的私有更新记录。'), file=sys.stderr)
         return
     if not path('/etc/argus-c2/server').exists() and not path('/var/lib/argus-c2-server').exists():
@@ -694,13 +701,71 @@ def database_stamp(state, component):
         return (db.execute('PRAGMA application_id').fetchone()[0], db.execute('PRAGMA user_version').fetchone()[0])
 
 
+def update_account(component, unit_loaded):
+    name = 'argus-' + component
+    try:
+        return pwd.getpwnam(name)
+    except KeyError:
+        pass
+    markers = [f'/etc/argus-c2/{component}.json', f'/var/lib/argus-c2-{component}',
+               f'/usr/local/libexec/argus-c2/{component}', f'/etc/sysusers.d/argus-c2-{component}.conf',
+               '/etc/sysusers.d/argus-c2.conf', f'/etc/systemd/system/argus-c2-{component}.service',
+               f'/etc/systemd/system/argus-c2-{component}.service.d']
+    if component == 'server':
+        markers += ['/etc/argus-c2/server', '/etc/argus-c2/server-local.json', '/etc/argus-c2/console',
+                    '/etc/argus-c2/setup', '/etc/argus-c2/console-install.json',
+                    '/usr/local/libexec/argus-c2/install-server.py', '/usr/local/share/argus-c2/agents',
+                    '/etc/systemd/system/argus-console-renew.service', '/etc/systemd/system/argus-console-renew.timer']
+    else:
+        markers += ['/etc/argus-c2/policy.json', '/etc/argus-c2/ca.pem']
+    try:
+        grp.getgrnam(name)
+        group_exists = True
+    except KeyError:
+        group_exists = False
+    # ACME accounts and the isolated Certbot environment can remain after an
+    # early install failure. They do not establish an installed ARGUS service.
+    incomplete = unit_loaded or group_exists or any(os.path.lexists(path(p)) for p in markers)
+    if incomplete:
+        raise UpdatePreflightError(text(
+            f'Existing {component} installation records were found, but service account {name} is missing. Preserve the configuration and identity; repair the existing installation using docs/deployment.md before updating.',
+            f'发现 {component} 安装记录，但缺少服务账户 {name}。请保留配置和身份，按 docs/deployment.md 修复现有安装后再更新。'))
+    if component == 'server':
+        raise UpdatePreflightError(text(
+            'Server is not installed. --update server requires a completed installation. Run this downloaded script without --update server to install first; existing Certbot/ACME preparation can be reused.',
+            '尚未安装 Server，--update server 仅用于已完成的安装。请去掉 --update server 后执行此下载脚本，先完成安装；已有 Certbot/ACME 准备内容可复用。'))
+    raise UpdatePreflightError(text(
+        'Agent is not installed. Generate an Agent installation command in Console → Management → Agents → Add agent and run it on this host first. Removing --update agent from this script would install a Server instead.',
+        '尚未安装 Agent。请先在 Console → 管理 → Agent → 添加 Agent 中生成安装命令，并在此主机执行。直接删除此脚本的 --update agent 参数会改为安装 Server。'))
+
+
 def update_plan(component, arch):
+    try:
+        return inspect_update_plan(component, arch)
+    except FileNotFoundError as error:
+        raise UpdatePreflightError(text(
+            f'The {component} installation is incomplete; required path is missing: {error.filename}. Preserve existing configuration and identity and repair the installation before updating.',
+            f'{component} 安装不完整，缺少必要路径：{error.filename}。请保留现有配置和身份，修复安装后再更新。')) from error
+    except json.JSONDecodeError as error:
+        raise UpdatePreflightError(text(
+            'An installed configuration file contains invalid JSON. Repair the existing configuration before updating; no service was changed.',
+            '现有配置文件包含无效 JSON。请修复配置后再更新；尚未更改任何服务。')) from error
+    except InstallError as error:
+        raise UpdatePreflightError(str(error)) from error
+
+
+def inspect_update_plan(component, arch):
     if not path('/run/systemd/system').is_dir():
         raise InstallError('A running systemd host is required.')
     for tool in ('systemctl', 'runuser'):
         if not shutil.which(tool):
             raise InstallError(f'Required command missing: {tool}')
-    account = pwd.getpwnam('argus-' + component)
+    unit = f'argus-c2-{component}.service'
+    load_state = run(['systemctl', 'show', unit, '--property=LoadState', '--value'], check=False).stdout.strip()
+    if load_state not in (b'loaded', b'not-found'):
+        raise InstallError(text('Cannot determine the installed service state. Inspect systemctl status ' + unit + ' before updating.',
+                                '无法确定已安装服务的状态。更新前请检查 systemctl status ' + unit + '。'))
+    account = update_account(component, load_state == b'loaded')
     config_file = path(f'/etc/argus-c2/{component}.json')
     config = json.loads(managed_file(config_file, 8192))
     state = path(f'/var/lib/argus-c2-{component}')
@@ -720,9 +785,9 @@ def update_plan(component, arch):
         managed_file(path('/etc/argus-c2/console-install.json'), 4096)
     for _, dest, _ in files:
         managed_file(dest, 64 << 20)
-    unit = f'argus-c2-{component}.service'
-    if run(['systemctl', 'show', unit, '--property=LoadState', '--value']).stdout.strip() != b'loaded':
-        raise InstallError('The component must already have an installed systemd service.')
+    if load_state != b'loaded':
+        raise InstallError(text('The component service is missing. Preserve its existing files and repair the installation before updating.',
+                                '缺少对应组件服务。请保留现有文件，修复安装后再更新。'))
     service_user = run(['systemctl', 'show', unit, '--property=User', '--value']).stdout.decode().strip()
     if service_user != account.pw_name:
         raise InstallError('The service does not use the expected dedicated account.')

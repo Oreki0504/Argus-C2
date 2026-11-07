@@ -52,6 +52,17 @@ def main():
     require(installer.is_file(), 'Use the installer packaged beside the release bundle.')
     unit = 'argus-c2-server.service'
     try:
+        # The update entry point must reject a new host cleanly, before any
+        # download, account creation or service change (the reported regression).
+        for component in ('server', 'agent'):
+            result = subprocess.run([sys.executable, str(installer), '--update', component, '--language', 'en'],
+                                    capture_output=True, text=True, timeout=30)
+            require(result.returncode == 1, 'Updating an uninstalled component must fail gracefully.')
+            require('is not installed' in result.stderr and 'No package was downloaded' in result.stderr,
+                    f'Missing first-install guidance for {component}: {result.stderr}')
+            require('Traceback' not in result.stderr, 'Uninstalled component emitted a Python traceback.')
+            require(not root.exists() and not state.exists(), 'Update initialized state on an uninstalled host.')
+            require(not Path('/var/lib/argus-c2-updates').exists(), 'Rejected update created a misleading backup record.')
         output = run(sys.executable, installer, '--bundle', bundle, '--host', '127.0.0.1', '--tls', 'local-ca')
         secret_file = root / 'setup/bootstrap.token'
         secret = secret_file.read_text().strip()
