@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -137,7 +138,7 @@ func TestProviderSelectionAndSavedSecretBoundaries(t *testing.T) {
 		t.Fatal("failed update changed settings")
 	}
 	info, err := os.Stat(filepath.Join(s.config.StateDir, "console-provider-"+current+".json"))
-	if err != nil || info.Mode().Perm() != 0600 {
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatal("credentials are not private", err)
 	}
 }
