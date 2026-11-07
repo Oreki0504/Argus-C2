@@ -118,15 +118,19 @@ export const api = {
   authStatus: (signal?: AbortSignal) =>
     request('/v1/console/auth/status', authStatusSchema, { signal }),
   logout: (csrf: string) => request('/v1/console/auth/logout', emptySchema, { body: {}, csrf }),
-  beginOIDC: (csrf: string, setup: boolean) =>
+  beginOIDC: (
+    csrf: string,
+    setup: boolean,
+    provider: import('./contracts').ProviderKind = 'oidc',
+  ) =>
     request(setup ? '/v1/console/setup/bind' : '/v1/console/auth/login', oidcStartSchema, {
-      body: {},
+      body: { provider },
       csrf,
     }),
   setup: (signal?: AbortSignal) => request('/v1/console/setup', setupSchema, { signal }),
   prove: (secret: string, csrf: string) =>
     request('/v1/console/setup/prove', setupSchema, { body: { secret }, csrf }),
-  provider: (body: { issuer: string; client_id: string; client_secret: string }, csrf: string) =>
+  provider: (body: { providers: import('./contracts').ProviderCredentials[] }, csrf: string) =>
     request('/v1/console/setup/provider', setupSchema, { body, csrf }),
   summary: (signal?: AbortSignal) => request('/v1/console/summary', summarySchema, { signal }),
   publicSummary: (signal?: AbortSignal) =>

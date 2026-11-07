@@ -40,6 +40,7 @@ type testProvider struct {
 	signer        jose.Signer
 	subject, mode string
 	redirectURI   string
+	issuer        string
 }
 
 func newTestProvider(t *testing.T) *testProvider {
@@ -55,9 +56,13 @@ func newTestProvider(t *testing.T) *testProvider {
 	p := &testProvider{grants: map[string]testGrant{}, signer: signer, subject: "owner", redirectURI: "https://console.example/v1/console/auth/callback"}
 	p.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		issuer := p.server.URL
+		if p.issuer != "" {
+			issuer = p.issuer
+		}
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
-			_ = json.NewEncoder(w).Encode(map[string]any{"issuer": p.server.URL, "authorization_endpoint": p.server.URL + "/authorize", "token_endpoint": p.server.URL + "/token", "jwks_uri": p.server.URL + "/keys", "response_types_supported": []string{"code"}, "subject_types_supported": []string{"public"}, "id_token_signing_alg_values_supported": []string{"ES256"}, "code_challenge_methods_supported": []string{"S256"}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"issuer": issuer, "authorization_endpoint": p.server.URL + "/authorize", "token_endpoint": p.server.URL + "/token", "jwks_uri": p.server.URL + "/keys", "response_types_supported": []string{"code"}, "subject_types_supported": []string{"public"}, "id_token_signing_alg_values_supported": []string{"ES256"}, "code_challenge_methods_supported": []string{"S256"}})
 		case "/keys":
 			_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "test-key", Algorithm: "ES256", Use: "sig"}}})
 		case "/authorize":
@@ -71,7 +76,7 @@ func newTestProvider(t *testing.T) *testProvider {
 			p.grants[code] = testGrant{q.Get("nonce"), q.Get("code_challenge"), q.Get("redirect_uri"), p.subject, p.mode}
 			p.mu.Unlock()
 			callback, _ := url.Parse(q.Get("redirect_uri"))
-			callback.RawQuery = url.Values{"code": {code}, "state": {q.Get("state")}, "iss": {p.server.URL}}.Encode()
+			callback.RawQuery = url.Values{"code": {code}, "state": {q.Get("state")}, "iss": {issuer}}.Encode()
 			http.Redirect(w, r, callback.String(), 303)
 		case "/token":
 			if err := r.ParseForm(); err != nil {
@@ -92,7 +97,7 @@ func newTestProvider(t *testing.T) *testProvider {
 				http.Error(w, "invalid grant", 400)
 				return
 			}
-			claims := map[string]any{"iss": p.server.URL, "sub": grant.subject, "aud": "console-test", "iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix(), "nonce": grant.nonce, "name": "Account " + grant.subject}
+			claims := map[string]any{"iss": issuer, "sub": grant.subject, "aud": "console-test", "iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix(), "nonce": grant.nonce, "name": "Account " + grant.subject}
 			switch grant.mode {
 			case "nonce":
 				claims["nonce"] = "wrong"
@@ -261,7 +266,7 @@ func setupConsole(t *testing.T) (*Server, *testProvider, *testBrowser, string) {
 	}
 	setup := decodeTest[map[string]any](t, b.request("POST", "/v1/console/setup/prove", map[string]string{"secret": secret}, b.pre(), nil), 200)
 	csrfToken := setup["csrf_token"].(string)
-	decodeTest[map[string]any](t, b.request("POST", "/v1/console/setup/provider", providerCredentials{p.server.URL, "console-test", "test-secret"}, csrfToken, nil), 200)
+	decodeTest[map[string]any](t, b.request("POST", "/v1/console/setup/provider", providerCredentials{Issuer: p.server.URL, ClientID: "console-test", ClientSecret: "test-secret"}, csrfToken, nil), 200)
 	return s, p, b, csrfToken
 }
 
@@ -315,7 +320,7 @@ func TestConsoleRecoversMissingProviderCredentials(t *testing.T) {
 		t.Fatal(setup)
 	}
 	csrfToken := setup["csrf_token"].(string)
-	decodeTest[map[string]any](t, b.request("POST", "/v1/console/setup/provider", providerCredentials{p.server.URL, "console-test", "test-secret"}, csrfToken, nil), 200)
+	decodeTest[map[string]any](t, b.request("POST", "/v1/console/setup/provider", providerCredentials{Issuer: p.server.URL, ClientID: "console-test", ClientSecret: "test-secret"}, csrfToken, nil), 200)
 	p.mu.Lock()
 	p.subject = "recovered-owner"
 	p.mu.Unlock()

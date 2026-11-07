@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [Console setup](console.md) · [Console API](console-api.md) · [Frontend development](../web/README.md)
 
-ARGUS now includes the React console, an optional independent HTTPS Console listener, one-time owner bootstrap, OIDC login, server-side sessions, Web Admin/User authorization, and real management APIs. Console defaults to disabled. Existing CLI Bearer and Agent mTLS routes remain on the Fleet listener and keep their original authorization.
+ARGUS now includes the React console, an optional independent HTTPS Console listener, one-time owner bootstrap, Google/GitHub and custom OIDC login, server-side sessions, Web Admin/User authorization, and real management APIs. Console defaults to disabled. Existing CLI Bearer and Agent mTLS routes remain on the Fleet listener and keep their original authorization.
 
 ## Navigation and design
 
@@ -14,7 +14,7 @@ Anonymous visitors enter the public User overview. Neither User nor Admin has a 
 
 | Page | Implemented behavior |
 | --- | --- |
-| Setup / sign-in | Ownership proof, provider discovery, OIDC owner binding, normal login and local logout |
+| Setup / sign-in | Ownership proof, selectable Google/GitHub or custom OIDC, direct owner binding, normal login and local logout |
 | Overview / details | Safe public names, heartbeat, allowlisted system/resource observations and sampled history |
 | Tasks | Six fixed diagnostic collectors, typed parameter forms, TTL/timeouts, list filters, results and related audit |
 | Agents | One-command Linux installation (curl/wget), manual registration token and CLI fallback, access/certificate state, exact-ID disable confirmation |
@@ -31,7 +31,7 @@ CPU, memory and disk come from successful `system.metrics` results; system infor
 
 ## Authentication and storage
 
-OIDC Authorization Code + S256 PKCE supports a standard provider such as Google or Auth0. Auth0 may offer GitHub and Google connections; GitHub OAuth is not directly treated as OIDC. Signatures/JWKS, issuer, audience, authorized party, expiry, issued-at, nonce, state and exact callback are verified. Local `(issuer, subject)` accounts determine roles; new identities are pending until approved.
+Authorization Code + S256 PKCE supports Google, GitHub OAuth Apps and custom OIDC providers such as Auth0. One or both social providers can be configured in setup. GitHub verifies its stable numeric user ID through its fixed authenticated user API; Google/custom OIDC verify signed ID tokens. Each provider has a distinct callback path. Signatures/JWKS, issuer, audience, authorized party, expiry, issued-at, nonce, state and exact callback are verified. Local `(issuer, subject)` accounts determine roles; new identities are pending until approved.
 
 Sessions contain opaque random credentials whose digests are held in bounded server memory. Cookies use Secure/HttpOnly/Strict/Path=/ and no Domain; the short-lived OIDC correlation cookie uses Lax. Idle expiry is 30 minutes, absolute expiry eight hours; restart clears sessions. Writes require exact Origin plus session-bound CSRF. Account version/generation checks also run inside mutation transactions, so revoked authorization cannot race a write. Role changes revoke sessions; changes involving Admin access require a login within ten minutes.
 
@@ -41,4 +41,4 @@ Schema **103** adds persistent owner/bootstrap state, Web accounts, public IDs a
 
 Mock mode is explicitly marked and remains available over LAN. Production builds contain no mock worker, fixtures, preview toolbar or fallback. Live builds serve UI and API from the Console's HTTPS origin; Vite is only a preview tool.
 
-Tests exercise signed local OIDC discovery/exchange, PKCE, invalid claims/replay, cookie/CSRF boundaries, revocation, atomic owner binding, migration rollback, real enrollment/task/result/disable flows, public projections and Go-response/TypeScript-schema compatibility. Browser tests cover UI workflows, permissions, localization, responsive layouts and accessibility. They do not claim a completed deployment-specific Google/Auth0 app registration or a third-party security review.
+Tests exercise signed local OIDC discovery/exchange, PKCE, invalid claims/replay, cookie/CSRF boundaries, revocation, atomic owner binding, migration rollback, real enrollment/task/result/disable flows, public projections and Go-response/TypeScript-schema compatibility. Browser tests cover UI workflows, permissions, localization, responsive layouts and accessibility. They do not claim a completed deployment-specific Google/GitHub/Auth0 app registration or a third-party security review.

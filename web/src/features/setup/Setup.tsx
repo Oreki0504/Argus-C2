@@ -1,13 +1,212 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, Check, KeyRound, ShieldCheck } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { ArrowLeft, ArrowRight, Check, Copy, ExternalLink } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import type { Setup as SetupContract } from '../../api/contracts'
-import { Brand, ErrorState, Loading, Notice } from '../../components/ui'
-import { OIDCForm } from '../auth/OIDCForm'
+import type { ProviderKind, Setup as SetupContract } from '../../api/contracts'
+import { Brand, ErrorState, Loading } from '../../components/ui'
+import { AppearanceControls } from '../../components/AppearanceControls'
+import { usePreferences } from '../../preferences/context'
+import { beginSignIn } from '../auth/sign-in'
+import { ProviderIcon } from '../auth/ProviderIcon'
+
+const names = { google: 'Google', github: 'GitHub', oidc: 'SSO' }
+const applications = {
+  google: 'https://console.cloud.google.com/auth/clients',
+  github: 'https://github.com/settings/applications/new',
+}
+
+function ProviderSetup({
+  setup,
+  save,
+}: {
+  setup: SetupContract
+  save: (value: SetupContract) => void
+}) {
+  const { t } = usePreferences()
+  const client = useQueryClient()
+  const navigate = useNavigate()
+  const [enabled, setEnabled] = useState<ProviderKind[]>(() =>
+    setup.providers.length ? setup.providers.map((p) => p.kind) : ['github'],
+  )
+  const [clientIDs, setClientIDs] = useState<Partial<Record<ProviderKind, string>>>(() =>
+    Object.fromEntries(setup.providers.map((p) => [p.kind, p.client_id])),
+  )
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+  const [copied, setCopied] = useState<ProviderKind | null>(null)
+  const toggle = (kind: ProviderKind) =>
+    setEnabled((current) =>
+      current.includes(kind) ? current.filter((p) => p !== kind) : [...current, kind],
+    )
+  return (
+    <form
+      className="provider-setup"
+      onSubmit={async (event) => {
+        event.preventDefault()
+        const form = event.currentTarget
+        const fields = new FormData(form)
+        const button = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null
+        const selected = enabled.find((kind) => kind === button?.value) ?? enabled[0]
+        if (!selected) return
+        const providers = enabled.map((kind) => ({
+          kind,
+          issuer: kind === 'oidc' ? String(fields.get('oidc-issuer') ?? '').trim() : '',
+          client_id: String(fields.get(`${kind}-client_id`) ?? '').trim(),
+          client_secret: String(fields.get(`${kind}-client_secret`) ?? '').trim(),
+        }))
+        for (const kind of enabled)
+          (form.elements.namedItem(`${kind}-client_secret`) as HTMLInputElement).value = ''
+        setBusy(true)
+        setError(null)
+        try {
+          const saved = await api.provider({ providers }, setup.csrf_token)
+          save(saved)
+          await beginSignIn(saved.csrf_token, true, selected, client, navigate)
+        } catch (caught) {
+          setError(caught)
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      <p className="muted">
+        {t('Enable one or both. Sign in below to bind your first administrator.')}
+      </p>
+      <div className="provider-choices">
+        {(['github', 'google'] as const).map((kind) => (
+          <label
+            key={kind}
+            className={`provider-choice ${enabled.includes(kind) ? 'selected' : ''}`}
+          >
+            <ProviderIcon kind={kind} />
+            <strong>{names[kind]}</strong>
+            <input
+              type="checkbox"
+              checked={enabled.includes(kind)}
+              onChange={() => toggle(kind)}
+              disabled={busy}
+              aria-label={t('Enable {provider}', { provider: names[kind] })}
+            />
+          </label>
+        ))}
+      </div>
+      <details className="other-provider" open={enabled.includes('oidc') || undefined}>
+        <summary>{t('Other identity provider (Auth0 / OIDC)')}</summary>
+        <label className="oidc-choice">
+          <input
+            type="checkbox"
+            checked={enabled.includes('oidc')}
+            onChange={() => toggle('oidc')}
+            disabled={busy}
+          />
+          {t('Enable custom SSO')}
+        </label>
+      </details>
+      <div className="provider-fields">
+        {enabled.map((kind) => {
+          const saved = setup.providers.find((p) => p.kind === kind)
+          const sameClient = saved && saved.client_id === clientIDs[kind]
+          return (
+            <fieldset key={kind} className="provider-fieldset" disabled={busy}>
+              <legend>{names[kind]}</legend>
+              {kind !== 'oidc' && (
+                <a
+                  className="provider-app-link"
+                  href={applications[kind]}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t('Create OAuth app')}
+                  <ExternalLink size={13} />
+                </a>
+              )}
+              {kind === 'oidc' && (
+                <>
+                  <label htmlFor="oidc-issuer">{t('Issuer URL')}</label>
+                  <input
+                    id="oidc-issuer"
+                    name="oidc-issuer"
+                    type="url"
+                    required
+                    pattern="https://.+"
+                    defaultValue={saved?.issuer}
+                    placeholder="https://your-tenant.auth0.com/"
+                  />
+                </>
+              )}
+              <label htmlFor={`${kind}-callback`}>{t('Callback URL')}</label>
+              <div className="callback-control">
+                <input id={`${kind}-callback`} value={setup.callback_uris[kind]} readOnly />
+                <button
+                  type="button"
+                  className="button"
+                  aria-label={t('Copy {provider} callback URL', { provider: names[kind] })}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(setup.callback_uris[kind])
+                      setCopied(kind)
+                    } catch (caught) {
+                      setError(caught)
+                    }
+                  }}
+                >
+                  {copied === kind ? <Check size={15} /> : <Copy size={15} />}
+                </button>
+              </div>
+              <label htmlFor={`${kind}-client-id`}>{names[kind]} Client ID</label>
+              <input
+                id={`${kind}-client-id`}
+                name={`${kind}-client_id`}
+                required
+                maxLength={512}
+                autoComplete="off"
+                value={clientIDs[kind] ?? ''}
+                onChange={(event) =>
+                  setClientIDs((current) => ({ ...current, [kind]: event.target.value }))
+                }
+              />
+              <label htmlFor={`${kind}-client-secret`}>{names[kind]} Client Secret</label>
+              <input
+                id={`${kind}-client-secret`}
+                name={`${kind}-client_secret`}
+                type="password"
+                maxLength={4096}
+                autoComplete="off"
+                required={kind !== 'oidc' && !sameClient}
+                placeholder={sameClient ? t('Saved — leave blank to keep') : ''}
+              />
+            </fieldset>
+          )
+        })}
+      </div>
+      {error !== null && <ErrorState error={error} />}
+      <div className="setup-bind-actions">
+        {enabled.map((kind) => (
+          <button
+            key={kind}
+            className="button social-button"
+            type="submit"
+            value={kind}
+            disabled={busy}
+          >
+            <ProviderIcon kind={kind} />
+            {busy ? t('Connecting…') : t('Bind with {provider}', { provider: names[kind] })}
+            <ArrowRight size={16} />
+          </button>
+        ))}
+      </div>
+      <p className="field-hint">
+        {t(
+          'Application credentials are configured once. Future visits only need a sign-in button.',
+        )}
+      </p>
+    </form>
+  )
+}
 
 export function SetupPage() {
+  const { t } = usePreferences()
   const client = useQueryClient()
   const status = useQuery({
     queryKey: ['auth-status'],
@@ -21,9 +220,7 @@ export function SetupPage() {
   })
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
-  const [editingProvider, setEditingProvider] = useState(false)
   const setup = resume.data
-  const step = setup?.step === 'bind' && !editingProvider ? 2 : setup ? 1 : 0
   const save = (data: SetupContract) => client.setQueryData(['setup'], data)
   if (status.isPending || (status.data?.state === 'SETUP_PENDING' && resume.isPending))
     return <Loading label="Checking setup state" />
@@ -39,17 +236,21 @@ export function SetupPage() {
       <main className="setup-closed">
         <Brand />
         <h1>
-          {status.data.state === 'ACTIVE'
-            ? 'Your console is already set up'
-            : 'Waiting for the server owner'}
+          {t(
+            status.data.state === 'ACTIVE'
+              ? 'Your console is already set up'
+              : 'Waiting for the server owner',
+          )}
         </h1>
         <p>
-          {status.data.state === 'ACTIVE'
-            ? 'First-run setup is closed. Sign in with your identity provider.'
-            : 'Generate a one-time bootstrap secret using the local server setup command before continuing.'}
+          {t(
+            status.data.state === 'ACTIVE'
+              ? 'Sign in with your linked account.'
+              : 'Generate a one-time setup code on the server to get started.',
+          )}
         </p>
         <Link className="button primary" to="/login">
-          Return to sign in
+          {t('Return to sign in')}
         </Link>
       </main>
     )
@@ -59,206 +260,76 @@ export function SetupPage() {
         <ErrorState error={resume.error} retry={() => void resume.refetch()} />
       </main>
     )
-
   return (
-    <main className="setup-layout">
+    <main className="setup-layout setup-simple">
       <header className="setup-header">
         <Brand />
-        <Link to="/login">
-          <ArrowLeft size={16} />
-          Back to sign in
-        </Link>
+        <div className="setup-header-actions">
+          <AppearanceControls />
+          <Link to="/login">
+            <ArrowLeft size={16} />
+            {t('Back to sign in')}
+          </Link>
+        </div>
       </header>
       <div className="setup-intro">
-        <p className="eyebrow">FIRST-RUN SETUP</p>
-        <h1>A secure start for your fleet.</h1>
-        <p>Connect your identity provider and establish your first administrator.</p>
+        <h1>{t('Set up your console')}</h1>
+        <p>{t('Verify ownership, then bind your Google or GitHub account.')}</p>
       </div>
-      <div className="setup-workspace">
-        <nav aria-label="Setup progress">
-          <ol className="steps">
-            {['Verify ownership', 'Connect identity provider', 'Bind administrator'].map(
-              (label, index) => (
-                <li
-                  key={label}
-                  aria-current={index === step ? 'step' : undefined}
-                  className={index < step ? 'complete' : index === step ? 'current' : ''}
-                >
-                  <span>{index < step ? <Check size={16} /> : `0${index + 1}`}</span>
-                  <div>
-                    {label}
-                    <small>
-                      {
-                        [
-                          'One-time local setup secret',
-                          'OIDC provider configuration',
-                          'Verify your organization identity',
-                        ][index]
-                      }
-                    </small>
-                  </div>
-                </li>
-              ),
-            )}
-          </ol>
-          <div className="setup-sidebar-note">
-            <ShieldCheck size={20} />
-            <p>Setup closes automatically after your first administrator is bound.</p>
-          </div>
-        </nav>
-        <section className="setup-panel">
-          <span className="step-icon">{step === 0 ? <KeyRound /> : <ShieldCheck />}</span>
-          <p className="eyebrow">STEP 0{step + 1} OF 03</p>
-          <h2>
-            {['Verify console ownership', 'Connect your identity provider', 'Make it yours'][step]}
-          </h2>
-          {error !== null && <ErrorState error={error} />}
-          {step === 0 && (
-            <form
-              onSubmit={async (event) => {
-                event.preventDefault()
-                const form = event.currentTarget
-                const secret = String(new FormData(form).get('secret') ?? '')
-                form.reset()
-                setBusy(true)
-                setError(null)
-                try {
-                  save(await api.prove(secret, status.data.csrf_token))
-                } catch (error) {
-                  setError(error)
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
-              <p className="muted">
-                Enter the one-time setup secret generated locally by the server owner.
-              </p>
-              <label htmlFor="secret">Bootstrap secret</label>
-              <input
-                id="secret"
-                name="secret"
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                required
-                pattern="[a-fA-F0-9]{64}"
-                minLength={64}
-                maxLength={64}
-                placeholder="64-character setup secret"
-                aria-describedby="secret-help"
-              />
-              <p className="field-hint" id="secret-help">
-                Short-lived and single-use. This is not your CLI admin token.
-              </p>
-              <Notice>
-                The secret establishes setup access. Your administrator identity is verified in the
-                final step.
-              </Notice>
-              <button className="button primary" disabled={busy}>
-                {busy ? 'Verifying…' : 'Verify & continue'}
-                <ArrowRight size={16} />
-              </button>
-            </form>
-          )}
-          {step === 1 && setup && (
-            <form
-              onSubmit={async (event) => {
-                event.preventDefault()
-                const form = event.currentTarget
-                const fields = new FormData(form)
-                const body = {
-                  issuer: String(fields.get('issuer')),
-                  client_id: String(fields.get('client_id')),
-                  client_secret: String(fields.get('client_secret') ?? ''),
-                }
-                const secretInput = form.elements.namedItem('client_secret') as HTMLInputElement
-                secretInput.value = ''
-                setBusy(true)
-                setError(null)
-                try {
-                  save(await api.provider(body, setup.csrf_token))
-                  setEditingProvider(false)
-                } catch (error) {
-                  setError(error)
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
-              <p className="muted">
-                Use an OIDC application registered with your organization’s provider.
-              </p>
-              <label htmlFor="issuer">Issuer URL</label>
-              <input
-                id="issuer"
-                name="issuer"
-                type="url"
-                required
-                pattern="https://.+"
-                placeholder="https://identity.example.com"
-                defaultValue={setup.issuer}
-              />
-              <label htmlFor="client-id">Client ID</label>
-              <input
-                id="client-id"
-                name="client_id"
-                required
-                maxLength={512}
-                defaultValue={setup.client_id}
-                autoComplete="off"
-              />
-              <label htmlFor="client-secret">
-                Client secret <span className="muted">(if required)</span>
-              </label>
-              <input
-                id="client-secret"
-                name="client_secret"
-                type="password"
-                maxLength={4096}
-                autoComplete="off"
-              />
-              <label htmlFor="callback">Redirect URI</label>
-              <input id="callback" value={setup.callback_uri} readOnly />
-              <p className="field-hint">
-                Register this exact URI with your provider. It is supplied by the Console server.
-              </p>
-              <button className="button primary" disabled={busy}>
-                {busy ? 'Validating provider…' : 'Validate & continue'}
-                <ArrowRight size={16} />
-              </button>
-            </form>
-          )}
-          {step === 2 && setup && (
-            <>
-              <p className="muted">
-                Sign in to verify the identity that will become the first administrator of this
-                console.
-              </p>
-              <dl className="detail-list">
-                <div>
-                  <dt>Identity provider</dt>
-                  <dd>{setup.issuer}</dd>
-                </div>
-                <div>
-                  <dt>Assigned role</dt>
-                  <dd>
-                    <span className="role-badge">Admin</span>
-                  </dd>
-                </div>
-              </dl>
-              <Notice>
-                Activation completes only after the server verifies your identity. Your setup secret
-                and setup session are then revoked.
-              </Notice>
-              <OIDCForm setup csrf={setup.csrf_token} />
-              <button className="text-action" onClick={() => setEditingProvider(true)}>
-                Change identity provider settings
-              </button>
-            </>
-          )}
-        </section>
-      </div>
+      <ol className="setup-progress" aria-label={t('Setup progress')}>
+        {['Verify ownership', 'Bind administrator'].map((label, index) => (
+          <li key={label} aria-current={index === (setup ? 1 : 0) ? 'step' : undefined}>
+            <span>{setup && index === 0 ? <Check size={14} /> : index + 1}</span>
+            {t(label)}
+          </li>
+        ))}
+      </ol>
+      <section className="setup-panel">
+        <h2>{t(setup ? 'Choose your sign-in methods' : 'Verify console ownership')}</h2>
+        {setup ? (
+          <ProviderSetup setup={setup} save={save} />
+        ) : (
+          <form
+            onSubmit={async (event) => {
+              event.preventDefault()
+              const input = event.currentTarget.elements.namedItem('secret') as HTMLInputElement
+              const secret = input.value.trim()
+              input.value = ''
+              setBusy(true)
+              setError(null)
+              try {
+                save(await api.prove(secret, status.data.csrf_token))
+              } catch (caught) {
+                setError(caught)
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            <p className="muted">
+              {t('Enter the setup code shown in your server’s installation terminal.')}
+            </p>
+            <label htmlFor="secret">{t('Bootstrap secret')}</label>
+            <input
+              id="secret"
+              name="secret"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              required
+              pattern="[a-fA-F0-9]{64}"
+              minLength={64}
+              maxLength={64}
+              placeholder={t('64-character setup code')}
+            />
+            {error !== null && <ErrorState error={error} />}
+            <button className="button primary" disabled={busy}>
+              {t(busy ? 'Verifying…' : 'Verify & continue')}
+              <ArrowRight size={16} />
+            </button>
+          </form>
+        )}
+      </section>
     </main>
   )
 }

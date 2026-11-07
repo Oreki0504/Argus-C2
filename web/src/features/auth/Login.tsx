@@ -2,7 +2,7 @@ import { usePreferences } from '../../preferences/context'
 import { AppearanceControls } from '../../components/AppearanceControls'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, LockKeyhole, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, ShieldCheck } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Brand, ErrorState, Loading, Notice } from '../../components/ui'
 import { OIDCForm } from './OIDCForm'
@@ -61,7 +61,7 @@ export function Login() {
         <div className="auth-card">
           <span className="eyebrow">{t('WELCOME TO ARGUS')}</span>
           <h2>{t('Sign in to your console')}</h2>
-          <p className="muted">{t('Use your organization’s identity provider to continue.')}</p>
+          <p className="muted">{t('Choose how you want to sign in.')}</p>
           {reason && reasons.has(reason) && (
             <Notice kind="warning">{t(new ApiError(401, reason).message)}</Notice>
           )}
@@ -71,17 +71,10 @@ export function Login() {
             <ErrorState error={status.error} retry={() => void status.refetch()} />
           ) : status.data.state === 'ACTIVE' ? (
             <>
-              <div className="provider">
-                <span className="provider-icon">
-                  <LockKeyhole size={20} />
-                </span>
-                <div>
-                  <strong>{t(status.data.provider_name ?? 'Single sign-on')}</strong>
-                  <small>{t('Organization identity provider')}</small>
-                </div>
-                <span className="provider-badge">OIDC</span>
-              </div>
-              <OIDCForm csrf={status.data.csrf_token} />
+              <OIDCForm
+                csrf={status.data.csrf_token}
+                providers={status.data.providers.length ? status.data.providers : undefined}
+              />
               <p className="auth-help">{t('Access is assigned by your console administrator.')}</p>
             </>
           ) : (
@@ -102,7 +95,7 @@ export function Login() {
           )}
           <div className="auth-security">
             <ShieldCheck size={16} />
-            {t('Protected by your organization’s sign-in policy')}
+            {t('Your account is verified by your sign-in provider.')}
           </div>
         </div>
         <p className="auth-bottom">{t('Secure access. Purposeful diagnostics.')}</p>

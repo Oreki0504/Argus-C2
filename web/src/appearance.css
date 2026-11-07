@@ -847,3 +847,217 @@
     }
   }
 }
+
+@layer refinement {
+  .social-sign-in {
+    display: grid;
+    gap: 12px;
+  }
+  .social-sign-in .button,
+  .provider-setup .button {
+    margin-top: 0;
+  }
+  .social-button {
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--control-border);
+    justify-content: center;
+    gap: 10px;
+  }
+  .social-button:hover {
+    border-color: var(--text);
+    background: var(--subtle);
+  }
+  .google-mark {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+    width: 19px;
+    text-align: center;
+  }
+  .setup-simple {
+    max-width: 1050px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  .setup-simple .setup-header {
+    margin-bottom: 6px;
+  }
+  .setup-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .setup-simple .setup-intro {
+    margin-bottom: 8px;
+  }
+  .setup-simple .setup-intro h1 {
+    font-size: 26px;
+    margin: 8px 0;
+  }
+  .setup-simple .setup-panel {
+    padding: 18px;
+  }
+  .setup-simple .setup-panel h2 {
+    margin: 0 0 10px;
+    font-size: 20px;
+  }
+  .setup-progress {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 10px;
+    display: flex;
+    gap: 24px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .setup-progress li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .setup-progress span {
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+  }
+  .setup-progress [aria-current='step'] {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .setup-progress [aria-current='step'] span {
+    background: var(--text);
+    color: var(--surface);
+    border-color: var(--text);
+  }
+  .provider-setup > .muted {
+    margin-bottom: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .provider-choices {
+    display: flex;
+    gap: 12px;
+  }
+  .provider-choice {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    gap: 10px;
+    min-height: 44px;
+    padding: 12px 16px;
+    border: 1px solid var(--control-border);
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  .provider-choice.selected {
+    border-color: var(--text);
+  }
+  .provider-choice input,
+  .oidc-choice input {
+    width: 17px;
+    height: 17px;
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    accent-color: var(--text);
+  }
+  .provider-choice input {
+    margin-left: auto;
+  }
+  .other-provider {
+    margin: 6px 0 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .other-provider summary {
+    cursor: pointer;
+    width: fit-content;
+    padding: 5px 0;
+  }
+  .oidc-choice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .provider-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
+    gap: 18px;
+  }
+  .provider-fieldset {
+    min-width: 0;
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 8px 12px 12px;
+  }
+  .provider-fieldset legend {
+    padding: 0 6px;
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .provider-fieldset label {
+    margin: 8px 0 5px;
+    font-size: 12px;
+  }
+  .provider-fieldset input {
+    min-height: 36px;
+    padding: 7px 10px;
+  }
+  .provider-app-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .callback-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .callback-control input {
+    min-width: 0;
+    margin: 0;
+    font-size: 11px;
+    font-family: var(--font-mono, monospace);
+  }
+  .callback-control .button {
+    flex-shrink: 0;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0 9px;
+  }
+  .setup-bind-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .setup-bind-actions + .field-hint {
+    margin: 10px 0 0;
+  }
+  @media (max-width: 600px) {
+    .setup-simple {
+      padding: 20px 16px;
+    }
+    .setup-simple .setup-panel {
+      padding: 18px;
+    }
+    .setup-header-actions {
+      gap: 8px;
+    }
+    .setup-header-actions > a {
+      font-size: 11px;
+    }
+    .setup-bind-actions .button {
+      width: 100%;
+    }
+  }
+}

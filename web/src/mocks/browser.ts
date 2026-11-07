@@ -41,6 +41,10 @@ export async function startMocks() {
   })
 }
 
-export async function simulateOIDC(path: string, csrf: string) {
-  await request(path, emptySchema, { body: {}, csrf })
+export async function simulateOIDC(
+  path: string,
+  csrf: string,
+  provider: import('../api/contracts').ProviderKind,
+) {
+  await request(path, emptySchema, { body: { provider }, csrf })
 }

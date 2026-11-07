@@ -1,6 +1,11 @@
 import { delay, http, HttpResponse } from 'msw'
 import { csrf, fleetFixture, historyFixture, identity, type Scenario } from './fixtures'
-import { historyRangeSchema, type Setup } from '../api/contracts'
+import {
+  historyRangeSchema,
+  type Setup,
+  type LoginProvider,
+  type ProviderCredentials,
+} from '../api/contracts'
 import { managementFixture, managementHandlers } from './management'
 
 // This state belongs to the development preview. It is not an authentication
@@ -9,6 +14,13 @@ export function makeHandlers(scenario: Scenario) {
   let active = scenario !== 'setup'
   let session = !['guest', 'setup', 'login', 'expired', 'empty', 'unavailable'].includes(scenario)
   let setup: Setup | null = null
+  let providers: LoginProvider[] =
+    scenario === 'oidc-error'
+      ? [{ kind: 'oidc', name: 'Organization SSO' }]
+      : [
+          { kind: 'github', name: 'GitHub' },
+          { kind: 'google', name: 'Google' },
+        ]
   const role = scenario === 'user' ? 'User' : 'Admin'
   const problem = (code: string, status: number) =>
     HttpResponse.json({ code }, { status, headers: { 'Cache-Control': 'no-store' } })
@@ -38,7 +50,10 @@ export function makeHandlers(scenario: Scenario) {
     http.get('/v1/console/auth/status', () =>
       reply({
         state: active ? 'ACTIVE' : 'SETUP_PENDING',
-        provider_name: 'Organization SSO',
+        provider_name: providers[0]?.name ?? null,
+        providers: active
+          ? providers
+          : (setup?.providers ?? []).map(({ kind, name }) => ({ kind, name })),
         csrf_token: csrf,
       }),
     ),
@@ -57,6 +72,8 @@ export function makeHandlers(scenario: Scenario) {
     }),
     http.post('/v1/console/auth/login', async ({ request }) => {
       if (!validCSRF(request)) return problem('csrf_invalid', 403)
+      const body = (await request.json()) as { provider: string }
+      if (!providers.some((p) => p.kind === body.provider)) return problem('oidc_unavailable', 400)
       if (scenario === 'oidc-error') return problem('oidc_callback_invalid', 400)
       session = true
       return reply({})
@@ -77,6 +94,12 @@ export function makeHandlers(scenario: Scenario) {
         step: 'provider',
         csrf_token: csrf,
         callback_uri: 'https://console.example.test/v1/console/auth/callback',
+        callback_uris: {
+          oidc: 'https://console.example.test/v1/console/auth/callback',
+          google: 'https://console.example.test/v1/console/auth/callback/google',
+          github: 'https://console.example.test/v1/console/auth/callback/github',
+        },
+        providers: [],
         issuer: '',
         client_id: '',
       }
@@ -86,16 +109,40 @@ export function makeHandlers(scenario: Scenario) {
       if (active) return problem('setup_closed', 403)
       if (!setup) return problem('session_expired', 401)
       if (!validCSRF(request)) return problem('csrf_invalid', 403)
-      const body = (await request.json()) as { issuer: string; client_id: string }
-      if (!body.issuer.startsWith('https://') || !body.client_id)
+      const body = (await request.json()) as { providers: ProviderCredentials[] }
+      if (
+        !body.providers.length ||
+        body.providers.some(
+          (p) => !p.client_id || (p.kind === 'oidc' && !p.issuer.startsWith('https://')),
+        )
+      )
         return problem('oidc_unavailable', 400)
-      setup = { ...setup, issuer: body.issuer, client_id: body.client_id, step: 'bind' }
+      setup = {
+        ...setup,
+        step: 'bind',
+        providers: body.providers.map((p) => ({
+          kind: p.kind,
+          name:
+            p.kind === 'google' ? 'Google' : p.kind === 'github' ? 'GitHub' : 'Organization SSO',
+          issuer:
+            p.kind === 'google'
+              ? 'https://accounts.google.com'
+              : p.kind === 'github'
+                ? 'https://github.com'
+                : p.issuer,
+          client_id: p.client_id,
+        })),
+      }
       return reply(setup)
     }),
-    http.post('/v1/console/setup/bind', ({ request }) => {
+    http.post('/v1/console/setup/bind', async ({ request }) => {
       if (active) return problem('setup_closed', 403)
       if (setup?.step !== 'bind') return problem('forbidden', 403)
       if (!validCSRF(request)) return problem('csrf_invalid', 403)
+      const body = (await request.json()) as { provider: string }
+      if (!setup.providers.some((p) => p.kind === body.provider))
+        return problem('oidc_unavailable', 400)
+      providers = setup.providers.map(({ kind, name }) => ({ kind, name }))
       active = true
       session = true
       setup = null

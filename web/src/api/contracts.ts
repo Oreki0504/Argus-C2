@@ -25,15 +25,31 @@ export const identitySchema = z.strictObject({
 })
 export type Identity = z.infer<typeof identitySchema>
 
+export const providerKindSchema = z.enum(['google', 'github', 'oidc'])
+export type ProviderKind = z.infer<typeof providerKindSchema>
+const providerSummarySchema = z.strictObject({ kind: providerKindSchema, name: z.string() })
+export type LoginProvider = z.infer<typeof providerSummarySchema>
+export type ProviderCredentials = {
+  kind: ProviderKind
+  issuer: string
+  client_id: string
+  client_secret: string
+}
+const callbackURI = z.url().refine((value) => new URL(value).protocol === 'https:')
 export const authStatusSchema = z.strictObject({
   state: z.enum(['UNINITIALIZED', 'SETUP_PENDING', 'ACTIVE']),
   provider_name: z.string().nullable(),
+  providers: z.array(providerSummarySchema).max(3).default([]),
   csrf_token: z.string().min(1),
 })
 export const setupSchema = z.strictObject({
   step: z.enum(['provider', 'bind']),
   csrf_token: z.string().min(1),
-  callback_uri: z.url().refine((value) => new URL(value).protocol === 'https:'),
+  callback_uri: callbackURI,
+  callback_uris: z.strictObject({ google: callbackURI, github: callbackURI, oidc: callbackURI }),
+  providers: z
+    .array(providerSummarySchema.extend({ issuer: z.string(), client_id: z.string() }))
+    .max(3),
   issuer: z.string(),
   client_id: z.string(),
 })

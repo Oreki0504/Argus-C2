@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,7 +30,91 @@ type providerCredentials struct {
 	Issuer       string `json:"issuer"`
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
+	Kind         string `json:"kind,omitempty"`
 }
+type providerSettings struct {
+	Providers []providerCredentials `json:"providers"`
+}
+
+// Accept the original single-OIDC configuration as well as provider sets.
+type providerInput struct {
+	providerCredentials
+	Providers []json.RawMessage `json:"providers"`
+}
+
+const googleIssuer = "https://accounts.google.com"
+const githubIssuer = "https://github.com"
+
+func callbackPath(kind string) string {
+	if kind == "google" || kind == "github" {
+		return "/v1/console/auth/callback/" + kind
+	}
+	return "/v1/console/auth/callback"
+}
+
+func providerLabel(c providerCredentials) string {
+	switch c.Kind {
+	case "google":
+		return "Google"
+	case "github":
+		return "GitHub"
+	default:
+		u, _ := url.Parse(c.Issuer)
+		return u.Host
+	}
+}
+
+func normalizeProviders(input providerInput) ([]providerCredentials, error) {
+	var items []providerCredentials
+	if input.Providers == nil {
+		items = []providerCredentials{input.providerCredentials}
+	} else if input.providerCredentials != (providerCredentials{}) {
+		return nil, errors.New("mixed provider formats")
+	} else {
+		for _, raw := range input.Providers {
+			var c providerCredentials
+			if err := strictjson.Decode(raw, &c, 8192, "kind", "issuer", "client_id", "client_secret"); err != nil {
+				return nil, err
+			}
+			items = append(items, c)
+		}
+	}
+	if len(items) < 1 || len(items) > 3 {
+		return nil, errors.New("choose one to three login providers")
+	}
+	seen := map[string]bool{}
+	for i := range items {
+		c := &items[i]
+		if c.Kind == "" {
+			c.Kind = "oidc"
+		}
+		if seen[c.Kind] {
+			return nil, errors.New("duplicate login provider")
+		}
+		seen[c.Kind] = true
+		switch c.Kind {
+		case "google", "github":
+			issuer := googleIssuer
+			if c.Kind == "github" {
+				issuer = githubIssuer
+			}
+			if c.Issuer != "" && c.Issuer != issuer {
+				return nil, errors.New("social provider endpoint cannot be changed")
+			}
+			c.Issuer = issuer
+		case "oidc":
+			// The issuer is explicitly supplied for custom OIDC providers.
+		default:
+			return nil, errors.New("unsupported login provider")
+		}
+		u, err := url.Parse(c.Issuer)
+		if err != nil || !secureEndpoint(c.Issuer) || u.RawQuery != "" || c.ClientID == "" || !protocol.CleanText(c.ClientID, 512) || !protocol.CleanText(c.ClientSecret, 4096) {
+			return nil, errors.New("invalid provider settings")
+		}
+	}
+	return items, nil
+}
+
 type provider struct {
 	ID          string
 	Credentials providerCredentials
@@ -67,21 +152,38 @@ func secureEndpoint(raw string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.Fragment == "" && len(raw) <= 2048
 }
-func (s *Server) readProvider(id string) (providerCredentials, error) {
-	var c providerCredentials
+func (s *Server) readProvider(id string) ([]providerCredentials, error) {
+	var input providerInput
 	if !identity.Valid(id) {
-		return c, errors.New("invalid provider ID")
+		return nil, errors.New("invalid provider ID")
 	}
-	b, err := localfile.Read(filepath.Join(s.config.StateDir, "console-provider-"+id+".json"), 8192, true)
+	b, err := localfile.Read(filepath.Join(s.config.StateDir, "console-provider-"+id+".json"), 32768, true)
 	if err == nil {
-		err = strictjson.Decode(b, &c, 8192, "issuer", "client_id", "client_secret")
+		err = strictjson.Decode(b, &input, 32768, "providers")
+		if err != nil {
+			err = strictjson.Decode(b, &input, 32768, "issuer", "client_id", "client_secret")
+		}
 	}
-	return c, err
+	if err != nil {
+		return nil, err
+	}
+	return normalizeProviders(input)
 }
 func (s *Server) discover(ctx context.Context, id string, c providerCredentials) (*provider, error) {
-	u, err := url.Parse(c.Issuer)
-	if err != nil || !secureEndpoint(c.Issuer) || u.RawQuery != "" || c.ClientID == "" || !protocol.CleanText(c.ClientID, 512) || !protocol.CleanText(c.ClientSecret, 4096) {
-		return nil, errors.New("invalid provider settings")
+	items, err := normalizeProviders(providerInput{providerCredentials: c})
+	if err != nil {
+		return nil, err
+	}
+	c = items[0]
+	if c.Kind != "oidc" && c.ClientSecret == "" {
+		return nil, errors.New("social login requires an application secret")
+	}
+	if c.Kind == "github" {
+		return &provider{ID: id, Credentials: c, OAuth: oauth2.Config{
+			ClientID: c.ClientID, ClientSecret: c.ClientSecret,
+			Endpoint:    oauth2.Endpoint{AuthURL: "https://github.com/login/oauth/authorize", TokenURL: "https://github.com/login/oauth/access_token", AuthStyle: oauth2.AuthStyleInParams},
+			RedirectURL: s.config.Origin + callbackPath(c.Kind), Scopes: []string{"read:user"},
+		}}, nil
 	}
 	ctx = oidc.ClientContext(ctx, s.httpClient)
 	p, err := oidc.NewProvider(ctx, c.Issuer)
@@ -98,23 +200,35 @@ func (s *Server) discover(ctx context.Context, id string, c providerCredentials)
 	if !secureEndpoint(endpoint.AuthURL) || !secureEndpoint(endpoint.TokenURL) || !secureEndpoint(metadata.JWKS) {
 		return nil, errors.New("invalid OIDC endpoints")
 	}
-	return &provider{ID: id, Credentials: c, OAuth: oauth2.Config{ClientID: c.ClientID, ClientSecret: c.ClientSecret, Endpoint: endpoint, RedirectURL: s.config.Origin + "/v1/console/auth/callback", Scopes: []string{oidc.ScopeOpenID, "profile"}}, Verifier: p.VerifierContext(oidc.ClientContext(context.Background(), s.httpClient), &oidc.Config{ClientID: c.ClientID, SupportedSigningAlgs: []string{oidc.RS256, oidc.ES256}, Now: s.now})}, nil
+	if c.Kind == "google" {
+		endpoint.AuthStyle = oauth2.AuthStyleInParams
+	}
+	return &provider{ID: id, Credentials: c, OAuth: oauth2.Config{ClientID: c.ClientID, ClientSecret: c.ClientSecret, Endpoint: endpoint, RedirectURL: s.config.Origin + callbackPath(c.Kind), Scopes: []string{oidc.ScopeOpenID, "profile"}}, Verifier: p.VerifierContext(oidc.ClientContext(context.Background(), s.httpClient), &oidc.Config{ClientID: c.ClientID, SupportedSigningAlgs: []string{oidc.RS256, oidc.ES256}, Now: s.now})}, nil
 }
-func (s *Server) getProvider(ctx context.Context, id string) (*provider, error) {
+func (s *Server) getProvider(ctx context.Context, id, kind string) (*provider, error) {
 	s.providerMu.Lock()
 	defer s.providerMu.Unlock()
-	if s.cachedProvider != nil && s.cachedProvider.ID == id {
-		return s.cachedProvider, nil
+	if p := s.cachedProviders[kind]; p != nil && p.ID == id {
+		return p, nil
 	}
-	c, err := s.readProvider(id)
+	items, err := s.readProvider(id)
 	if err != nil {
 		return nil, err
 	}
-	p, err := s.discover(ctx, id, c)
-	if err == nil {
-		s.cachedProvider = p
+	for _, c := range items {
+		if c.Kind != kind && !(kind == "" && len(items) == 1) {
+			continue
+		}
+		p, err := s.discover(ctx, id, c)
+		if err == nil {
+			if s.cachedProviders == nil {
+				s.cachedProviders = map[string]*provider{}
+			}
+			s.cachedProviders[c.Kind] = p
+		}
+		return p, err
 	}
-	return p, err
+	return nil, errors.New("login provider is not configured")
 }
 func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 	state, err := s.store.ConsoleState(r.Context())
@@ -138,20 +252,24 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 		status = "SETUP_PENDING"
 	}
 	var providerName *string
+	providers := []map[string]string{}
 	if state.ProviderID != "" {
-		c, e := s.readProvider(state.ProviderID)
+		items, e := s.readProvider(state.ProviderID)
 		if e != nil {
 			if !state.SetupOpen(s.now().Unix()) {
 				problem(w, 503, "service_unavailable")
 				return
 			}
 		}
-		u, _ := url.Parse(c.Issuer)
-		if u != nil {
-			providerName = &u.Host
+		for _, c := range items {
+			name := providerLabel(c)
+			if providerName == nil {
+				providerName = &name
+			}
+			providers = append(providers, map[string]string{"kind": c.Kind, "name": name})
 		}
 	}
-	reply(w, map[string]any{"state": status, "provider_name": providerName, "csrf_token": v.CSRF})
+	reply(w, map[string]any{"state": status, "provider_name": providerName, "providers": providers, "csrf_token": v.CSRF})
 }
 func (s *Server) setupSession(w http.ResponseWriter, r *http.Request, write bool) (session, database.ConsoleState, bool) {
 	state, err := s.store.ConsoleState(r.Context())
@@ -175,18 +293,28 @@ func (s *Server) setupSession(w http.ResponseWriter, r *http.Request, write bool
 	return v, state, true
 }
 func (s *Server) setupReply(w http.ResponseWriter, v session, state database.ConsoleState) {
-	c := providerCredentials{}
+	items := []providerCredentials{}
 	step := "provider"
 	if state.ProviderID != "" {
 		var err error
-		c, err = s.readProvider(state.ProviderID)
-		if err != nil {
-			c = providerCredentials{}
-		} else {
+		items, err = s.readProvider(state.ProviderID)
+		if err == nil {
 			step = "bind"
 		}
 	}
-	reply(w, map[string]string{"step": step, "csrf_token": v.CSRF, "callback_uri": s.config.Origin + "/v1/console/auth/callback", "issuer": c.Issuer, "client_id": c.ClientID})
+	providers := []map[string]string{}
+	c := providerCredentials{}
+	for _, item := range items {
+		providers = append(providers, map[string]string{"kind": item.Kind, "name": providerLabel(item), "issuer": item.Issuer, "client_id": item.ClientID})
+		if c.ClientID == "" {
+			c = item
+		}
+	}
+	callbacks := map[string]string{}
+	for _, kind := range []string{"google", "github", "oidc"} {
+		callbacks[kind] = s.config.Origin + callbackPath(kind)
+	}
+	reply(w, map[string]any{"step": step, "csrf_token": v.CSRF, "callback_uri": callbacks["oidc"], "issuer": c.Issuer, "client_id": c.ClientID, "providers": providers, "callback_uris": callbacks})
 }
 func (s *Server) setupStatus(w http.ResponseWriter, r *http.Request) {
 	v, state, ok := s.setupSession(w, r, false)
@@ -219,19 +347,38 @@ func (s *Server) prove(w http.ResponseWriter, r *http.Request) {
 	s.setupReply(w, v, state)
 }
 func (s *Server) configureProvider(w http.ResponseWriter, r *http.Request) {
-	v, _, ok := s.setupSession(w, r, true)
+	v, state, ok := s.setupSession(w, r, true)
 	if !ok {
 		return
 	}
-	var c providerCredentials
-	if !decode(w, r, &c, "issuer", "client_id", "client_secret") {
+	var input providerInput
+	if !decodeAlternatives(w, r, &input, []string{"providers"}, []string{"issuer", "client_id", "client_secret"}) {
 		return
 	}
-	id := identity.RandomID()
-	p, err := s.discover(r.Context(), id, c)
+	items, err := normalizeProviders(input)
 	if err != nil {
-		problem(w, 503, "oidc_unavailable")
+		problem(w, 400, "invalid_request")
 		return
+	}
+	previous, _ := s.readProvider(state.ProviderID)
+	// A resumed setup may keep a saved secret, but only for the same provider,
+	// issuer and client. Secrets are never returned to the browser.
+	for i := range items {
+		for _, old := range previous {
+			if items[i].ClientSecret == "" && items[i].Kind == old.Kind && items[i].Issuer == old.Issuer && items[i].ClientID == old.ClientID {
+				items[i].ClientSecret = old.ClientSecret
+			}
+		}
+	}
+	id := identity.RandomID()
+	providers := map[string]*provider{}
+	for _, c := range items {
+		p, err := s.discover(r.Context(), id, c)
+		if err != nil {
+			problem(w, 503, "oidc_unavailable")
+			return
+		}
+		providers[c.Kind] = p
 	}
 	path := filepath.Join(s.config.StateDir, "console-provider-"+id+".json")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
@@ -239,7 +386,7 @@ func (s *Server) configureProvider(w http.ResponseWriter, r *http.Request) {
 		problem(w, 503, "service_unavailable")
 		return
 	}
-	err = json.NewEncoder(f).Encode(c)
+	err = json.NewEncoder(f).Encode(providerSettings{Providers: items})
 	if err == nil {
 		err = f.Sync()
 	}
@@ -264,9 +411,9 @@ func (s *Server) configureProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.providerMu.Lock()
-	s.cachedProvider = p
+	s.cachedProviders = providers
 	s.providerMu.Unlock()
-	state, err := s.store.ConsoleState(r.Context())
+	state, err = s.store.ConsoleState(r.Context())
 	if err != nil {
 		storeProblem(w, err)
 		return
@@ -298,10 +445,17 @@ func (s *Server) startLogin(w http.ResponseWriter, r *http.Request, setup bool) 
 			return
 		}
 	}
-	if !decode(w, r, &struct{}{}) {
+	var choice struct {
+		Provider string `json:"provider"`
+	}
+	if !decodeAlternatives(w, r, &choice, []string{"provider"}, nil) {
 		return
 	}
-	p, err := s.getProvider(r.Context(), state.ProviderID)
+	if choice.Provider != "" && choice.Provider != "google" && choice.Provider != "github" && choice.Provider != "oidc" {
+		problem(w, 400, "invalid_request")
+		return
+	}
+	p, err := s.getProvider(r.Context(), state.ProviderID, choice.Provider)
 	if err != nil {
 		problem(w, 503, "oidc_unavailable")
 		return
@@ -312,7 +466,11 @@ func (s *Server) startLogin(w http.ResponseWriter, r *http.Request, setup bool) 
 	if setup && time.Unix(state.BootstrapExpires, 0).Before(expires) {
 		expires = time.Unix(state.BootstrapExpires, 0)
 	}
-	authURL := p.OAuth.AuthCodeURL(stateToken, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier))
+	options := []oauth2.AuthCodeOption{oauth2.S256ChallengeOption(verifier)}
+	if p.Credentials.Kind != "github" {
+		options = append(options, oidc.Nonce(nonce))
+	}
+	authURL := p.OAuth.AuthCodeURL(stateToken, options...)
 	s.mu.Lock()
 	s.cleanLocked()
 	if len(s.flows) >= 128 {
@@ -321,7 +479,7 @@ func (s *Server) startLogin(w http.ResponseWriter, r *http.Request, setup bool) 
 		return
 	}
 	delete(s.flows, database.TokenDigest(cookieValue(r, flowCookie)))
-	s.flows[database.TokenDigest(raw)] = flow{StateDigest: database.TokenDigest(stateToken), Nonce: nonce, Verifier: verifier, ProviderID: p.ID, Generation: state.Generation, Setup: setup, Created: s.now(), Expires: expires, AuthorizationURL: authURL}
+	s.flows[database.TokenDigest(raw)] = flow{StateDigest: database.TokenDigest(stateToken), Nonce: nonce, Verifier: verifier, ProviderID: p.ID, ProviderKind: p.Credentials.Kind, Generation: state.Generation, Setup: setup, Created: s.now(), Expires: expires, AuthorizationURL: authURL}
 	s.mu.Unlock()
 	setCookie(w, flowCookie, raw, expires.Sub(s.now()), true)
 	reply(w, map[string]string{"redirect_path": "/v1/console/auth/redirect"})
@@ -367,7 +525,11 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		fail("oidc_callback_invalid")
 		return
 	}
-	p, err := s.getProvider(r.Context(), v.ProviderID)
+	if r.URL.Path != callbackPath(v.ProviderKind) {
+		fail("oidc_callback_invalid")
+		return
+	}
+	p, err := s.getProvider(r.Context(), v.ProviderID, v.ProviderKind)
 	if err != nil {
 		fail("oidc_unavailable")
 		return
@@ -381,25 +543,12 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		fail("oidc_callback_invalid")
 		return
 	}
-	raw, ok := token.Extra("id_token").(string)
-	if !ok || len(raw) > 65536 {
+	issuer, subject, name, err := s.loginIdentity(r.Context(), p, token, v)
+	if err != nil {
 		fail("oidc_callback_invalid")
 		return
 	}
-	verified, err := p.Verifier.Verify(r.Context(), raw)
-	if err != nil || verified.Issuer != p.Credentials.Issuer || subtle.ConstantTimeCompare([]byte(verified.Nonce), []byte(v.Nonce)) != 1 || verified.IssuedAt.After(s.now().Add(time.Minute)) || verified.IssuedAt.Before(v.Created.Add(-time.Minute)) {
-		fail("oidc_callback_invalid")
-		return
-	}
-	var claims struct {
-		Name            string `json:"name"`
-		AuthorizedParty string `json:"azp"`
-	}
-	if err = verified.Claims(&claims); err != nil || len(verified.Audience) > 1 && claims.AuthorizedParty != p.Credentials.ClientID || claims.AuthorizedParty != "" && claims.AuthorizedParty != p.Credentials.ClientID {
-		fail("oidc_callback_invalid")
-		return
-	}
-	u, err := s.store.FinishConsoleLogin(r.Context(), v.Generation, p.ID, verified.Issuer, verified.Subject, claims.Name, v.Setup)
+	u, err := s.store.FinishConsoleLogin(r.Context(), v.Generation, p.ID, issuer, subject, name, v.Setup)
 	if err != nil {
 		fail("oidc_callback_invalid")
 		return
@@ -437,4 +586,61 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	clearCookie(w, preCookie)
 	clearCookie(w, setupCookie)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (s *Server) loginIdentity(ctx context.Context, p *provider, token *oauth2.Token, v flow) (string, string, string, error) {
+	invalid := errors.New("provider identity verification failed")
+	if p.Credentials.Kind == "github" {
+		if token.AccessToken == "" || len(token.AccessToken) > 8192 || !strings.EqualFold(token.TokenType, "Bearer") {
+			return "", "", "", invalid
+		}
+		r, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user", nil)
+		if err != nil {
+			return "", "", "", err
+		}
+		r.Header.Set("Authorization", "Bearer "+token.AccessToken)
+		r.Header.Set("Accept", "application/vnd.github+json")
+		r.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		resp, err := s.httpClient.Do(r)
+		if err != nil {
+			return "", "", "", err
+		}
+		defer resp.Body.Close()
+		var user struct {
+			ID    int64  `json:"id"`
+			Login string `json:"login"`
+			Name  string `json:"name"`
+			Type  string `json:"type"`
+		}
+		if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&user) != nil || user.ID <= 0 || user.Type != "User" || user.Login == "" || !protocol.CleanText(user.Login, 128) {
+			return "", "", "", invalid
+		}
+		if user.Name == "" || !protocol.CleanText(user.Name, 128) {
+			user.Name = user.Login
+		}
+		return githubIssuer, strconv.FormatInt(user.ID, 10), user.Name, nil
+	}
+	raw, ok := token.Extra("id_token").(string)
+	if !ok || len(raw) > 65536 {
+		return "", "", "", invalid
+	}
+	verified, err := p.Verifier.Verify(ctx, raw)
+	if err != nil {
+		return "", "", "", invalid
+	}
+	issuer := verified.Issuer
+	if p.Credentials.Kind == "google" && issuer == "accounts.google.com" {
+		issuer = googleIssuer
+	}
+	if issuer != p.Credentials.Issuer || subtle.ConstantTimeCompare([]byte(verified.Nonce), []byte(v.Nonce)) != 1 || verified.IssuedAt.After(s.now().Add(time.Minute)) || verified.IssuedAt.Before(v.Created.Add(-time.Minute)) {
+		return "", "", "", invalid
+	}
+	var claims struct {
+		Name            string `json:"name"`
+		AuthorizedParty string `json:"azp"`
+	}
+	if err = verified.Claims(&claims); err != nil || len(verified.Audience) > 1 && claims.AuthorizedParty != p.Credentials.ClientID || claims.AuthorizedParty != "" && claims.AuthorizedParty != p.Credentials.ClientID {
+		return "", "", "", invalid
+	}
+	return issuer, verified.Subject, claims.Name, nil
 }

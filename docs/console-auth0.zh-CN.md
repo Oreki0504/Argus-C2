@@ -2,7 +2,7 @@
 
 [Console 启动与恢复](console.md) · [实现状态](web-design.md)
 
-本项目选用 **Auth0 Universal Login**：ARGUS 将登录请求交给 Auth0，用户在 Auth0 页面选择 GitHub 或 Google。后端的 OIDC、PKCE、签名验证、Cookie 会话和 Web 权限已经实现并通过本地端到端测试。
+Auth0 是可选接入方式。若只需要 Google / GitHub 登录，可以直接按[直连登录说明](console-login.zh-CN.md)配置，无需 Auth0。使用 **Auth0 Universal Login** 时，ARGUS 将登录请求交给 Auth0，用户在 Auth0 页面选择 GitHub 或 Google。
 
 当前局域网 `http://192.168.9.40:5173` 是明确标记的模拟预览；真实登录需要启动独立 HTTPS Console。不要在模拟初始化页面填写真实 Client Secret。
 
@@ -66,7 +66,7 @@ bin/server console-bootstrap issue -config /private/argus/server.json \
   -out /private/argus/console-bootstrap.txt
 ```
 
-打开真实 Console 的 `/setup`，输入证明，然后配置 Auth0 Issuer（保留精确的尾部斜线）、Client ID 和 Client Secret。验证通过后点击绑定，在 Auth0 选择 GitHub 或 Google；成功回调后成为首位 Admin。
+打开真实 Console 的 `/setup`，输入初始化码，展开“其他登录服务（Auth0 / OIDC）”并启用自定义 SSO。配置 Auth0 Issuer（保留精确的尾部斜线）、Client ID 和 Client Secret，点击“使用 SSO 绑定管理员”，在 Auth0 选择 GitHub 或 Google；成功回调后成为首位 Admin。
 
 之后的新身份会进入“管理 → 用户与权限”的待批准列表。Admin 明确批准后才获得 User 或 Admin 权限。匿名监控入口仍按当前产品要求可访问，但不授予任何管理权限。
 

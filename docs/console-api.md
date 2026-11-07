@@ -26,21 +26,25 @@ Status endpoints expose minimum state, with bounded sessions/body sizes/rates. `
 
 | Method / path | Authority | Behavior |
 | --- | --- | --- |
-| `GET /v1/console/auth/status` | None; bounded pre-login context | `{state, provider_name, csrf_token}`; UNINITIALIZED / SETUP_PENDING / ACTIVE |
+| `GET /v1/console/auth/status` | None; bounded pre-login context | `{state, provider_name, providers:[{kind,name}], csrf_token}`; UNINITIALIZED / SETUP_PENDING / ACTIVE |
 | `POST /v1/console/setup/prove` | Pre-login CSRF + `{secret}` | Establish setup-only session; return setup DTO; invalid/expired/consumed secret fails |
 | `GET /v1/console/setup` | Setup session | Setup DTO; 401 without proof, 403 after ACTIVE |
-| `POST /v1/console/setup/provider` | Setup session + CSRF | `{issuer, client_id, client_secret}`; server validates provider, returns setup DTO; no secret echo |
-| `POST /v1/console/setup/bind` | Validated setup + CSRF; `{}` | Start first-owner OIDC transaction; `{redirect_path: "/v1/console/auth/redirect"}` |
-| `POST /v1/console/auth/login` | Pre-login + CSRF; `{}` | Start normal OIDC transaction; same fixed redirect DTO |
+| `POST /v1/console/setup/provider` | Setup session + CSRF | `{providers:[{kind,issuer,client_id,client_secret}]}`; one to three distinct kinds (`google`, `github`, `oidc`); native issuers are fixed; no secret echo |
+| `POST /v1/console/setup/bind` | Validated setup + CSRF; `{provider:kind}` | Start first-owner authentication transaction; `{redirect_path: "/v1/console/auth/redirect"}` |
+| `POST /v1/console/auth/login` | Pre-login + CSRF; `{provider:kind}` | Start normal authentication with a configured provider; same fixed redirect DTO |
 | `GET /v1/console/auth/redirect` | Pending bounded OIDC transaction cookie | Top-level navigation; server redirects to its configured provider; no caller destination |
 | `GET /v1/console/auth/callback` | Code/state/nonce/PKCE validation | Atomically bind first Admin or authorize existing account, establish session, redirect to fixed UI path |
+| `GET /v1/console/auth/callback/google` | Bound Google transaction + PKCE + verified ID token | Direct Google binding/login; issuer and immutable subject determine identity |
+| `GET /v1/console/auth/callback/github` | Bound GitHub transaction + PKCE + authenticated user API | Direct GitHub binding/login; fixed issuer and numeric user ID determine identity |
 | `GET /v1/me` | Browser session + current local role | `{principal_id, name, role, csrf_token, capabilities}`; Admin/User; capabilities below |
 | `POST /v1/console/auth/logout` | Browser session + CSRF; `{}` | Immediately revoke session, clear cookie, return `{}` |
 | `GET /v1/console/summary` | Browser session + `summary:read` | Public summary for both roles in this iteration; server projection required |
 
 The redirect route consumes a transaction whose authority is held on the server. Callback failures may redirect to `/login?reason=<allowlisted-code>`, never including raw provider errors, tokens or a caller return destination. The frontend accepts only the exact redirect-path literal, rejecting external URLs and query strings. Mock sign-in skips external redirects and performs no OIDC validation.
 
-Setup DTO: `{step: "provider" | "bind", csrf_token, callback_uri, issuer, client_id}`. `callback_uri` is the server's exact HTTPS callback. Expired setup returns to ownership proof; failed provider validation must not advance or create an account. ACTIVE closes every setup operation.
+Setup DTO: `{step: "provider" | "bind", csrf_token, callback_uri, issuer, client_id, providers:[{kind,name,issuer,client_id}], callback_uris:{google,github,oidc}}`. All callbacks come from the server's exact configured HTTPS origin. Legacy single-OIDC configuration requests and `{}` login bodies remain accepted; an empty login selection is valid only when exactly one provider is configured. The legacy `callback_uri` remains the custom OIDC callback. New social configurations use their distinct callback paths; callbacks cannot switch the transaction's selected provider.
+
+A blank application Secret reuses the saved value only when provider kind, issuer and Client ID all match. Secrets never appear in the DTO. Saving settings is not identity proof; GitHub application credentials are checked during code exchange, and Google/OIDC discovery cannot validate a client secret. The UI saves the selected providers and starts binding in one action. Expired setup returns to ownership proof; a failed exchange or invalid identity cannot create an account. ACTIVE closes every setup operation.
 
 ## Public summary
 

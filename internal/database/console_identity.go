@@ -187,7 +187,8 @@ func (s *Store) ConsoleUser(ctx context.Context, id string) (ConsoleUser, error)
 	return u, err
 }
 
-// Called only after cryptographic OIDC verification. Binding, account state,
+// Called only after verified OIDC claims or a trusted OAuth provider's identity
+// response. Binding, account state,
 // permanent initialization and audit all commit together.
 func (s *Store) FinishConsoleLogin(ctx context.Context, generation int64, providerID, issuer, subject, name string, setup bool) (ConsoleUser, error) {
 	var out ConsoleUser

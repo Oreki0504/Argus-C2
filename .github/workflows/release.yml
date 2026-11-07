@@ -75,11 +75,13 @@ jobs:
           {command}
           ```
 
-          The installer first asks for Chinese or English, downloads the matching version, verifies its SHA-256, and asks for a domain or IP to configure HTTPS. Python 3.10+, OpenSSL and systemd-sysusers are required. On success, an interactive terminal displays the 15-minute bootstrap code and `/setup` URL. The code is also saved at `/etc/argus-c2/setup/bootstrap.token`; read it locally with `sudo cat /etc/argus-c2/setup/bootstrap.token`. Complete Auth0/OIDC configuration and bind your first administrator in `/setup`.
+          The installer first asks for Chinese or English, downloads the matching version, verifies its SHA-256, and asks for a domain or IP to configure HTTPS. Python 3.10+, OpenSSL and systemd-sysusers are required. On success, an interactive terminal displays the 15-minute bootstrap code and `/setup` URL. The code is also saved at `/etc/argus-c2/setup/bootstrap.token`; read it locally with `sudo cat /etc/argus-c2/setup/bootstrap.token`.
+
+          First-run setup now supports direct Google and GitHub login, separately or together: prove ownership, configure your OAuth application credentials, and click a provider button to bind the first administrator. Auth0/custom OIDC remains optional, and existing OIDC configurations remain readable. Callback addresses are provided by the page. See `docs/console-login.zh-CN.md` at this tag. Newly configured provider sets require this version or newer; they are not compatible with older binaries. Accounts from different providers are approved separately.
 
           To update a completed standard installation, append `--update server` or `--update agent` to the `sudo python3 "$f"` invocation above. An earlier failure during certificate preparation is not a completed installation: run the Server command above without `--update server` first. Missing accounts or files now produce actionable installation checks instead of a Python traceback; partial installations are preserved for repair. Updates preserve configuration and identity, back up state, check database compatibility on a copy, and restore previous programs if startup fails. Update Agents individually on their hosts. See the tagged installation guide for backup and recovery details.
 
-          ACME logs use the private `/var/lib/argus-certbot/logs` directory, so normal group-writable system log directories are supported without changing their permissions. Early installation failures preserve the Certbot environment and ACME state for a retry.
+          Certificate failures now distinguish connection, DNS, challenge-response and local port errors without exposing tokens. The installer prints the exact `/var/lib/argus-certbot/logs/letsencrypt.log` path and a command to inspect it. Early installation failures preserve the Certbot environment and ACME state for a retry.
 
           Public certificate issuance requires inbound TCP 80; private LAN IPs use a separately trusted local CA. Existing Server installations are preserved. See `docs/server-installation.zh-CN.md` at this tag for deployment and renewal details.
           '''

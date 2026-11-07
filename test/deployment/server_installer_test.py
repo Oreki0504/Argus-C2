@@ -571,6 +571,60 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.certbot_executable(args), str(executable))
             run.assert_called_once_with([str(executable), '--version'])
 
+    def test_certificate_failures_explain_current_diagnostics_without_exposing_raw_output(self):
+        args = options('--host', 'argus.example.com', '--email', 'owner@example.com', '--agree-tos')
+        cases = [
+            (b'  Type:   connection\n  Detail: Timeout during connect (likely firewall problem)\n',
+             'could not connect', '无法连接公网验证地址'),
+            (b'  Type:   dns\n  Detail: DNS problem: NXDOMAIN looking up A\n',
+             'DNS error', 'DNS 错误'),
+            (b'  Type:   unauthorized\n  Detail: Invalid response from challenge endpoint\n',
+             'expected challenge response', '预期的验证内容'),
+            (b'Could not bind TCP port 80 because it is already in use\n',
+             'could not listen on TCP 80', '无法监听 TCP 80'),
+            (b'An unexpected error occurred: account configuration invalid\n',
+             'network failure has not been established', '不能据此认定是网络故障'),
+        ]
+        private = b'https://acme.example/acct/private-account\nprivate-challenge-token\n'
+        for diagnostic, en, zh in cases:
+            for language, expected in [('en', en), ('zh-CN', zh)]:
+                for stderr in (False, True):
+                    result = subprocess.CompletedProcess([], 1, private if stderr else diagnostic + private,
+                                                         diagnostic + private if stderr else b'')
+                    with self.subTest(diagnostic=diagnostic, language=language, stderr=stderr), \
+                            patch.object(installer, 'LANGUAGE', language), \
+                            patch.object(installer.subprocess, 'run', return_value=result) as run:
+                        with self.assertRaises(installer.InstallError) as caught:
+                            installer.request_certificate(args, '/opt/argus-certbot/bin/certbot')
+                    self.assertIn(expected, str(caught.exception))
+                    self.assertNotIn('private-account', str(caught.exception))
+                    self.assertNotIn('private-challenge-token', str(caught.exception))
+                    self.assertEqual(run.call_args.kwargs['timeout'], 300)
+
+    def test_failed_issuance_does_not_read_old_certificates_or_old_errors(self):
+        args = options('--host', 'argus.example.com', '--email', 'owner@example.com', '--agree-tos')
+        logs = installer.path(installer.ACME_DIRECTORIES[2])
+        installer.mkdir(logs, 0o700)
+        installer.write_new(logs / 'letsencrypt.log', 'Type: connection\nOld unrelated failure\n')
+        with patch.object(installer, 'certbot_executable', return_value='/usr/bin/certbot'), \
+                patch.object(installer.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, b'', b'')), \
+                patch.object(installer, 'read_bounded') as read, contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(installer.InstallError, 'network failure has not been established'):
+                installer.certificates(args, self.root)
+            read.assert_not_called()
+        self.assertIn('Old unrelated failure', (logs / 'letsencrypt.log').read_text())
+
+    def test_certificate_success_and_timeout_are_distinct_from_validation_failure(self):
+        args = options('--host', 'argus.example.com', '--email', 'owner@example.com', '--agree-tos')
+        with patch.object(installer.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'', b'')):
+            installer.request_certificate(args, '/usr/bin/certbot')
+        for language, expected in [('en', '300 seconds'), ('zh-CN', '300 秒')]:
+            with patch.object(installer, 'LANGUAGE', language), patch.object(installer.subprocess, 'run',
+                    side_effect=subprocess.TimeoutExpired('certbot', 300, output=b'private-output', stderr=b'private-error')):
+                with self.assertRaisesRegex(installer.InstallError, expected) as caught:
+                    installer.request_certificate(args, '/usr/bin/certbot')
+            self.assertNotIn('private-', str(caught.exception))
+
     def test_setup_code_is_visible_only_in_an_interactive_terminal(self):
         secret_file = installer.path('/etc/argus-c2/setup/bootstrap.token')
         installer.mkdir(secret_file.parent, 0o700)
@@ -590,7 +644,8 @@ class InstallerTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()) as output:
             installer.report_failure(installer.InstallError('test failure'))
         self.assertIn('no Console bootstrap code was created', output.getvalue())
-        self.assertIn('/var/lib/argus-certbot/logs', output.getvalue())
+        logfile = installer.path('/var/lib/argus-certbot/logs/letsencrypt.log')
+        self.assertIn(f'sudo tail -n 80 {logfile}', output.getvalue())
         installer.mkdir(installer.path('/etc/argus-c2/server'))
         secret_file = installer.path('/etc/argus-c2/setup/bootstrap.token')
         installer.mkdir(secret_file.parent, 0o700)

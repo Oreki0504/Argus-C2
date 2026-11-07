@@ -12,7 +12,7 @@ Argus-C2 uses one server, SQLite, and Linux agents that poll for work. The serve
 | `agent` | Local policy, collection, deduplication, result retries, renewal | `probe.db`, private key, and client certificate |
 | `argus` | Management requests, JSON output, waiting for results | Local administrator token file; no login-session database |
 
-The server has a Fleet HTTPS listener and an optional independent Console HTTPS listener. Console uses OIDC and server-side Web sessions; its public projection is explicitly anonymous, while management requires a current Web Admin. Console does not expose Agent or CLI routes. See [Console architecture and limits](web-design.md).
+The server has a Fleet HTTPS listener and an optional independent Console HTTPS listener. Console uses Google OIDC, GitHub OAuth or custom OIDC with server-side Web sessions; its public projection is explicitly anonymous, while management requires a current Web Admin. Console does not expose Agent or CLI routes. See [Console architecture and limits](web-design.md).
 
 On the Fleet listener, Enrollment and management routes do not require a client certificate: they check enrollment and administrator tokens respectively. Every agent route requires a verified client certificate. Node middleware validates the identity URI and protocol metadata without querying SQLite. Each business operation then checks certificate validity, fingerprints, and the disable flag inside the same transaction as its state change, including renewal. A malformed body may be rejected before that transaction; it cannot perform an authorized operation.
 

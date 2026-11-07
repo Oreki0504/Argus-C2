@@ -173,13 +173,14 @@ test('first-run preview proves ownership, configures provider, binds and closes 
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
   await page.getByLabel('Bootstrap secret', { exact: true }).fill('a'.repeat(64))
   await page.getByRole('button', { name: 'Verify & continue' }).click()
-  await expect(page.getByRole('heading', { name: 'Connect your identity provider' })).toBeVisible()
-  await page.getByLabel('Issuer URL').fill('https://identity.example.test')
-  await page.getByLabel('Client ID', { exact: true }).fill('argus-preview')
-  await page.getByLabel('Client secret').fill('preview-secret')
-  await page.getByRole('button', { name: 'Validate & continue' }).click()
-  await expect(page.getByRole('heading', { name: 'Make it yours' })).toBeVisible()
-  await page.getByRole('button', { name: 'Verify identity & activate' }).click()
+  await expect(page.getByRole('heading', { name: 'Choose your sign-in methods' })).toBeVisible()
+  await page.getByRole('checkbox', { name: 'Enable Google', exact: true }).check()
+  for (const provider of ['GitHub', 'Google']) {
+    await page.getByLabel(`${provider} Client ID`, { exact: true }).fill('argus-preview')
+    await page.getByLabel(`${provider} Client Secret`, { exact: true }).fill('preview-secret')
+  }
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
+  await page.getByRole('button', { name: 'Bind with GitHub' }).click()
   await expect(page.getByRole('heading', { name: 'Fleet overview' })).toBeVisible()
   await page.getByRole('button', { name: 'Sign out' }).click()
   await expect(page.getByRole('heading', { name: 'Fleet overview' })).toBeVisible()
@@ -192,6 +193,36 @@ test('first-run preview proves ownership, configures provider, binds and closes 
   expect(storage).not.toContain('preview-secret')
   expect(storage).not.toContain('a'.repeat(64))
   await expect(page.getByRole('link', { name: 'Set up your console' })).toHaveCount(0)
+  await page.getByRole('link', { name: 'Log in', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Continue with GitHub' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible()
+  await page.getByRole('button', { name: 'Continue with Google' }).click()
+  await expect(page.getByRole('link', { name: 'Management', exact: true })).toBeVisible()
+})
+
+test('first-run setup can enable Google alone and keeps the mobile layout usable', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/setup?scenario=setup')
+  await page.getByLabel('Bootstrap secret', { exact: true }).fill('b'.repeat(64))
+  await page.getByRole('button', { name: 'Verify & continue' }).click()
+  await page.getByRole('checkbox', { name: 'Enable GitHub', exact: true }).uncheck()
+  await page.getByRole('checkbox', { name: 'Enable Google', exact: true }).check()
+  await expect(page.getByLabel('Callback URL', { exact: true })).toHaveValue(
+    'https://console.example.test/v1/console/auth/callback/google',
+  )
+  await expect(page.getByLabel('Issuer URL')).toHaveCount(0)
+  await page.getByLabel('Google Client ID', { exact: true }).fill('google-preview')
+  await page.getByLabel('Google Client Secret', { exact: true }).fill('only-this-app-secret')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+  await page.getByRole('button', { name: 'Bind with Google' }).click()
+  await page.getByRole('button', { name: 'Sign out' }).click()
+  await page.getByRole('link', { name: 'Log in', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Continue with GitHub' })).toHaveCount(0)
 })
 
 for (const [scenario, message] of [

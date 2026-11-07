@@ -37,6 +37,7 @@ type session struct {
 }
 type flow struct {
 	StateDigest, Nonce, Verifier, ProviderID, AuthorizationURL string
+	ProviderKind                                               string
 	Generation                                                 int64
 	Setup, Started                                             bool
 	Created, Expires                                           time.Time
@@ -46,18 +47,18 @@ type rate struct {
 	Until time.Time
 }
 type Server struct {
-	store          *database.Store
-	config         Config
-	host           string
-	mu             sync.Mutex
-	sessions       map[string]session
-	flows          map[string]flow
-	rates          map[string]rate
-	providerMu     sync.Mutex
-	cachedProvider *provider
-	httpClient     *http.Client
-	now            func() time.Time
-	installer      *installer
+	store           *database.Store
+	config          Config
+	host            string
+	mu              sync.Mutex
+	sessions        map[string]session
+	flows           map[string]flow
+	rates           map[string]rate
+	providerMu      sync.Mutex
+	cachedProviders map[string]*provider
+	httpClient      *http.Client
+	now             func() time.Time
+	installer       *installer
 }
 
 func New(store *database.Store, c Config) (*Server, error) {
@@ -99,6 +100,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/console/auth/login", func(w http.ResponseWriter, r *http.Request) { s.startLogin(w, r, false) })
 	mux.HandleFunc("GET /v1/console/auth/redirect", s.redirect)
 	mux.HandleFunc("GET /v1/console/auth/callback", s.callback)
+	mux.HandleFunc("GET /v1/console/auth/callback/google", s.callback)
+	mux.HandleFunc("GET /v1/console/auth/callback/github", s.callback)
 	mux.HandleFunc("GET /v1/me", s.authorized(false, s.me))
 	mux.HandleFunc("POST /v1/console/auth/logout", s.authorized(false, s.logout))
 	s.managementRoutes(mux)
@@ -327,6 +330,9 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request, u database.Conso
 	reply(w, struct{}{})
 }
 func decode(w http.ResponseWriter, r *http.Request, v any, fields ...string) bool {
+	return decodeAlternatives(w, r, v, fields)
+}
+func decodeAlternatives(w http.ResponseWriter, r *http.Request, v any, variants ...[]string) bool {
 	defer r.Body.Close()
 	if len(r.Header.Values("Content-Type")) != 1 || !strictjson.MediaType(r.Header.Get("Content-Type")) {
 		problem(w, 400, "invalid_request")
@@ -334,7 +340,12 @@ func decode(w http.ResponseWriter, r *http.Request, v any, fields ...string) boo
 	}
 	b, err := strictjson.Read(http.MaxBytesReader(w, r.Body, 16384), 16384)
 	if err == nil {
-		err = strictjson.Decode(b, v, 16384, fields...)
+		for _, fields := range variants {
+			err = strictjson.Decode(b, v, 16384, fields...)
+			if err == nil {
+				break
+			}
+		}
 	}
 	if err != nil {
 		problem(w, 400, "invalid_request")

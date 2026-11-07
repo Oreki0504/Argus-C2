@@ -474,6 +474,47 @@ def acme_arguments(args, certbot, renew=False):
     return command + (['--ip-address', args.host, '--required-profile', 'shortlived'] if args.address else ['--domain', args.host])
 
 
+def request_certificate(args, certbot):
+    try:
+        result = run(acme_arguments(args, certbot), check=False, timeout=300)
+    except subprocess.TimeoutExpired as exc:
+        raise InstallError(text(
+            'Certbot did not finish within 300 seconds. Check the ACME log file below before retrying.',
+            'Certbot 未在 300 秒内完成。请先检查下方 ACME 日志文件，再决定是否重试。')) from exc
+    if result.returncode == 0:
+        return
+    # Classify only this invocation's output, never a previous attempt's log.
+    # Print fixed explanations rather than account URLs or challenge tokens.
+    diagnostic = b'\n'.join((result.stdout or b'', result.stderr or b'')).decode(errors='replace').lower()
+    types = set(re.findall(r'^\s*type:\s*([a-z]+)\s*$', diagnostic, re.MULTILINE))
+    if 'connection' in types:
+        message = text(
+            'HTTP-01 validation failed: the certificate authority could not connect to the public validation endpoint. '
+            'Check the domain/IP target, public TCP 80, cloud and host firewall rules, and NAT forwarding. '
+            'A free local port does not prove public reachability.',
+            'HTTP-01 验证失败：证书机构无法连接公网验证地址。请核对域名/IP 指向、公网 TCP 80、'
+            '云平台和本机防火墙规则，以及 NAT 转发。本机端口空闲不代表公网可达。')
+    elif 'dns' in types:
+        message = text(
+            'HTTP-01 validation failed: the certificate authority reported a DNS error. '
+            'Check public A/AAAA records and DNS resolution.',
+            'HTTP-01 验证失败：证书机构报告 DNS 错误。请检查公开的 A/AAAA 记录及 DNS 解析。')
+    elif 'unauthorized' in types:
+        message = text(
+            'HTTP-01 validation failed: the certificate authority did not receive the expected challenge response. '
+            'Check the domain/IP target and any proxy or HTTP redirect rules.',
+            'HTTP-01 验证失败：证书机构未收到预期的验证内容。请检查域名/IP 指向、代理及 HTTP 重定向规则。')
+    elif 'could not bind tcp port 80' in diagnostic:
+        message = text(
+            'Certbot could not listen on TCP 80. Check which process is using the port; existing services were left running.',
+            'Certbot 无法监听 TCP 80。请检查端口占用；已有服务未被停止。')
+    else:
+        message = text(
+            'Certbot failed. Check the ACME log file below for the specific error; network failure has not been established.',
+            'Certbot 执行失败。请查看下方 ACME 日志文件确定具体原因；不能据此认定是网络故障。')
+    raise InstallError(message)
+
+
 def certificates(args, stage):
     certdir = stage / 'console'
     certdir.mkdir(mode=0o700)
@@ -487,7 +528,7 @@ def certificates(args, stage):
             mkdir(path(directory), 0o700)
         certbot = certbot_executable(args)
         print(text('Requesting a Let’s Encrypt certificate…', '正在申请 Let’s Encrypt 证书…'))
-        run(acme_arguments(args, certbot), timeout=300)
+        request_certificate(args, certbot)
         lineage = path('/etc/argus-c2/acme/live/' + CERT_NAME)
         write_new(cert, read_bounded(lineage / 'fullchain.pem', 65536))
         write_new(key, read_bounded(lineage / 'privkey.pem', 16384))
@@ -615,9 +656,9 @@ def print_setup_instructions():
     if sys.stdin.isatty() and sys.stdout.isatty():
         secret = read_bounded(secret_file, 256).decode('ascii').strip()
         print(text('   Bootstrap code: ', '   一次性初始化码：') + secret)
-    print(text('2. Configure Auth0/OIDC, then sign in with GitHub/Google to bind the first Admin.', '2. 配置 Auth0/OIDC，然后通过 GitHub/Google 登录并绑定首位管理员。'))
+    print(text('2. Choose Google/GitHub, enter your OAuth application credentials, then sign in to bind the first Admin.', '2. 选择 Google/GitHub，填写 OAuth 应用凭据后直接登录，绑定首位管理员。'))
     print(text('   The bootstrap code is for /setup only, not a login password or CLI admin.token.', '   初始化码只用于 /setup；它不是日常登录密码，也不是 CLI admin.token。'))
-    print(text('   Prepare your Auth0/OIDC application first; expired codes can be reissued locally.', '   尚无 Auth0/OIDC 应用时，请先准备；初始化码过期可以在本机重新签发。'))
+    print(text('   Register your Google/GitHub OAuth application once; Auth0/OIDC is optional. Expired codes can be reissued locally.', '   Google/GitHub OAuth 应用只需登记一次；Auth0/OIDC 为可选方式。初始化码过期可以在本机重新签发。'))
     print(text('Agent installers are already published.', 'Agent 安装程序已就绪。'))
 
 
@@ -637,7 +678,9 @@ def report_failure(error, updating=False):
         secret_file = path('/etc/argus-c2/setup/bootstrap.token')
         if secret_file.is_file():
             print(text('Bootstrap file (may have expired): ', '初始化码文件（可能已过期）：') + str(secret_file), file=sys.stderr)
-    print(text('ACME logs: ', '证书申请日志：') + str(path(ACME_DIRECTORIES[2])), file=sys.stderr)
+    logfile = path(ACME_DIRECTORIES[2]) / 'letsencrypt.log'
+    print(text('ACME log file (if created): ', '证书申请日志文件（若已创建）：') + str(logfile), file=sys.stderr)
+    print('sudo tail -n 80 ' + shlex.quote(str(logfile)), file=sys.stderr)
 
 
 def replace_file(dest, data, mode):

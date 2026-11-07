@@ -4,6 +4,44 @@ export type Language = 'en' | 'zh-CN'
 
 const chinese: Record<string, string> = {
   ...managementChinese,
+  'Choose how you want to sign in.': '选择登录方式。',
+  'Your account is verified by your sign-in provider.': '由所选平台验证你的账号身份。',
+  'Continue with {provider}': '使用 {provider} 登录',
+  'Bind with {provider}': '使用 {provider} 绑定管理员',
+  'Enable {provider}': '启用 {provider}',
+  'Enable one or both. Sign in below to bind your first administrator.':
+    '可以启用一种或两种方式。配置后点击下方按钮，登录并绑定首位管理员。',
+  'Other identity provider (Auth0 / OIDC)': '其他登录服务（Auth0 / OIDC）',
+  'Enable custom SSO': '启用自定义 SSO',
+  'Create OAuth app': '创建 OAuth 应用',
+  'Callback URL': '回调地址',
+  'Copy {provider} callback URL': '复制 {provider} 回调地址',
+  'Paste this address into your OAuth app’s callback settings.':
+    '将此地址填入 OAuth 应用的回调设置。',
+  'Saved — leave blank to keep': '已保存，留空即可保留',
+  'Application credentials are configured once. Future visits only need a sign-in button.':
+    '应用凭据只需配置一次，以后直接点击登录按钮即可。',
+  'Your console is already set up': '控制台已完成设置',
+  'Waiting for the server owner': '等待服务器所有者初始化',
+  'Sign in with your linked account.': '使用已绑定的账号登录。',
+  'Generate a one-time setup code on the server to get started.':
+    '请先在服务器上生成一次性初始化码。',
+  'Return to sign in': '返回登录',
+  'Back to sign in': '返回登录',
+  'Verify ownership, then bind your Google or GitHub account.':
+    '验证服务器所有权，然后绑定 Google 或 GitHub 账号。',
+  'Setup progress': '设置进度',
+  'Verify ownership': '验证所有权',
+  'Bind administrator': '绑定管理员',
+  'Choose your sign-in methods': '选择登录方式',
+  'Verify console ownership': '验证服务器所有权',
+  'Enter the setup code shown in your server’s installation terminal.':
+    '输入服务器安装终端显示的初始化码。',
+  'Bootstrap secret': '初始化码',
+  '64-character setup code': '64 位初始化码',
+  'Verifying…': '正在验证…',
+  'Verify & continue': '验证并继续',
+  'Issuer URL': 'Issuer 地址',
   'Search…': '搜索…',
   Login: '登录',
   Setup: '初始化',

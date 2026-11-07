@@ -18,7 +18,11 @@ export default defineConfig({
   webServer: process.env.ARGUS_CONSOLE_BROWSER_INFO
     ? undefined
     : [
-        { command: 'npm run dev:mock', url: 'http://127.0.0.1:5173', reuseExistingServer: false },
+        {
+          command: 'npm run dev:mock',
+          url: 'http://127.0.0.1:5173',
+          reuseExistingServer: process.env.ARGUS_REUSE_PREVIEW === '1' && !process.env.CI,
+        },
         {
           command: 'npm run preview -- --port 4173',
           url: 'http://127.0.0.1:4173',
