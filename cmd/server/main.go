@@ -33,7 +33,13 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return errors.New("usage: server init|run|backup|storage|prune|certificates [flags]")
+		return errors.New("usage: server init|run|backup|storage|prune|certificates|console-migrate|console-bootstrap [flags]")
+	}
+	if os.Args[1] == "console-migrate" {
+		return consoleMigrateCommand(os.Args[2:], os.Stdout)
+	}
+	if os.Args[1] == "console-bootstrap" {
+		return consoleBootstrapCommand(os.Args[2:], os.Stdout)
 	}
 	if os.Args[1] == "prune" {
 		return pruneCommand(os.Args[2:], os.Stdout)
@@ -48,6 +54,13 @@ func run() error {
 	file := f.String("config", "/etc/argus-c2/server.json", "server configuration")
 	check := f.Bool("check", false, "validate configuration and exit")
 	out := f.String("out", "", "new backup file in a private directory")
+	var browser consoleFlags
+	f.StringVar(&browser.listen, "console-listen", "", "optional Console HTTPS listen address, e.g. 0.0.0.0:9443")
+	f.StringVar(&browser.origin, "console-origin", "", "exact browser HTTPS origin")
+	f.StringVar(&browser.cert, "console-cert", "", "browser TLS certificate, independent of Fleet CA")
+	f.StringVar(&browser.key, "console-key", "", "private browser TLS key")
+	f.StringVar(&browser.installerDir, "console-installer-dir", "", "optional directory of published agent-linux-amd64 and/or agent-linux-arm64 binaries")
+	f.StringVar(&browser.fleetOrigin, "console-fleet-origin", "", "reachable Fleet HTTPS origin used by installed Agents; requires -console-installer-dir")
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
 	}
@@ -98,6 +111,13 @@ func run() error {
 	if e != nil {
 		return e
 	}
+	if os.Args[1] == "run" {
+		lock, err := localdb.LockServer(c.StateDir)
+		if err != nil {
+			return err
+		}
+		defer lock.Close()
+	}
 	store, e := database.Open(c.StateDir, false)
 	if e != nil {
 		return e
@@ -141,6 +161,10 @@ func run() error {
 	if e != nil {
 		return e
 	}
+	consoleServer, e := browser.server(store, c.StateDir, c.CA)
+	if e != nil {
+		return e
+	}
 	if *check {
 		fmt.Println("server configuration valid")
 		return nil
@@ -149,28 +173,13 @@ func run() error {
 	server := &http.Server{Addr: c.Listen, Handler: handler, TLSConfig: tlsConfig, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 40 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	done := make(chan error, 1)
-	go func() { done <- server.ListenAndServeTLS("", "") }()
-	slog.Info("server listening", "address", c.Listen)
-	select {
-	case e = <-done:
-		if errors.Is(e, http.ErrServerClosed) {
-			return nil
-		}
-		return e
-	case <-ctx.Done():
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if e = server.Shutdown(shutdown); e != nil {
-			server.Close()
-			return e
-		}
-		e = <-done
-		if errors.Is(e, http.ErrServerClosed) {
-			return nil
-		}
-		return e
+	servers := []*http.Server{server}
+	if consoleServer != nil {
+		servers = append(servers, consoleServer)
+		slog.Info("Console configured", "address", consoleServer.Addr, "origin", browser.origin)
 	}
+	slog.Info("Fleet configured", "address", c.Listen)
+	return serveListeners(ctx, servers...)
 }
 func writeJSON(path string, v any) error {
 	b, e := json.MarshalIndent(v, "", "  ")

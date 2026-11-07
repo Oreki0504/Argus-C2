@@ -41,7 +41,7 @@ func (s *Store) CreateTask(ctx context.Context, actor string, r protocol.TaskReq
 			return e
 		}
 		if status != "active" {
-			return ErrConflict
+			return ErrNodeDisabled
 		}
 		if e := expire(ctx, tx, s.now().Unix()); e != nil {
 			return e
@@ -301,6 +301,11 @@ func expire(ctx context.Context, tx *sql.Tx, now int64) error {
 		}
 	}
 	return nil
+}
+
+// ExpireTasks applies the existing request-driven expiry rules for Console lists.
+func (s *Store) ExpireTasks(ctx context.Context) error {
+	return s.Write(ctx, func(tx *sql.Tx) error { return expire(ctx, tx, s.now().Unix()) })
 }
 func finishOutstanding(ctx context.Context, tx *sql.Tx, id, code string, now int64) error {
 	rows, e := tx.QueryContext(ctx, "SELECT "+taskColumns+" FROM tasks WHERE node_id=? AND status IN ('PENDING','ACCEPTED','RUNNING')", id)

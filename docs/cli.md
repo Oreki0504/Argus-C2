@@ -19,11 +19,15 @@ For `argus`, put `-server`, `-ca`, and `-token-file` **before** the subcommand. 
 | Subcommand | Arguments | Behavior |
 | --- | --- | --- |
 | `init` | Required `-dir PATH`; `-hosts localhost,127.0.0.1`; `-listen 127.0.0.1:8443` | Create credentials, configuration, an administrator token, and SQLite state in a new directory |
-| `run` | `-config /etc/argus-c2/server.json`; optional `-check` | Serve HTTPS; `-check` exits after loading the database, accounts, and credentials without binding a port |
+| `run` | `-config /etc/argus-c2/server.json`; optional `-check`; grouped `-console-listen`, `-console-origin`, `-console-cert`, `-console-key` | Serve Fleet HTTPS and optionally independent Console HTTPS; `-check` validates without binding ports |
 | `backup` | `-config /etc/argus-c2/server.json`; required `-out PATH` | Create a consistent database snapshot without overwriting an existing file; verify integrity/schema and sync it |
 | `storage` | `-config /etc/argus-c2/server.json` | Report database/WAL sizes, filesystem space, and warnings without loading service credentials |
 | `certificates` | `-config /etc/argus-c2/server.json`; `-warn-before 720h` | Read public server/issuer certificates, report validity, exit nonzero for expiring/expired/not-yet-valid certificates |
 | `prune` | `-config /etc/argus-c2/server.json`; `-retain-days 30`; `-unknown-days 90`; `-limit 200`; optional `-apply -backup PATH` | Preview eligible terminal task/result pairs; apply only after creating a verified new snapshot |
+
+`console-migrate -config FILE -backup NEW_PRIVATE_FILE` upgrades a stopped schema 102 server to 103 after a verified backup. `console-bootstrap issue -config FILE -out NEW_PRIVATE_FILE` issues a 15-minute one-time Console setup secret; `console-bootstrap recover` additionally requires `-confirm-recovery`, revokes browser sessions, and enables explicit owner recovery. These are local operations; see [Console setup](console.md).
+
+Optional `server run` flags `-console-installer-dir /absolute/path` and `-console-fleet-origin https://fleet.example.com:8443` must be supplied together with the Console listener flags to enable one-command Agent installation. The directory holds operator-built `agent-linux-amd64` and/or `agent-linux-arm64` static binaries; the Fleet origin is the reachable destination placed in new Agent configurations. `-check` also validates these artifacts and the public Fleet CA. See [Agent installation](agent-installation.zh-CN.md).
 
 `-hosts` is a comma-separated certificate DNS/IP list. `-listen` writes the initial configuration; when running, the address comes from the JSON `listen` field.
 

@@ -1,0 +1,587 @@
+@layer management {
+  .management-page {
+    max-width: 1440px;
+    margin: auto;
+  }
+  .management-heading,
+  .management-section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+  }
+  .management-heading h1 {
+    font-size: 25px;
+  }
+  .management-heading p,
+  .management-section-heading p {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 5px;
+  }
+  .management-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--accent);
+    font-size: 11px;
+  }
+  .management-tabs {
+    display: flex;
+    gap: 8px;
+    margin: 18px 0 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .management-tabs a {
+    padding: 10px 18px;
+    min-height: 44px;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .management-tabs a[aria-current='page'] {
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .management-tabs a:hover {
+    background: var(--subtle);
+    color: var(--text);
+  }
+  .management-section-heading {
+    margin-bottom: 14px;
+  }
+  .management-section-heading h2 {
+    font-size: 18px;
+  }
+  .management-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .management-actions .button {
+    font-size: 12px;
+    padding: 8px 14px;
+  }
+  .management-filters {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .management-filters input {
+    max-width: 320px;
+    min-width: 0;
+    font-size: 12px;
+  }
+  .management-filters select {
+    font-size: 12px;
+    min-width: 150px;
+  }
+  .management-table-panel .table-scroll {
+    max-height: max(230px, calc(100dvh - 510px));
+  }
+  .management-table-panel thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .management-table-panel th,
+  .management-table-panel td {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .management-table-panel .text-link {
+    min-height: 24px;
+  }
+  .management-table-panel th {
+    font-size: 12px;
+  }
+  .management-table-panel thead th {
+    font-size: 11px;
+  }
+  .management-table-panel th:first-child {
+    max-width: 350px;
+  }
+  .management-time {
+    font-size: 11px;
+    max-width: 200px;
+  }
+  .management-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 20px;
+    font-size: 11px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+  }
+  .management-note {
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 10px;
+  }
+  .management-success {
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 14px;
+  }
+  .record-id {
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    overflow-wrap: anywhere;
+  }
+  .stacked-status {
+    display: grid;
+    justify-items: start;
+    gap: 5px;
+  }
+  .stacked-status > span:last-child {
+    color: var(--muted);
+    font-size: 10px;
+  }
+  .certificate-warning {
+    color: var(--warning);
+  }
+  .text-action {
+    min-height: 36px;
+    background: transparent;
+    border: 0;
+    padding: 4px 0;
+    color: var(--accent);
+    font-size: 12px;
+    text-align: left;
+  }
+  .text-action:hover {
+    text-decoration: underline;
+  }
+  .text-action:disabled {
+    color: var(--muted);
+  }
+  .management-dialog {
+    width: min(560px, calc(100% - 32px));
+    max-height: 90dvh;
+    margin: auto;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    background: var(--surface);
+    box-shadow: 0 20px 80px #0004;
+  }
+  .management-dialog::backdrop {
+    background: #09151bb3;
+  }
+  .dialog-wide {
+    width: min(820px, calc(100% - 32px));
+  }
+  .management-dialog-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface);
+  }
+  .management-dialog-heading h2 {
+    font-size: 18px;
+  }
+  .management-dialog-body {
+    padding: 18px 24px;
+  }
+  .form-intro {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+  }
+  .management-form label {
+    margin: 14px 0 6px;
+    font-size: 12px;
+  }
+  .management-form input,
+  .management-form select {
+    width: 100%;
+    font-size: 13px;
+  }
+  .management-form input:disabled,
+  .management-form select:disabled {
+    opacity: 0.6;
+  }
+  .form-two-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+  }
+  .dialog-actions .button {
+    margin-top: 0;
+  }
+  .button.danger {
+    background: #b2373d;
+    color: #fff;
+  }
+  .button.danger:hover {
+    background: #952c32;
+  }
+  .button.danger:disabled {
+    opacity: 0.5;
+  }
+  .form-error {
+    color: #a8313c;
+    font-size: 12px;
+    margin-top: 12px;
+  }
+  .agent-action-list {
+    display: grid;
+    gap: 12px;
+    margin-top: 18px;
+  }
+  .agent-action-list > .text-link {
+    justify-content: center;
+  }
+  .enrollment-result > label {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .enrollment-modes {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--subtle);
+    margin: 0 0 16px;
+  }
+  .enrollment-modes button {
+    flex: 1;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .enrollment-modes button[aria-pressed='true'] {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 1px 3px #0002;
+  }
+  .installer-target {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    margin: 12px 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .installer-target div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+  .installer-target strong {
+    font-size: 13px;
+  }
+  .installer-target span {
+    font-size: 11px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+  .install-command-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin: 12px 0 8px;
+    font-size: 12px;
+  }
+  .install-command-toolbar select {
+    padding: 6px 10px;
+  }
+  .enrollment-result .install-command {
+    font-size: 11px;
+    line-height: 1.65;
+  }
+  .enrollment-result textarea {
+    width: 100%;
+    resize: none;
+    color: var(--text);
+    background: var(--subtle);
+    border: 1px solid var(--control-border);
+    border-radius: 6px;
+    padding: 12px;
+    font:
+      12px/1.8 ui-monospace,
+      monospace;
+  }
+  .enrollment-result > .notice:first-child {
+    margin-top: 0;
+  }
+  .token-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .enrollment-result h3 {
+    font-size: 14px;
+    margin-top: 20px;
+  }
+  .enrollment-steps {
+    padding-left: 20px;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+  .enrollment-steps li {
+    margin: 8px 0;
+  }
+  .enrollment-steps pre {
+    background: var(--subtle);
+    padding: 12px;
+    border-radius: 6px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 11px;
+  }
+  .user-identity {
+    display: grid;
+    gap: 4px;
+    padding: 12px 14px;
+    border-radius: 6px;
+    background: var(--subtle);
+    overflow-wrap: anywhere;
+  }
+  .user-identity span,
+  .user-identity code {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .user-access-links {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+  }
+  .management-form .checkbox-label {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .checkbox-label input {
+    width: 18px;
+    height: 18px;
+    min-height: 18px;
+    flex-shrink: 0;
+    accent-color: var(--accent);
+  }
+  .task-detail-columns {
+    display: grid;
+    grid-template-columns: 1fr 1.25fr;
+    gap: 16px;
+  }
+  .management-facts,
+  .management-result {
+    padding: 18px 20px;
+    min-width: 0;
+  }
+  .management-facts h3,
+  .management-result h3 {
+    font-size: 14px;
+  }
+  .management-facts dl {
+    margin: 12px 0;
+  }
+  .management-facts dl > div {
+    display: grid;
+    grid-template-columns: minmax(100px, 0.7fr) 1fr;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0;
+    font-size: 11px;
+  }
+  .management-facts dt {
+    color: var(--muted);
+  }
+  .management-facts dd {
+    margin: 0;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+  .result-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    min-height: 36px;
+    margin-top: -10px;
+  }
+  .management-result > .muted {
+    font-size: 11px;
+    margin-top: 6px;
+  }
+  .result-fields {
+    margin: 16px 0;
+    font-size: 12px;
+    max-height: 300px;
+    overflow: auto;
+  }
+  .result-fields > div {
+    margin-bottom: 12px;
+  }
+  .result-fields dt {
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .result-fields dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  .result-fields pre {
+    white-space: pre-wrap;
+    font-size: 11px;
+  }
+  .json-result {
+    max-height: 320px;
+    overflow: auto;
+    padding: 14px;
+    background: var(--subtle);
+    border-radius: 6px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .empty-result {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.8;
+    padding: 28px 0;
+  }
+  .audit-task-link {
+    display: block;
+    font-size: 10px;
+    max-width: 240px;
+    overflow-wrap: anywhere;
+  }
+  .status-succeeded,
+  .status-active {
+    background: #edf7f2;
+    color: #24654e;
+    border-color: #c3e2d2;
+  }
+  .status-running,
+  .status-accepted {
+    background: #eef4fc;
+    color: #355b92;
+    border-color: #cbdcf4;
+  }
+  .status-failed,
+  .status-disabled {
+    background: #fff1f2;
+    color: #9d3945;
+    border-color: #ecced2;
+  }
+  .status-unknown,
+  .status-pending {
+    background: var(--warning-bg);
+    color: var(--warning);
+  }
+  :root[data-theme='dark'] .status-succeeded,
+  :root[data-theme='dark'] .status-active {
+    background: #20382e;
+    color: #8dd8b7;
+    border-color: var(--border);
+  }
+  :root[data-theme='dark'] .status-running,
+  :root[data-theme='dark'] .status-accepted {
+    background: #233548;
+    color: #9fc5f2;
+    border-color: var(--border);
+  }
+  :root[data-theme='dark'] .status-failed,
+  :root[data-theme='dark'] .status-disabled {
+    background: #402b30;
+    color: #f5acb6;
+    border-color: var(--border);
+  }
+  :root[data-theme='dark'] .form-error {
+    color: #f5acb6;
+  }
+  .detail-dispatch {
+    font-size: 11px;
+    padding: 6px 12px;
+    min-height: 36px;
+  }
+  @media (max-width: 800px) {
+    .management-heading,
+    .management-section-heading {
+      align-items: flex-start;
+    }
+    .management-section-heading {
+      flex-wrap: wrap;
+    }
+    .management-actions {
+      width: 100%;
+      justify-content: flex-end;
+    }
+    .management-filters {
+      flex-wrap: wrap;
+    }
+    .management-filters input {
+      flex: 1 1 180px;
+      max-width: none;
+    }
+    .management-filters select {
+      flex: 1 1 150px;
+    }
+    .task-detail-columns {
+      grid-template-columns: 1fr;
+    }
+    .management-table-panel .table-scroll {
+      max-height: none;
+    }
+    .management-tabs {
+      gap: 0;
+    }
+    .management-tabs a {
+      flex: 1;
+      text-align: center;
+      padding: 10px 6px;
+      font-size: 12px;
+    }
+    .management-badge {
+      display: none;
+    }
+    .management-dialog-body {
+      padding: 16px;
+    }
+    .form-two-columns {
+      gap: 10px;
+    }
+    .management-pagination {
+      padding: 10px 12px;
+    }
+    .detail-dispatch {
+      order: 2;
+    }
+  }
+}

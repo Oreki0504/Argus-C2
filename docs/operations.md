@@ -86,7 +86,7 @@ For repeatable same-root server leaf rotation: back up the old leaf/key separate
 
 ## Database compatibility and upgrades
 
-The server requires Schema **102**; the agent remains on Schema **101**, independently versioned. Server databases have SQLite application ID `0x41524753` (`ARGS`); agent databases use `0x41524741` (`ARGA`). Server Schema 101 is incompatible with 102 because it lacks trusted receipt and durable execution-authorization timestamps and the task-query indexes. Wrong-component and other unsupported versions are rejected; startup never resets or converts them. Do not change `PRAGMA user_version` to bypass the check.
+The server requires Schema **103**; the agent remains on Schema **101**, independently versioned. Server databases have SQLite application ID `0x41524753` (`ARGS`); agent databases use `0x41524741` (`ARGA`). Server Schema 101 is incompatible with 102 because it lacks trusted receipt and durable execution-authorization timestamps and the task-query indexes. Wrong-component and other unsupported versions are rejected; startup never resets or converts them. Do not change `PRAGMA user_version` to bypass the check.
 
 Before replacing binaries:
 
@@ -94,9 +94,9 @@ Before replacing binaries:
 2. Create a verified server snapshot with the old compatible binary. Separately preserve configuration, CA/TLS material, account configuration, and revocations since the snapshot. Stop each agent before preserving its entire identity/state directory; retain the old binaries.
 3. Test the new binaries against **copies** in an isolated environment, with agent access blocked. Check schema acceptance, administration, result reads, and restart behavior. Never run a copied agent identity alongside the original.
 4. For updates compatible with each component's current schema, stop services, install binaries, run appropriate configuration checks, restart, and inspect heartbeat/report behavior before broader rollout.
-5. For incompatible development state, keep it archived. Use a specifically reviewed one-time conversion only if one exists; none is shipped here. Otherwise initialize a separate deployment and explicitly reenroll nodes with new identities. Do not silently discard pending results or reuse a certificate with a new agent database.
+5. For server schema 102, stop the old server and run `server console-migrate -config FILE -backup NEW_PRIVATE_FILE` with the new binary. It verifies/syncs a 102 snapshot before transactional migration to 103. The original data remains intact; failures roll back and startup refuses the old schema. Preserve unsupported older development state separately. Do not silently discard pending results or reuse a certificate with a new agent database.
 
-There is no historical migration chain, downgrade framework, or general migration command before MVP. Rollback requires a binary that supports the database being restored and the identity reconciliation below; restoring both agent and server snapshots can break deduplication continuity.
+The only shipped migration is 102 → 103; there is no general historical migration chain or downgrade framework. See [Console migration and recovery](console.md). Rollback requires a binary that supports the database being restored and the identity reconciliation below; restoring both agent and server snapshots can break deduplication continuity.
 
 ## Online backup
 

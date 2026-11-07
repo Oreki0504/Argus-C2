@@ -102,6 +102,8 @@ Use the initial account to establish administration. Generate individual tokens 
 
 ## 4. Configure and enroll a node
 
+For a **new Agent-only host**, an initialized Web Console can generate a single curl/wget installation command from Management → Agents → Add agent. It installs only the Agent and registers it automatically. See [one-command installation](agent-installation.zh-CN.md) for artifact publication, TLS prerequisites and failure recovery. The manual procedure below remains available for existing installations and custom local policies.
+
 Install the same programs and units on the node. Transfer the trusted `ca.pem` and install it as `/etc/argus-c2/ca.pem`, owned by root with mode 0644. Use [examples/agent.json](../examples/agent.json) for `/etc/argus-c2/agent.json`, changing `server` to the actual HTTPS origin. Copy [examples/policy.json](../examples/policy.json) to `/etc/argus-c2/policy.json`. Both JSON files should be root-owned, mode 0644, with a parent directory the agent cannot write.
 
 ```sh

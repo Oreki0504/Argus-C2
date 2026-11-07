@@ -68,7 +68,7 @@ done
 | [安全边界](docs/security.md) | 信任假设、凭证、审计和限制 |
 | [Linux 部署](docs/deployment.md) | 账户、权限、systemd 与注册 |
 | [日常运维](docs/operations.md) | 账号、续期、日志、备份恢复和排障 |
-| [Frontend 准备](docs/web-design.md) | 会话设计与当前任务查询约定 |
+| [Web Console](docs/web-design.md) | React 界面、OIDC 会话、Admin 管理及 [Auth0 + GitHub／Google 配置](docs/console-auth0.zh-CN.md) |
 | [开发与验证](docs/validation.md) | 测试命令、证据、CI 与后续验收 |
 
 本地结果维护支持列出、导出、重试和显式删除报告内容，删除后仍保留去重依据。每次节点请求检查协议版本 1，节点列表可观察 Agent 构建版本。本地 `storage` 命令报告数据库/WAL 大小、可用空间及 Agent 结果容量。详见[运维说明](docs/operations.md)。
@@ -77,7 +77,7 @@ Server 历史清理由操作员手动执行：`server prune` 默认预览、保�
 
 `argus health` 检查 Server 数据库连接；节点 `active` 表示获得授权，`last_seen_at` 表示最近收到心跳的时间；任务 `SUCCEEDED` 表示有合法报告。它们都不能直接解释为节点健康，报告的数据可用性与覆盖范围需要单独判断。详见[状态语义](docs/architecture.md#status-dimensions)。
 
-Server 要求 Schema 102，Agent 保持 Schema 101，组件标识各自独立；Server 的旧 Schema 101 会被拒绝，不自动转换。升级前保留状态并遵循[升级与恢复流程](docs/operations.md#database-compatibility-and-upgrades)。Offline Root + Online Intermediate 目前是 [PKI 规划](docs/security.md#offline-root-and-online-intermediate-plan)，当前仍使用在线根 CA。
+Server 要求 Schema 103，Agent 保持 Schema 101，组件标识各自独立；Schema 102 可通过 `server console-migrate` 备份后显式升级，启动时不会自动转换，其他不支持的版本仍会被拒绝。遵循[升级与恢复流程](docs/operations.md#database-compatibility-and-upgrades)。Offline Root + Online Intermediate 目前仍是 [PKI 规划](docs/security.md#offline-root-and-online-intermediate-plan)。
 
 ## 验证状态
 

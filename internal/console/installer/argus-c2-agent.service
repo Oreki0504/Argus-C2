@@ -1,0 +1,55 @@
+[Unit]
+Description=Argus Linux fleet diagnostics agent
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=argus-agent
+Group=argus-agent
+UMask=0077
+StateDirectory=argus-c2-agent
+StateDirectoryMode=0700
+ExecStart=/usr/local/libexec/argus-c2/agent run -config /etc/argus-c2/agent.json
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=45
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/argus-c2-agent
+NoExecPaths=/var/lib/argus-c2-agent /tmp /var/tmp
+LimitNOFILE=1024
+LimitCORE=0
+TasksMax=64
+MemoryMax=192M
+MemorySwapMax=0
+CPUQuota=50%
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=100
+
+[Install]
+WantedBy=multi-user.target

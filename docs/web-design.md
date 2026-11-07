@@ -1,31 +1,44 @@
-# Frontend preparation
+# Web Console implementation
 
-[Documentation](../README.md) · [API](api.md) · [Security](security.md)
+[Documentation](../README.md) · [Console setup](console.md) · [Console API](console-api.md) · [Frontend development](../web/README.md)
 
-This document defines the proposed browser authentication boundary. **No frontend, browser login, cookie authentication, or session service is implemented yet.** The current CLI keeps named bearer tokens, loaded at server startup. Session implementation is deferred to the Frontend work; it must precede exposure of a browser management interface.
+ARGUS now includes the React console, an optional independent HTTPS Console listener, one-time owner bootstrap, OIDC login, server-side sessions, Web Admin/User authorization, and real management APIs. Console defaults to disabled. Existing CLI Bearer and Agent mTLS routes remain on the Fleet listener and keep their original authorization.
 
-## Proposed session lifecycle
+## Navigation and design
 
-Use the existing HTTPS origin for the frontend and API. A login request supplies a management credential over TLS; the server verifies it and issues a cryptographically random opaque session ID. Do not place long-lived management tokens in URLs, localStorage, sessionStorage, browser-readable cookies, or frontend configuration. Clear the submitted credential from application state after the exchange and never log it.
+The selected **Argus Hybrid** direction combines [Geist](https://vercel.com/geist/introduction) typography and restrained surfaces with [Carbon](https://carbondesignsystem.com/) table and interaction patterns. It uses semantic HTML, local Geist fonts, static CSS and Lucide icons, rather than an official component-library implementation.
 
-Store only a hash of the session ID, account identity, credential generation, creation/last-use times, and absolute expiry on the server. An initial bounded in-memory store can invalidate all sessions on restart and avoid a new database component. Proposed limits are 30 minutes of inactivity and 8 hours absolute lifetime, with explicit logout/revocation; these are design defaults to confirm during Frontend implementation, not current settings. Rotate the session ID on login and privilege changes. Bound session count and rate-limit login attempts without logging submitted credentials.
+Anonymous visitors enter the public User overview. Neither User nor Admin has a sidebar. Admin's top bar contains Overview / Traffic / Management. Management has horizontal **Tasks / Agents / Audit / Users & access** navigation. The public overview keeps search and five status filter cards in one row, compact Agent cards and five aligned number/bar indicators. Details provide charts and system facts. Chinese/English and light/dark controls persist display preferences only.
 
-Deliver the ID through a host-only `__Host-argus-session` cookie with `Secure`, `HttpOnly`, `Path=/`, and `SameSite=Strict`; omit `Domain`. For every authenticated browser request, enforce session expiry and current account/credential generation before applying Admin/ReadOnly permissions. Do not trust a role copied into browser state. Reject ambiguous requests containing conflicting bearer and session identities.
+[UI design rules](ui-design-system.md) target Overview and Details fitting 1366×768 and 1440×900 at 100% zoom. Management tables use bounded internal scrolling and pagination. Mobile, zoom and long results allow natural scrolling without clipping content.
 
-SameSite is defense in depth, not the sole CSRF defense. State-changing session requests need a session-bound CSRF token and strict Origin validation, with explicit rejection of missing/untrusted origins for browser mutations. Cover login and logout against CSRF and session fixation. Keep CORS disabled for other origins by default; never combine credentialed requests with wildcard origins. Use TLS, a restrictive CSP, and escaped UI rendering; HttpOnly does not prevent malicious scripts from making authenticated requests.
+| Page | Implemented behavior |
+| --- | --- |
+| Setup / sign-in | Ownership proof, provider discovery, OIDC owner binding, normal login and local logout |
+| Overview / details | Safe public names, heartbeat, allowlisted system/resource observations and sampled history |
+| Tasks | Six fixed diagnostic collectors, typed parameter forms, TTL/timeouts, list filters, results and related audit |
+| Agents | One-command Linux installation (curl/wget), manual registration token and CLI fallback, access/certificate state, exact-ID disable confirmation |
+| Audit | Action, Agent, task and account filters, stable pagination and related-task links |
+| Users & access | Pending approvals, role/access edits with version checks, session revocation and last-Admin protection |
 
-## Revocation and administration
+## Real data and current limits
 
-The first implementation can retain the current account-file/restart model if it clearly states the timing: editing `admins.json` alone has no effect until restart, and restart invalidates all in-memory sessions. After reload, removed accounts and replaced tokens cannot log in again. Credential replacement must invalidate sessions derived from the old credential even if the account name is unchanged. Logout must invalidate the server record before clearing the cookie.
+Management uses the shared SQLite-backed Fleet services. A Console-created task is delivered through the existing Agent polling protocol; registration tokens are accepted by Fleet enrollment. Disable uses the existing transaction and unfinished-task semantics. Tasks do not accept arbitrary commands, shell scripts or policy editing. The separate opt-in installer serves a fixed, versioned shell template and operator-published Agent binaries; it runs only when explicitly pasted on a new host. See [installation configuration](agent-installation.zh-CN.md).
 
-If runtime credential reload or targeted revocation is added, it must atomically update the effective account set and invalidate affected sessions; define a linearization point so a revoked identity cannot authorize a later mutation. A reload of systemd `LoadCredential` source files still needs a service restart under the current deployment model. Do not promise immediate token revocation from editing those sources.
+Public summaries use a separate Go projection. Names are opaque `Server-<id>` placeholders; hostnames, internal node IDs, IPs, interfaces, mount paths, certificates, raw results and audit never enter public responses. System strings are reduced to a small vocabulary/version representation. Missing observations remain null.
 
-Before release, tests must cover token replacement/removal, role downgrade, session expiry and logout, restart invalidation, CSRF/Origin rejection, fixation, duplicate cookies, concurrent revocation, ReadOnly mutation refusal, log redaction, and bounded session/login resources. Existing bearer-client behavior must remain tested separately. Do not add cookie acceptance without these lifecycle checks.
+CPU, memory and disk come from successful `system.metrics` results; system information comes from `system.info`. History uses real result receipt times, selecting the latest result per 60/300/900-second display bucket. **No automatic periodic telemetry has been added.** Bandwidth, capacity, traffic totals and coverage therefore remain null in live mode. Task-driven samples do not establish continuous monitoring. History is affected by task/result retention. Public summary currently rejects fleets larger than 1,000 nodes rather than silently truncating them. Public-name editing and continuous traffic telemetry remain future work.
 
-## Current API preparation
+## Authentication and storage
 
-`GET /v1/tasks?order=newest` is implemented with node/status/time filters, a bounded page size, and a `(created_at, id)` descending cursor; see [API](api.md#newest-task-pages). Keep filtering on the server. The legacy random-ID listing remains available for existing CLI clients. Parameterized JSON media types with UTF-8 are accepted; this does not enable CORS or browser sessions.
+OIDC Authorization Code + S256 PKCE supports a standard provider such as Google or Auth0. Auth0 may offer GitHub and Google connections; GitHub OAuth is not directly treated as OIDC. Signatures/JWKS, issuer, audience, authorized party, expiry, issued-at, nonce, state and exact callback are verified. Local `(issuer, subject)` accounts determine roles; new identities are pending until approved.
 
-Render [the four status dimensions](architecture.md#status-dimensions) separately. Show server receipt time alongside the agent's completion claim, preserve UNKNOWN as uncertain, and expose `available`, `coverage`, and `truncated` rather than mapping every SUCCEEDED task to a green host-health indicator. Pagination is a live view, so refresh the first page for new tasks and do not describe it as a database snapshot.
+Sessions contain opaque random credentials whose digests are held in bounded server memory. Cookies use Secure/HttpOnly/Strict/Path=/ and no Domain; the short-lived OIDC correlation cookie uses Lax. Idle expiry is 30 minutes, absolute expiry eight hours; restart clears sessions. Writes require exact Origin plus session-bound CSRF. Account version/generation checks also run inside mutation transactions, so revoked authorization cannot race a write. Role changes revoke sessions; changes involving Admin access require a login within ten minutes.
 
-Server leaf-certificate monitoring and manual rotation are independent of session implementation. Offline Root + Online Intermediate remains a separate [PKI plan](security.md#offline-root-and-online-intermediate-plan).
+Schema **103** adds persistent owner/bootstrap state, Web accounts, public IDs and audit subjects. The explicit 102 → 103 migration creates and verifies a durable backup before transactional DDL. Startup never migrates implicitly. Provider credentials are separate private files and must be backed up independently. See [setup and recovery](console.md).
+
+## Development and validation
+
+Mock mode is explicitly marked and remains available over LAN. Production builds contain no mock worker, fixtures, preview toolbar or fallback. Live builds serve UI and API from the Console's HTTPS origin; Vite is only a preview tool.
+
+Tests exercise signed local OIDC discovery/exchange, PKCE, invalid claims/replay, cookie/CSRF boundaries, revocation, atomic owner binding, migration rollback, real enrollment/task/result/disable flows, public projections and Go-response/TypeScript-schema compatibility. Browser tests cover UI workflows, permissions, localization, responsive layouts and accessibility. They do not claim a completed deployment-specific Google/Auth0 app registration or a third-party security review.

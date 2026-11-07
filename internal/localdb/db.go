@@ -83,7 +83,14 @@ func Open(dir, name string, create bool) (*sql.DB, error) {
 // Lock is held for the full lifetime of the probe worker; the OS releases it on
 // a crash. A second process cannot mistake another worker's tasks for crashes.
 func Lock(dir string) (*os.File, error) {
-	path := filepath.Join(dir, "probe.lock")
+	return lockFile(dir, "probe.lock")
+}
+
+// LockServer excludes running servers and offline schema migrations.
+func LockServer(dir string) (*os.File, error) { return lockFile(dir, "server.lock") }
+
+func lockFile(dir, name string) (*os.File, error) {
+	path := filepath.Join(dir, name)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
 	if os.IsExist(err) {
 		if err := PrivateFile(path); err != nil {
@@ -96,7 +103,7 @@ func Lock(dir string) (*os.File, error) {
 	}
 	if err := lock(f); err != nil {
 		f.Close()
-		return nil, errors.New("another probe worker holds the state lock")
+		return nil, errors.New("another process holds the state lock")
 	}
 	return f, nil
 }

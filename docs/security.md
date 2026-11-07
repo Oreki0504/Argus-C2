@@ -10,7 +10,8 @@ Argus-C2 supports diagnostics on explicitly authorized Linux hosts. Its controls
 | --- | --- | --- |
 | Network confidentiality, integrity, and server identity | Standard Go TLS, minimum TLS 1.3, CA and name validation | Trust anchors must be distributed through a trusted channel |
 | Node identity | Per-node certificate, identity URI, fingerprint, and active-status checks | A leaked node key requires disabling and reenrollment |
-| Management permissions | Named high-entropy bearer tokens; Admin / ReadOnly | Possession grants the account's permissions; no automatic expiry or MFA |
+| CLI management permissions | Named high-entropy bearer tokens; Admin / ReadOnly | Possession grants the account's permissions; no automatic expiry or MFA |
+| Browser management permissions | Independent HTTPS Console, OIDC + PKCE, server-side sessions, local Admin / User | Provider proves identity; local approval determines access; anonymous routes expose only public projections |
 | Agent execution scope | Six fixed Go collectors, strict task parameters, local allowlist, non-root execution | Local OS permissions and runtime restrictions determine visibility |
 | Repeated delivery and interruptions | ID/node binding, expiry, SQLite uniqueness, persistent execution records | No exactly-once promise; old snapshots can break continuity |
 | Visibility of important changes | Structured audit committed with state changes, bounded retention | Database administrators can alter records; history is not tamper-proof |
@@ -21,13 +22,15 @@ Compromise of node root, the kernel, the agent executable, or local policy is ou
 
 ## Authentication in deployment
 
-All routes share one HTTPS listener. TLS uses `VerifyClientCertIfGiven`: connections without a client certificate can reach enrollment and management routes; any supplied certificate must pass TLS verification. Every `/v1/agent/*` route additionally requires a verified client certificate. An administrator token cannot replace it.
+Fleet routes share one HTTPS listener. TLS uses `VerifyClientCertIfGiven`: connections without a client certificate can reach enrollment and management routes; any supplied certificate must pass TLS verification. Every `/v1/agent/*` route additionally requires a verified client certificate. An administrator token cannot replace it.
 
 Every node operation checks certificate validity, fingerprints, and disabled status. Existing connections therefore cannot bypass node disabling. Standard TLS validates the trust chain; application checks add node authorization. There is no trust-on-first-use, `insecure` mode, plaintext fallback, or proxy-header substitute for a node identity.
 
 Administrator configuration stores only SHA-256 digests of tokens generated from a cryptographically secure random source. This is not password authentication. Give each administrator a separate token and use ReadOnly for observation. To revoke an account, remove its record and restart the server; configuration changes are not hot-reloaded.
 
-Browser session authentication remains a [design](web-design.md), not an implemented endpoint. Current bearer-token revocation still takes effect on server restart. Standard JSON media-type parsing and task-list filtering do not add browser credential storage or cookie authentication.
+Browser authentication is implemented on the independent [Console](console.md), using a separate browser TLS certificate and no client certificates. One-time local bootstrap binds the first OIDC Admin atomically; subsequent identities require approval. Opaque session credentials are stored as digests in bounded memory, with Secure/HttpOnly/Strict cookies and a separate Lax OIDC transaction cookie. Origin and CSRF protect writes; account versions and recovery generations are checked inside mutation transactions. Role/access changes revoke sessions immediately. Restart clears sessions, while accounts and activation persist. CLI Bearer revocation remains independent and restart-based.
+
+Anonymous and User responses are constructed before serialization from explicit public DTOs: opaque names, heartbeat and permitted aggregate observations. Hostnames, addresses, interfaces, mount paths, raw results, tasks and audit are Admin-only. No CLI token login, Fleet proxy, plaintext Console mode or browser token persistence is provided. Provider credentials, TLS keys and SQLite require separate backups; see [local recovery](console.md#local-recovery).
 
 ## Single CA and renewal
 

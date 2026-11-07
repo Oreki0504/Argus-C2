@@ -22,6 +22,7 @@ import (
 
 var ErrUnauthorized = errors.New("unauthorized")
 var ErrConflict = errors.New("state conflict")
+var ErrNodeDisabled = fmt.Errorf("%w: node disabled", ErrConflict)
 var ErrNotFound = errors.New("not found")
 var ErrTaskNotFound = fmt.Errorf("%w: assigned task", ErrNotFound)
 var ErrResultConflict = fmt.Errorf("%w: result differs", ErrConflict)
@@ -41,7 +42,7 @@ func (s *Store) now() time.Time {
 	return time.Now()
 }
 
-const SchemaVersion = 102
+const SchemaVersion = 103
 const applicationID = 0x41524753 // ARGS
 
 const schema = `
@@ -80,7 +81,7 @@ func Open(dir string, create bool) (*Store, error) {
 		if e != nil {
 			return fail(e)
 		}
-		if _, e = tx.Exec(schema); e != nil {
+		if _, e = tx.Exec(schema + consoleSchema); e != nil {
 			tx.Rollback()
 			return fail(e)
 		}
@@ -105,6 +106,9 @@ func (s *Store) Write(ctx context.Context, f func(*sql.Tx) error) error {
 		return e
 	}
 	defer tx.Rollback()
+	if e = authorizeConsoleContext(ctx, tx); e != nil {
+		return e
+	}
 	if e = f(tx); e != nil {
 		return e
 	}
@@ -117,7 +121,10 @@ func TokenDigest(s string) string { h := sha256.Sum256([]byte(s)); return hex.En
 const AuditCapacity = 100000
 
 func Audit(ctx context.Context, tx *sql.Tx, actor, action, node, task, status string) error {
-	if _, e := tx.ExecContext(ctx, "INSERT INTO audit_events(timestamp,actor,action,node_id,task_id,status) VALUES(?,?,?,?,?,?)", time.Now().Unix(), actor, action, node, task, status); e != nil {
+	return auditSubject(ctx, tx, actor, action, node, task, "", status)
+}
+func auditSubject(ctx context.Context, tx *sql.Tx, actor, action, node, task, subject, status string) error {
+	if _, e := tx.ExecContext(ctx, "INSERT INTO audit_events(timestamp,actor,action,node_id,task_id,subject_id,status) VALUES(?,?,?,?,?,?,?)", time.Now().Unix(), actor, action, node, task, subject, status); e != nil {
 		return e
 	}
 	_, e := tx.ExecContext(ctx, "DELETE FROM audit_events WHERE id <= (SELECT max(id)-? FROM audit_events)", AuditCapacity)
@@ -247,6 +254,9 @@ func (s *Store) Disable(ctx context.Context, actor, id string) error {
 // Backup reserves a private destination exclusively, includes committed WAL,
 // verifies the snapshot, then syncs it. It never overwrites an existing file.
 func (s *Store) Backup(ctx context.Context, path string) error {
+	return s.backupVersion(ctx, path, SchemaVersion)
+}
+func (s *Store) backupVersion(ctx context.Context, path string, expectedVersion int) error {
 	abs, e := filepath.Abs(path)
 	if e != nil {
 		return e
@@ -283,7 +293,7 @@ func (s *Store) Backup(ctx context.Context, path string) error {
 	if e = snapshot.QueryRowContext(ctx, "PRAGMA application_id").Scan(&component); e != nil {
 		return e
 	}
-	if version != SchemaVersion || component != applicationID {
+	if version != expectedVersion || component != applicationID {
 		return errors.New("backup schema check failed")
 	}
 	if e = file.Sync(); e != nil {

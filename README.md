@@ -68,7 +68,7 @@ Follow the [local quick start](docs/quickstart.md) to complete a single-node wor
 | [Security boundaries](docs/security.md) | Trust assumptions, credentials, audit, and limitations |
 | [Linux deployment](docs/deployment.md) | Accounts, permissions, systemd, and enrollment |
 | [Operations](docs/operations.md) | Accounts, renewal, logs, backup, recovery, and troubleshooting |
-| [Frontend preparation](docs/web-design.md) | Proposed sessions and current task-query contract |
+| [Web Console](docs/web-design.md) | React UI, OIDC sessions, Admin management and [HTTPS setup](docs/console.md) |
 | [Development and validation](docs/validation.md) | Test commands, evidence, CI, and remaining fleet acceptance |
 
 Local result maintenance can list, export, retry, or explicitly discard report contents while retaining deduplication. Protocol version 1 is checked on every agent request; node listings expose the agent build. Local `storage` commands report database/WAL size, available space, and agent result capacity. See [Operations](docs/operations.md).
@@ -77,7 +77,7 @@ Server history cleanup is manual: `server prune` previews a bounded batch with a
 
 `argus health` checks the server's database connection. Node `active` means authorized, and `last_seen_at` records the latest heartbeat. Task `SUCCEEDED` means a valid report, whose availability and coverage must be inspected separately. None is a host-health verdict. See [Status dimensions](docs/architecture.md#status-dimensions).
 
-Server requires Schema 102; agent remains on Schema 101, with separate component IDs. Server Schema 101 and other unsupported versions are rejected without automatic conversion. Preserve state and follow the [upgrade and recovery procedure](docs/operations.md#database-compatibility-and-upgrades). An offline root with an online intermediate is a [PKI plan](docs/security.md#offline-root-and-online-intermediate-plan), not the current deployment model.
+Server requires Schema 103; agent remains on Schema 101, with separate component IDs. Schema 102 has an explicit, backed-up `server console-migrate` path; startup never converts state automatically. Other unsupported versions are rejected. Follow the [upgrade and recovery procedure](docs/operations.md#database-compatibility-and-upgrades). An offline root with an online intermediate remains a [PKI plan](docs/security.md#offline-root-and-online-intermediate-plan).
 
 ## Validation status
 

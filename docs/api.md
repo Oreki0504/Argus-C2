@@ -4,6 +4,8 @@
 
 This page describes the current `/v1` routes. Access is HTTPS-only; the application does not treat forwarded plaintext requests as TLS. Terminate agent mTLS at the Argus server. Forwarding a client certificate in an HTTP header does not satisfy node authentication.
 
+The browser uses the separate [Console API](console-api.md) on an optional independent HTTPS listener. Its session/setup/public-summary and management routes are not mounted on this Fleet listener. CLI Bearer credentials do not authenticate the Console. See [Console setup](console.md).
+
 ## Authentication and common format
 
 - Management routes: `Authorization: Bearer <administrator token>`. Admin can query and modify; ReadOnly can only query.
