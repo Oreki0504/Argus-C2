@@ -476,7 +476,12 @@ def validate_certificate(cert, key, host):
     ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(cert, key, password=b'')
     _, address = host_value(host)
     run(['openssl', 'x509', '-in', cert, '-noout', '-checkend', '300'])
-    run(['openssl', 'x509', '-in', cert, '-noout', '-checkip' if address else '-checkhost', host])
+    result = run(['openssl', 'x509', '-in', cert, '-noout', '-checkip' if address else '-checkhost', host])
+    # OpenSSL 3.0 returns zero even for a name mismatch. Require the explicit
+    # affirmative result as well; newer versions also report failure via status.
+    expected = f'{"IP" if address else "Hostname"} {host} does match certificate'.encode('ascii')
+    if result.stdout.strip() != expected:
+        raise InstallError('Console certificate does not match the configured host.')
 
 
 def console_flags(args, certdir, artifacts, key=None):

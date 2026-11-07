@@ -300,6 +300,27 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaises(ssl.SSLError):
             installer.validate_certificate(directory / 'browser.pem', directory / 'ca-key.pem', args.host)
 
+    def test_openssl_zero_exit_requires_affirmative_host_match(self):
+        # OpenSSL 3.0 exits successfully even when x509 -checkhost/-checkip
+        # reports a mismatch. Exercise that behavior on newer OpenSSL too.
+        cases = [('argus.example.com', 'Hostname', '-checkhost'),
+                 ('192.168.9.40', 'IP', '-checkip'), ('2001:db8::1', 'IP', '-checkip')]
+        for host, label, flag in cases:
+            outputs = [(f'{label} {host} does match certificate\n'.encode(), True),
+                       (f'{label} {host} does NOT match certificate\n'.encode(), False),
+                       (f'{label} another.example.com does match certificate\n'.encode(), False),
+                       (b'', False)]
+            for output, accepted in outputs:
+                result = subprocess.CompletedProcess([], 0, stdout=output, stderr=b'')
+                with self.subTest(host=host, output=output), patch.object(installer.ssl, 'SSLContext'), \
+                        patch.object(installer, 'run', return_value=result) as run:
+                    if accepted:
+                        installer.validate_certificate('cert.pem', 'key.pem', host)
+                    else:
+                        with self.assertRaisesRegex(installer.InstallError, 'does not match'):
+                            installer.validate_certificate('cert.pem', 'key.pem', host)
+                    self.assertEqual(run.call_args.args[0][-2:], [flag, host])
+
     def prepare_renewal(self):
         directory = installer.path('/etc/argus-c2/console')
         lineage = installer.path('/etc/argus-c2/acme/live/argus-console')
