@@ -290,6 +290,109 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(installer.InstallError, 'Certbot >= 5.3'):
                 installer.certbot_executable(args)
 
+    def test_acme_works_with_group_writable_system_logs_and_preserves_retry_state(self):
+        logs = installer.path('/var/log')
+        installer.mkdir(logs)
+        logs.chmod(0o2775)
+        (logs / 'existing-log').write_text('preserve')
+        installer.mkdir(installer.path('/run/systemd/system'))
+        account = installer.path('/etc/argus-c2/acme/accounts')
+        installer.mkdir(account, 0o700)
+        (account / 'existing-account').write_text('preserve account')
+        args = options('--host', 'argus.example.com', '--email', 'owner@example.com', '--agree-tos')
+        with patch.object(installer.shutil, 'which', return_value='/usr/bin/tool'), \
+                patch.object(installer.pwd, 'getpwnam', side_effect=KeyError), \
+                patch.object(installer.grp, 'getgrnam', side_effect=KeyError), \
+                patch.object(installer, 'run', return_value=subprocess.CompletedProcess([], 1)), \
+                patch.object(installer, 'check_ports'):
+            installer.preflight(args)
+        fixture = self.root / 'certificate-fixture'
+        fixture.mkdir()
+        certdir, _ = installer.certificates(options('--host', args.host, '--tls', 'local-ca'), fixture)
+        actual_run, calls = installer.run, []
+        def issue(command, **kwargs):
+            if str(command[0]) == '/opt/argus-certbot/bin/certbot':
+                calls.append(command)
+                lineage = installer.path('/etc/argus-c2/acme/live/argus-console')
+                installer.mkdir(lineage, 0o700)
+                (lineage / 'fullchain.pem').write_bytes((certdir / 'browser.pem').read_bytes())
+                (lineage / 'privkey.pem').write_bytes((certdir / 'browser-key.pem').read_bytes())
+                return subprocess.CompletedProcess(command, 0, b'', b'')
+            return actual_run(command, **kwargs)
+        for attempt in range(2):
+            stage = self.root / f'attempt-{attempt}'
+            stage.mkdir()
+            with patch.object(installer, 'certbot_executable', return_value='/opt/argus-certbot/bin/certbot'), \
+                    patch.object(installer, 'run', side_effect=issue), contextlib.redirect_stdout(io.StringIO()):
+                installer.certificates(args, stage)
+        for command in [*calls, installer.acme_arguments(args, '/opt/argus-certbot/bin/certbot', True)]:
+            self.assertEqual(command[command.index('--logs-dir') + 1], str(installer.path('/var/lib/argus-certbot/logs')))
+        self.assertEqual(stat.S_IMODE(logs.stat().st_mode), 0o2775)
+        self.assertEqual((logs / 'existing-log').read_text(), 'preserve')
+        self.assertEqual((account / 'existing-account').read_text(), 'preserve account')
+        self.assertFalse((logs / 'argus-certbot').exists())
+        for directory in installer.ACME_DIRECTORIES:
+            self.assertEqual(stat.S_IMODE(installer.path(directory).stat().st_mode), 0o700)
+
+    def test_acme_private_path_validation_happens_in_preflight(self):
+        args = options('--host', 'argus.example.com', '--email', 'owner@example.com', '--agree-tos')
+        installer.mkdir(installer.path('/run/systemd/system'))
+        state = installer.path('/var/lib/argus-certbot')
+        installer.mkdir(state, 0o775)
+        with patch.object(installer.shutil, 'which', return_value='/usr/bin/tool'), \
+                patch.object(installer, 'run') as run:
+            with self.assertRaisesRegex(installer.InstallError, 'not writable by others'):
+                installer.preflight(args)
+            run.assert_not_called()
+        state.chmod(0o700)
+        (state / 'logs').symlink_to(self.root)
+        with patch.object(installer.shutil, 'which', return_value='/usr/bin/tool'), \
+                patch.object(installer, 'run') as run:
+            with self.assertRaisesRegex(installer.InstallError, 'symlink'):
+                installer.preflight(args)
+            run.assert_not_called()
+
+    def test_existing_private_certbot_is_reused_after_early_failure(self):
+        executable = installer.path('/opt/argus-certbot/bin/certbot')
+        installer.mkdir(executable.parent)
+        executable.write_text('fixture launcher')
+        args = installer.parser().parse_args([])
+        with patch.object(installer.shutil, 'which', return_value=None), \
+                patch.object(installer, 'run', return_value=subprocess.CompletedProcess([], 0, b'certbot 5.3.0\n')) as run:
+            self.assertEqual(installer.certbot_executable(args), str(executable))
+            run.assert_called_once_with([str(executable), '--version'])
+
+    def test_setup_code_is_visible_only_in_an_interactive_terminal(self):
+        secret_file = installer.path('/etc/argus-c2/setup/bootstrap.token')
+        installer.mkdir(secret_file.parent, 0o700)
+        installer.write_new(secret_file, 'test-only-bootstrap-secret\n')
+        for input_tty, output_tty in [(True, True), (True, False), (False, True), (False, False)]:
+            output = io.StringIO()
+            with self.subTest(stdin=input_tty, stdout=output_tty), \
+                    patch.object(installer.sys.stdin, 'isatty', return_value=input_tty), \
+                    patch.object(output, 'isatty', return_value=output_tty), contextlib.redirect_stdout(output):
+                installer.print_setup_instructions()
+            self.assertEqual('test-only-bootstrap-secret' in output.getvalue(), input_tty and output_tty)
+            self.assertIn(f'sudo cat {secret_file}', output.getvalue())
+            self.assertIn('/setup', output.getvalue())
+            self.assertIn('Auth0/OIDC', output.getvalue())
+
+    def test_failure_explains_missing_bootstrap_without_disclosing_secrets(self):
+        with contextlib.redirect_stderr(io.StringIO()) as output:
+            installer.report_failure(installer.InstallError('test failure'))
+        self.assertIn('no Console bootstrap code was created', output.getvalue())
+        self.assertIn('/var/lib/argus-certbot/logs', output.getvalue())
+        installer.mkdir(installer.path('/etc/argus-c2/server'))
+        secret_file = installer.path('/etc/argus-c2/setup/bootstrap.token')
+        installer.mkdir(secret_file.parent, 0o700)
+        installer.write_new(secret_file, 'test-only-bootstrap-secret\n')
+        with contextlib.redirect_stderr(io.StringIO()) as output:
+            installer.report_failure(OSError('private diagnostic'))
+        self.assertIn('Existing Server data was preserved', output.getvalue())
+        self.assertIn(str(secret_file), output.getvalue())
+        self.assertNotIn('test-only-bootstrap-secret', output.getvalue())
+        self.assertNotIn('private diagnostic', output.getvalue())
+
     def test_local_ca_certificate_matches_host_and_mismatched_key_is_rejected(self):
         args = options('--host', '192.168.9.40', '--tls', 'local-ca')
         directory, certbot = installer.certificates(args, self.root)

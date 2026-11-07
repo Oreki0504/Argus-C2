@@ -39,6 +39,16 @@ ARGUS 请求 `openid profile`。GitHub／Google 身份通过 Auth0 验证后，A
 
 ## 启动 ARGUS 并绑定首位管理员
 
+如果使用[一键 Server 安装器](server-installation.zh-CN.md)，服务已启动。打开安装完成时打印的 `https://HOST:9443/setup`，输入终端显示的一次性初始化码（15 分钟有效），也可在服务器本机读取：
+
+```sh
+sudo cat /etc/argus-c2/setup/bootstrap.token
+```
+
+初始化码只用于证明服务器管理权限；接下来仍需配置 Auth0 并绑定 GitHub/Google 身份。它不是 CLI 的 `admin.token`，也不是 TLS 私钥。若安装在证书准备阶段中止，初始化码尚未生成，应先完成安装。过期后的重新签发命令见[Server 安装说明](server-installation.zh-CN.md#安装完成后的配置)。
+
+以下是从源码手动启动的步骤：
+
 按 [Console 配置](console.md) 构建 UI 与 Go Binary；已有 Schema 102 先停服并执行有备份的显式升级。
 
 ```sh

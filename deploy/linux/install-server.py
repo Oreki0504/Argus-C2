@@ -32,6 +32,7 @@ from urllib.parse import urlsplit
 ROOT = Path('/')
 SERVICE = 'argus-c2-server.service'
 CERT_NAME = 'argus-console'
+ACME_DIRECTORIES = ('/etc/argus-c2/acme', '/var/lib/argus-certbot', '/var/lib/argus-certbot/logs')
 MAX_ARCHIVE = 128 * 1024 * 1024
 FILES = {'server': 64 << 20, 'argus': 32 << 20, 'agent-linux-amd64': 32 << 20,
          'agent-linux-arm64': 32 << 20, 'argus-c2-server.service': 16384, 'manifest.json': 16384}
@@ -386,6 +387,11 @@ def preflight(args):
         trusted_parents(dest.parent)
         if os.path.lexists(dest):
             raise InstallError(f'Existing installation preserved: {dest}')
+    if args.tls == 'letsencrypt':
+        # Validate persistent ACME paths before downloading bundles or installing
+        # tools. Existing account/certificate state from an early failure is reusable.
+        for directory in ACME_DIRECTORIES:
+            trusted_parents(path(directory))
     for lookup in (pwd.getpwnam, grp.getgrnam):
         try:
             lookup('argus-server')
@@ -432,7 +438,7 @@ def certbot_executable(args):
 def acme_arguments(args, certbot, renew=False):
     command = [certbot, 'renew' if renew else 'certonly', '--non-interactive', '--server', ACME,
                '--config-dir', str(path('/etc/argus-c2/acme')), '--work-dir', str(path('/var/lib/argus-certbot')),
-               '--logs-dir', str(path('/var/log/argus-certbot')), '--cert-name', CERT_NAME, '--no-directory-hooks']
+               '--logs-dir', str(path(ACME_DIRECTORIES[2])), '--cert-name', CERT_NAME, '--no-directory-hooks']
     if renew:
         return command + ['--deploy-hook', f'/usr/bin/python3 {path("/usr/local/libexec/argus-c2/install-server.py")} --deploy-certificate']
     command += ['--standalone', '--preferred-challenges', 'http', '--agree-tos', '--email', args.email]
@@ -445,9 +451,12 @@ def certificates(args, stage):
     cert, key = certdir / 'browser.pem', certdir / 'browser-key.pem'
     certbot = None
     if args.tls == 'letsencrypt':
-        certbot = certbot_executable(args)
-        for directory in ('/etc/argus-c2/acme', '/var/lib/argus-certbot', '/var/log/argus-certbot'):
+        # /var/log may legitimately be group-writable (e.g. root:syslog 0775).
+        # Keep private ACME diagnostics under our own protected state directory,
+        # without weakening path checks or changing the system log permissions.
+        for directory in ACME_DIRECTORIES:
             mkdir(path(directory), 0o700)
+        certbot = certbot_executable(args)
         print('Requesting a Let’s Encrypt certificate / 正在申请证书…')
         run(acme_arguments(args, certbot), timeout=300)
         lineage = path('/etc/argus-c2/acme/live/' + CERT_NAME)
@@ -561,11 +570,39 @@ def install(args, stage, bundle, certdir, certbot):
         run(['systemctl', 'enable', '--now', 'argus-console-renew.timer'])
         run(['systemctl', 'is-active', '--quiet', 'argus-console-renew.timer'])
     print(f'ARGUS Server installed / 安装完成\nConsole: {origin(args.host, args.console_port)}/setup\nFleet: {origin(args.host, args.fleet_port)}')
-    print(f'Bootstrap secret (15 minutes; read locally): {path("/etc/argus-c2/setup/bootstrap.token")}')
-    print('Configure Auth0/OIDC in /setup and bind the first administrator. Agent installers are already published.')
+    print_setup_instructions()
     if args.tls == 'local-ca':
         print(f'Install this Console CA into browser and Agent-host trust stores: {console / "ca.pem"}')
         print('Local certificates are not publicly trusted and are not ACME-renewed; replace the leaf before 90 days.')
+
+
+def print_setup_instructions():
+    secret_file = path('/etc/argus-c2/setup/bootstrap.token')
+    print('Console 首次认证 / first administrator setup:')
+    print('1. 打开上方 /setup 地址，输入一次性初始化码（有效期 15 分钟）。 / Enter the bootstrap code at /setup (valid for 15 minutes).')
+    print(f'   在服务器本机读取 / Read locally: sudo cat {secret_file}')
+    # The operator asked to see the first-login code. Show it only during an
+    # interactive terminal installation; redirected output must not carry secrets.
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        secret = read_bounded(secret_file, 256).decode('ascii').strip()
+        print(f'   一次性初始化码 / Bootstrap code: {secret}')
+    print('2. 配置 Auth0/OIDC，然后通过 GitHub/Google 登录并绑定首位管理员。 / Configure Auth0/OIDC, then sign in to bind the first Admin.')
+    print('   初始化码只用于 /setup；它不是日常登录密码，也不是 CLI admin.token。 / The bootstrap code is for setup only, not a login password or CLI token.')
+    print('   尚无 Auth0/OIDC 应用时，请先准备；初始化码过期可以在本机重新签发。 / Prepare your identity provider first; expired codes can be reissued locally.')
+    print('Agent installers are already published / Agent 安装程序已就绪。')
+
+
+def report_failure(error):
+    # Do not print raw HTTP/ACME exceptions, which can contain request URLs.
+    print(str(error) if isinstance(error, InstallError) else f'Installation failed ({type(error).__name__}).', file=sys.stderr)
+    if not path('/etc/argus-c2/server').exists() and not path('/var/lib/argus-c2-server').exists():
+        print('Server 尚未初始化，本次没有生成 Console 初始化码。修复原因后可重试；已有 Certbot 环境及 ACME 状态会保留。 / Server initialization has not completed; no Console bootstrap code was created. Fix the cause and retry; Certbot/ACME state is preserved.', file=sys.stderr)
+    else:
+        print('Existing Server data was preserved / 已保留 Server 数据。检查服务 / Inspect: sudo journalctl -u argus-c2-server -n 50 --no-pager', file=sys.stderr)
+        secret_file = path('/etc/argus-c2/setup/bootstrap.token')
+        if secret_file.is_file():
+            print(f'初始化码文件 / Bootstrap file (may have expired): {secret_file}', file=sys.stderr)
+    print(f'ACME logs / 证书申请日志: {path(ACME_DIRECTORIES[2])}', file=sys.stderr)
 
 
 def replace_file(dest, data, mode):
@@ -643,7 +680,5 @@ if __name__ == '__main__':
     try:
         main()
     except (InstallError, OSError, ValueError, EOFError, KeyboardInterrupt, tarfile.TarError, subprocess.SubprocessError) as error:
-        # Do not print raw HTTP/ACME exceptions, which can contain request URLs.
-        print(str(error) if isinstance(error, InstallError) else f'Installation failed ({type(error).__name__}).', file=sys.stderr)
-        print('Existing data was not reset. If files were installed, inspect journalctl -u argus-c2-server before manual recovery. ACME logs: /var/log/argus-certbot', file=sys.stderr)
+        report_failure(error)
         sys.exit(1)

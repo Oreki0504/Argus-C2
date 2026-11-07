@@ -40,6 +40,9 @@ jobs:
         working-directory: .
         env:
           ARGUS_SERVER_TEST_BUNDLE: ${{ runner.temp }}/argus-server-release/argus-server-linux-amd64.tar.gz
+      - name: Verify native Server installation and bootstrap on disposable VM
+        run: sudo env GITHUB_ACTIONS=true python3 test/deployment/server_install_smoke.py --disposable-ci --bundle "$RUNNER_TEMP/argus-server-release/argus-server-linux-amd64.tar.gz"
+        working-directory: .
       - run: npm audit --audit-level=moderate
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e

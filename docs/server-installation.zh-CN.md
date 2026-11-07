@@ -12,7 +12,7 @@
 cd web
 npm ci --ignore-scripts
 cd ..
-sh deploy/linux/build-server-bundles.sh /tmp/argus-server-release v0.1.0-preview.2
+sh deploy/linux/build-server-bundles.sh /tmp/argus-server-release v0.1.0-preview.3
 ```
 
 生成：
@@ -30,23 +30,23 @@ SHA256SUMS
 
 ## 一条命令启动交互安装
 
-预览版本使用固定 tag 的下载链接。以下是 [v0.1.0-preview.2](https://github.com/Oreki0504/Argus-C2/releases/tag/v0.1.0-preview.2) 发布后的安装入口：在新服务器粘贴命令，即可下载安装脚本、启动交互并自动取得匹配的安装包。下载链接须等待对应 Release 工作流成功完成；仅有 commit 或 tag 不会产生安装包。
+预览版本使用固定 tag 的下载链接。以下是 [v0.1.0-preview.3](https://github.com/Oreki0504/Argus-C2/releases/tag/v0.1.0-preview.3) 发布后的安装入口：在新服务器粘贴命令，即可下载安装脚本、启动交互并自动取得匹配的安装包。下载链接须等待对应 Release 工作流成功完成；仅有 commit 或 tag 不会产生安装包。
 
 curl：
 
 ```sh
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.2/install-server.py -o "$f" && sudo python3 "$f" )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.3/install-server.py -o "$f" && sudo python3 "$f" )
 ```
 
 GNU wget：
 
 ```sh
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; wget --https-only --max-redirect=5 -O "$f" https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.2/install-server.py && sudo python3 "$f" )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; wget --https-only --max-redirect=5 -O "$f" https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.3/install-server.py && sudo python3 "$f" )
 ```
 
 脚本完整下载后才执行，终端标准输入保留给域名/IP 提问。脚本识别架构，从其绑定的 Release 获取 `SHA256SUMS` 和安装包，校验后才运行包内程序。用户不需要填写安装包 URL 或摘要。GitHub 的 HTTPS 资产重定向受支持，不允许降级到 HTTP 或带凭据跳转。
 
-预发布版本不会成为 `latest`。发布首个稳定版本后，可将链接中的 `download/v0.1.0-preview.2` 换成 `latest/download`，取得最新稳定版；测试预览版时应保留固定版本链接。每个 Release 的说明会给出该版本的完整命令。`v0.1.0-preview.1` 在发布检查中失败，保留 tag 供追溯，没有公开安装包。
+预发布版本不会成为 `latest`。发布首个稳定版本后，可将链接中的 `download/v0.1.0-preview.3` 换成 `latest/download`，取得最新稳定版；测试预览版时应保留固定版本链接。每个 Release 的说明会给出该版本的完整命令。`v0.1.0-preview.1` 在发布检查中失败，保留 tag 供追溯，没有公开安装包。
 
 已有本地安装目录时，也可以继续执行：
 
@@ -105,7 +105,7 @@ sudo python3 install-server.py \
 
 以上下载地址是部署示例。自定义单个包的 `--bundle-url` 必须显式传入可信 SHA-256，支持最多五次 HTTPS 重定向；本地包使用 `--bundle /path/archive.tar.gz` 并默认读取同目录 `SHA256SUMS`。完整下载及校验通过后才会执行包内程序，解包不接受目录穿越、链接、重复或意外文件。
 
-自托管整个发布目录时，可以改用 `--release-base https://downloads.example.com/argus/v0.1.0`，自动读取同目录清单并选择架构；或用 `--release v0.1.0-preview.2` 选择 GitHub 上已发布的版本。没有本地包、没有绑定版本的源码安装器会查询 GitHub 最新稳定 Release；没有 Release 时明确报错，不会回退到源码构建或未经校验的二进制。
+自托管整个发布目录时，可以改用 `--release-base https://downloads.example.com/argus/v0.1.0`，自动读取同目录清单并选择架构；或用 `--release v0.1.0-preview.3` 选择 GitHub 上已发布的版本。没有本地包、没有绑定版本的源码安装器会查询 GitHub 最新稳定 Release；没有 Release 时明确报错，不会回退到源码构建或未经校验的二进制。
 
 ## 发布 GitHub 下载入口
 
@@ -121,9 +121,17 @@ sudo python3 install-server.py \
 - 创建 `argus-server` 普通用户，安装加固的 systemd 服务并启动。
 - 默认监听 `0.0.0.0:8443`（Fleet）和 `0.0.0.0:9443`（Console），IPv6 地址使用 `[::]`；端口可用 `--fleet-port` / `--console-port` 调整。
 - 自动发布 `/usr/local/share/argus-c2/agents` 中的两种架构 Agent，并配置实际 Fleet 地址。
-- 生成 15 分钟有效的首位管理员初始化凭据，保存至 `/etc/argus-c2/setup/bootstrap.token`，只打印路径、不打印内容。
+- 生成 15 分钟有效的一次性初始化码，保存至 root 专用的 `/etc/argus-c2/setup/bootstrap.token`（0600）。交互终端会显示该码；重定向输出时只打印读取命令，不把凭据写入日志。
 
-安装后打开打印出的 `https://HOST:9443/setup`，在服务器本地读取初始化凭据，填写 Auth0/OIDC 设置并绑定首位管理员。**自动 HTTPS 不会替你创建 Auth0 应用**。IP 证书能解决 TLS 信任，但 OIDC 提供方是否接受 IP 回调仍需在其应用设置中确认；正式社交登录建议使用域名。
+安装成功后，打开打印出的 `https://HOST:9443/setup`，输入终端显示的一次性初始化码，也可在服务器本机读取：
+
+```sh
+sudo cat /etc/argus-c2/setup/bootstrap.token
+```
+
+然后填写 Auth0/OIDC 设置，通过 GitHub/Google 登录并绑定首位管理员。**初始化码只证明你有这台服务器的本地管理权限，不是日常登录密码，也不是 CLI 的 `admin.token`；TLS 私钥不能用来登录 Console。**
+
+**自动 HTTPS 不会替你创建 Auth0 应用**。尚未准备 Auth0 时，可先完成应用配置，再重新签发初始化码；不能仅凭初始化码进入日常管理页。IP 证书能解决 TLS 信任，但 OIDC 提供方是否接受 IP 回调仍需在其应用设置中确认；正式社交登录建议使用域名。
 
 初始化凭据过期后，用新文件重新签发：
 
@@ -131,7 +139,10 @@ sudo python3 install-server.py \
 sudo /usr/local/libexec/argus-c2/server console-bootstrap issue \
   -config /etc/argus-c2/server-local.json \
   -out /etc/argus-c2/setup/bootstrap-new.token
+sudo cat /etc/argus-c2/setup/bootstrap-new.token
 ```
+
+`-out` 必须指定尚不存在的新文件；再次签发时换一个文件名。旧码和此前的初始化会话会失效。无需重装或重启服务。
 
 服务使用 `/etc/argus-c2/server.json` 和 systemd `LoadCredential`；`server-local.json` 是 root-only 的运维配置，引用源凭据与同一个状态目录，不应另开第二个 Server 进程。CLI 管理员 Token 位于 `/etc/argus-c2/server/admin.token`，不是 Console 登录凭据。
 
@@ -139,7 +150,7 @@ sudo /usr/local/libexec/argus-c2/server console-bootstrap issue \
 
 公开证书使用 Certbot **5.3 或更新版本**。安装器优先使用已有的兼容 Certbot，也可通过 `--certbot /path/to/certbot` 指定。若尚未安装，在 Debian/Ubuntu 上自动安装 `python3-venv`，并在 `/opt/argus-certbot` 中从 PyPI 安装 `certbot>=5.3,<6`；不会替换系统 Python。其他发行版应先按其官方方法安装新版 Certbot。管理员仍需维护 Certbot 工具自身的安全更新。
 
-Argus 使用独立的 `/etc/argus-c2/acme`、`/var/lib/argus-certbot` 和 `/var/log/argus-certbot`，不会接管已有 Certbot 证书。`argus-console-renew.timer` 每 6 小时运行一次，附加不超过 5 分钟的随机延迟；Certbot 根据到期时间和 ACME Renewal Information 决定是否续签，不会每次强制签发。
+Argus 使用独立的 `/etc/argus-c2/acme`、`/var/lib/argus-certbot` 和 `/var/lib/argus-certbot/logs`（均为 root 私有目录），不会接管已有 Certbot 证书。日志不依赖 `/var/log` 的组权限，也不修改系统日志目录权限。`argus-console-renew.timer` 每 6 小时运行一次，附加不超过 5 分钟的随机延迟；Certbot 根据到期时间和 ACME Renewal Information 决定是否续签，不会每次强制签发。
 
 成功续期后，部署钩子验证主机名、有效期和密钥匹配，再更新副本并重启 Server，使 systemd 重新加载私钥。重启失败时恢复之前的证书，并尝试恢复服务。每次定时任务结束还会检查证书副本是否同步，避免“签发成功但部署失败”一直拖到下一轮签发才重试。证书未变化时不重启。
 
@@ -159,4 +170,6 @@ sudo journalctl -u argus-c2-server.service -n 50 --no-pager
 
 缺包、校验失败、端口占用和输入错误会在应用安装前中止。自动申请证书可能已经创建独立 Certbot 环境、ACME 账户或证书；这些内容保留供诊断及重试，不应为重试随意删除 ACME 账户。若已写入 Server 状态后启动失败，保留该状态并检查日志及配置，按[手动部署](deployment.md)完成恢复；不会自动清理或重新初始化。
 
-仓库测试使用临时目录模拟 systemd 和账户管理，真实运行包内 Go 程序验证初始化、配置及 bootstrap。ACME 请求由模拟命令验证，不会在测试中申请公开证书或消耗 Let’s Encrypt 配额。真实域名/IP 的外网验证和目标系统服务启动仍需在实际部署时验收。
+旧版 `v0.1.0-preview.2` 在 `/var/log` 允许日志组写入的系统上可能报 `Installation parent must be root-owned and not writable by others: /var/log`。这是安装器路径选择的问题，不应通过 `chmod /var/log` 修复。此时流程尚未执行 Server 初始化，因而还没有 Console 初始化码。改用本页新版命令重试即可复用已安装的 Certbot 和 ACME 准备目录；无需删除这些目录或修改系统日志权限。
+
+隔离测试覆盖可组写的系统日志目录、早期失败重试、真实包初始化和终端凭据显示。CI 还会在一次性 VM 上执行完整安装器、启动真实 systemd 服务，并通过受信任的 HTTPS 验证 `/setup`、初始化码及重新签发流程。ACME 请求由模拟命令验证，不会在测试中申请公开证书或消耗 Let’s Encrypt 配额；真实域名/IP 的外网验证仍需在实际部署时验收。
