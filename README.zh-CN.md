@@ -55,7 +55,7 @@ done
 
 按[中文快速开始](docs/quickstart.zh-CN.md)完成单节点闭环；准备测试主机时使用[Linux 部署指南](docs/deployment.md)。Agent 的注册、运行和续期要求 Linux 非 root 用户；Windows 构建与部分测试不代表支持 Windows Agent 部署。
 
-新 Linux Server 可通过 curl／wget 链接启动[一键安装器](docs/server-installation.zh-CN.md)：自动下载匹配版本与架构，交互选择域名或 IP，配置 HTTPS、证书续期、初始状态和 Agent 下载服务。发布包内置前端及两种架构的 Agent，目标机无需 Go 或 Node。公网下载链接需维护者运行手动 Release 发布流程后生效。
+新 Linux Server 可通过 curl／wget 链接启动[一键安装器](docs/server-installation.zh-CN.md)：自动下载匹配版本与架构，交互选择域名或 IP，配置 HTTPS、证书续期、初始状态和 Agent 下载服务。发布包内置前端及两种架构的 Agent，目标机无需 Go 或 Node。公网下载链接在维护者推送版本 tag 或手动触发 Release 工作流、发布成功后生效。
 
 ## 文档导航
 

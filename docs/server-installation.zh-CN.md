@@ -24,7 +24,7 @@ argus-server-linux-arm64.tar.gz
 SHA256SUMS
 ```
 
-构建需要项目规定的 Go 和 Node 版本。第二个参数是计划发布的版本 tag，构建器将它写入安装脚本，保证脚本与安装包使用同一个版本；省略 tag 时保留本地目录安装及最新稳定 Release 查询能力。可以将目录放在自己的 HTTPS 下载站、GitHub Release，或通过可信渠道复制到目标主机。普通 CI 会生成 `server-bundles` artifact；发布流程需手动运行，见下文。目标服务器首次安装不依赖一个已经运行的 Argus Server。
+构建需要项目规定的 Go 和 Node 版本。第二个参数是计划发布的版本 tag，构建器将它写入安装脚本，保证脚本与安装包使用同一个版本；省略 tag 时保留本地目录安装及最新稳定 Release 查询能力。可以将目录放在自己的 HTTPS 下载站、GitHub Release，或通过可信渠道复制到目标主机。普通 CI 会生成 `server-bundles` artifact；发布由明确推送版本 tag 或手动运行工作流触发，见下文。目标服务器首次安装不依赖一个已经运行的 Argus Server。
 
 安装脚本与 SHA256SUMS 应从可信来源一起取得。SHA-256 检测损坏和替换，不替代发布者身份认证。仅传输目标架构的 Server 压缩包即可，其中已附带两种架构的 Agent。
 
@@ -109,9 +109,9 @@ sudo python3 install-server.py \
 
 ## 发布 GitHub 下载入口
 
-维护者先提交并推送代码及所选版本 tag，再从 GitHub Actions 手动运行 **Publish Server release**，输入已经存在的 tag。流程会校验 tag、构建两种架构安装包、运行 Go 和隔离安装测试，再将安装器、SHA256SUMS、amd64 包和 arm64 包上传到草稿 Release，全部上传成功后才公开。预发布 tag（含 `-`）标记为 prerelease，正式 tag 更新 latest；已有 Release 不覆盖，上传失败留下的草稿需维护者检查。
+维护者提交代码后，明确创建并推送 `vX.Y.Z` 或 `vX.Y.Z-preview.N` 版本 tag，即触发 **Publish Server release**；也可以在 GitHub Actions 手动运行并输入已经存在的 tag。SSH 仓库写权限即可推送 tag，实际创建 Release 使用工作流的 `GITHUB_TOKEN`，无需本地个人 API Token。流程会校验 tag、构建两种架构安装包、运行 Go 和隔离安装测试，再将安装器、SHA256SUMS、amd64 包和 arm64 包上传到草稿 Release，全部上传成功后才公开。预发布 tag（含 `-`）标记为 prerelease，正式 tag 更新 latest；已有 Release 不覆盖，上传失败留下的草稿需维护者检查。
 
-该流程需要仓库写权限。普通 commit/push 和前端 CI 不会自动发布版本，也不会擅自升级现有下载入口。下载链接必须等这一发布流程成功完成后才能交给用户执行。
+该流程需要仓库写权限。普通分支 commit/push 和前端 CI 不会自动发布版本，也不会擅自升级现有下载入口；推送版本 tag 表示明确发起发布。下载链接必须等这一发布流程成功完成后才能交给用户执行。
 
 ## 安装完成后的配置
 
