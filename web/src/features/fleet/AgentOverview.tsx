@@ -14,16 +14,21 @@ const heartbeatFilters = [
   { value: 'Online', label: 'Online', tone: 'online' },
   { value: 'Stale', label: 'Stale', tone: 'stale' },
   { value: 'Offline', label: 'Offline', tone: 'offline' },
-  { value: 'Never seen', label: 'Never seen', tone: 'unseen' },
 ] as const
 
 export function AgentOverview() {
   const { relativeTime, timestampLabel } = useFormat()
-  const { t } = usePreferences()
+  const { t, language } = usePreferences()
   const identity = useViewer()
   const pageSize = useCardPageSize()
   const summary = useSummary()
-  const now = useNow()
+  const now = useNow(1_000)
+  const localTime = new Intl.DateTimeFormat(language, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  })
   const [params, setParams] = useSearchParams()
   const search = params.get('q') ?? ''
   const status =
@@ -76,6 +81,10 @@ export function AgentOverview() {
         <div>
           <h1>{t('Fleet overview')}</h1>
           <p className="overview-updated" title={timestampLabel(data.generated_at)}>
+            <time dateTime={new Date(now * 1000).toISOString()}>
+              {localTime.format(now * 1000)}
+            </time>
+            {' · '}
             {t('Updated {time} · every 30s', { time: relativeTime(data.generated_at, now) })}
           </p>
         </div>
@@ -132,6 +141,7 @@ export function AgentOverview() {
             return (
               <article
                 className={`agent-card ${stale ? 'agent-stale' : ''}`}
+                data-status={heartbeat(node.last_seen_at, now)}
                 key={node.public_id}
                 aria-label={node.display_name}
                 title={`${t('Resources')}: ${timestampLabel(node.resources.as_of)} · ${t('Traffic')}: ${timestampLabel(node.traffic.as_of)}`}

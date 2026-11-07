@@ -49,7 +49,7 @@ export function fleetFixture(count = 6, now = Math.floor(Date.now() / 1000)): Su
     return {
       public_id: `srv-${String(index + 1).padStart(4, '0')}`,
       display_name: count <= 6 ? names[i] : `Server · ${String(index + 1).padStart(3, '0')}`,
-      last_seen_at: i === 5 ? 0 : now - [12, 28, 41, 180, 740, 0][i],
+      last_seen_at: now - [12, 28, 41, 180, 740, 3600][i],
       system: {
         os: available ? ['Ubuntu 24.04', 'Debian 13', 'Ubuntu 24.04'][i % 3] : null,
         architecture: available ? 'x86_64' : null,

@@ -8,6 +8,10 @@
     --warning: #805d22;
     --warning-bg: #fff8eb;
     --preview-height: 0px;
+    --state-all: #2563eb;
+    --state-online: #258366;
+    --state-stale: #946215;
+    --state-offline: #c23c4e;
   }
   :root:has(.preview-toolbar) {
     --preview-height: 47px;
@@ -29,6 +33,10 @@
     --warning: #edc889;
     --warning-bg: #382f21;
     --shadow: none;
+    --state-all: #8bb4ff;
+    --state-online: #8dd8b7;
+    --state-stale: #edc889;
+    --state-offline: #f38b95;
   }
   input,
   select {
@@ -91,8 +99,8 @@
     color: var(--text);
   }
   .header-navigation a[aria-current='page'] {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
+    color: var(--text);
+    border-bottom-color: var(--text);
   }
   .appearance-controls {
     display: flex;
@@ -173,6 +181,7 @@
   .overview-updated {
     color: var(--muted);
     font-size: 11px;
+    font-variant-numeric: tabular-nums;
   }
   .agent-toolbar .search-input {
     flex: 0 0 clamp(180px, 20vw, 260px);
@@ -188,7 +197,7 @@
   }
   .heartbeat-filters {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10px;
     flex: 1;
     min-width: 0;
@@ -208,15 +217,12 @@
     color: var(--muted);
     text-align: left;
     box-shadow: var(--shadow);
+    transition: border-color 0.15s;
   }
-  .heartbeat-filter:hover {
-    border-color: var(--accent);
-  }
+  .heartbeat-filter:hover,
+  .heartbeat-filter:focus-visible,
   .heartbeat-filter[aria-pressed='true'] {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    box-shadow: inset 0 0 0 1px var(--accent);
-    color: var(--text);
+    border-color: var(--state-color);
   }
   .heartbeat-filter-label {
     display: flex;
@@ -226,25 +232,36 @@
   }
   .heartbeat-filter strong {
     color: var(--text);
-    font-size: 23px;
+    font-size: 20px;
     line-height: 1.2;
     font-weight: 500;
     font-variant-numeric: tabular-nums;
   }
-  .filter-all .status-dot {
-    color: var(--accent);
+  .filter-all {
+    --state-color: var(--state-all);
   }
-  .filter-online .status-dot {
-    color: #328772;
+  .filter-all,
+  .filter-all strong {
+    color: var(--state-all);
   }
-  .filter-stale .status-dot {
-    color: #b18739;
+  .filter-online,
+  .agent-card[data-status='Online'] {
+    --state-color: var(--state-online);
   }
-  .filter-offline .status-dot {
-    color: #a07a80;
+  .filter-stale,
+  .agent-card[data-status='Stale'] {
+    --state-color: var(--state-stale);
   }
-  .filter-unseen .status-dot {
-    color: var(--muted);
+  .filter-offline,
+  .agent-card[data-status='Offline'] {
+    --state-color: var(--state-offline);
+  }
+  .heartbeat-filter .status-dot {
+    color: var(--state-color);
+  }
+  .agent-card:hover,
+  .agent-card:has(:focus-visible) {
+    border-color: var(--state-color);
   }
   .agent-grid {
     grid-template-columns: 1fr;
@@ -619,6 +636,10 @@
     color: var(--warning);
     background: var(--warning-bg);
   }
+  .status-offline,
+  :root[data-theme='dark'] .status-offline {
+    color: var(--state-offline);
+  }
   :root[data-theme='dark'] .notice {
     background: var(--subtle);
     color: var(--text);
@@ -741,7 +762,7 @@
       display: none;
     }
     .heartbeat-filter strong {
-      font-size: 20px;
+      font-size: 18px;
     }
     .viewer-header-inner {
       padding: 0 16px;

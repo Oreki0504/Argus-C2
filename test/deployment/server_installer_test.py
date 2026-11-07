@@ -11,6 +11,8 @@ import io
 import json
 import os
 from pathlib import Path
+import pwd
+import sqlite3
 import ssl
 import stat
 import subprocess
@@ -103,6 +105,138 @@ class InstallerTests(unittest.TestCase):
         with patch('builtins.input', side_effect=['2', '192.168.9.40', 'n']), contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaises(installer.InstallError):
                 installer.configure(installer.parser().parse_args([]), True)
+
+    def test_language_is_selected_before_installation_prompts(self):
+        for choice, expected in [('1', '域名'), ('2', 'Hostname')]:
+            answers = iter([choice, '1', 'argus.example.com', 'owner@example.com', 'y'])
+            transcript = io.StringIO()
+            def answer(prompt):
+                transcript.write(prompt + '\n')
+                return next(answers)
+            with patch.object(installer, 'LANGUAGE', 'en'), patch('builtins.input', side_effect=answer), contextlib.redirect_stdout(transcript):
+                args = installer.parser().parse_args([])
+                installer.choose_language(args, True)
+                installer.configure(args, True)
+            self.assertTrue(transcript.getvalue().startswith('请选择语言 / Choose a language:'))
+            self.assertIn(expected, transcript.getvalue())
+        with patch.object(installer, 'LANGUAGE', 'en'), patch('builtins.input') as read:
+            installer.choose_language(installer.parser().parse_args(['--language', 'zh-CN']), True)
+            self.assertEqual(installer.text('hello', '你好'), '你好')
+            read.assert_not_called()
+
+    def update_fixture(self, component='agent', active=True):
+        state = installer.path('/var/lib/argus-c2-' + component)
+        installer.mkdir(state, 0o700)
+        database = state / ('argus.db' if component == 'server' else 'probe.db')
+        with contextlib.closing(sqlite3.connect(database)) as db:
+            db.executescript('CREATE TABLE preserved(value TEXT); INSERT INTO preserved VALUES("identity"); '
+                             f'PRAGMA application_id={0x41524753 if component == "server" else 0x41524741}; '
+                             f'PRAGMA user_version={103 if component == "server" else 101};')
+        database.chmod(0o600)
+        config = installer.path('/etc/argus-c2/' + component + '.json')
+        installer.mkdir(config.parent)
+        settings = {'state_dir': str(state)}
+        installer.write_new(config, json.dumps(settings))
+        binary = installer.path('/usr/local/libexec/argus-c2/' + component)
+        installer.mkdir(binary.parent)
+        installer.write_new(binary, b'old-program', 0o755)
+        bundle = self.root / 'update-bundle'
+        bundle.mkdir()
+        candidate = 'server' if component == 'server' else 'agent-linux-amd64'
+        (bundle / candidate).write_bytes(b'new-program')
+        account = pwd.getpwuid(os.geteuid())
+        plan = {'component': component, 'state': state, 'config': settings, 'config_file': config,
+                'unit': f'argus-c2-{component}.service', 'account': account,
+                'files': [(candidate, binary, 0o755)], 'active': active}
+        args = installer.parser().parse_args(['--update', component, '--release', 'v0.1.0-preview.4'])
+        args.sha256 = '0' * 64
+        calls = []
+        def system(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 3 if command[1] == 'is-active' else 0, b'', b'')
+        return args, plan, bundle, system, calls
+
+    def test_update_preserves_identity_and_has_private_durable_snapshot(self):
+        args, plan, bundle, system, calls = self.update_fixture()
+        before = (plan['state'] / 'probe.db').read_bytes()
+        config = plan['config_file'].read_bytes()
+        with patch.object(installer, 'run', side_effect=system), patch.object(installer, 'validate_update') as validate, \
+                patch.object(installer, 'verify_updated_service') as verify, contextlib.redirect_stdout(io.StringIO()):
+            installer.update_component(args, plan, bundle)
+        validate.assert_called_once()
+        verify.assert_called_once_with(plan)
+        self.assertEqual(plan['files'][0][1].read_bytes(), b'new-program')
+        self.assertEqual((plan['state'] / 'probe.db').read_bytes(), before)
+        self.assertEqual(plan['config_file'].read_bytes(), config)
+        backup = next(installer.path('/var/lib/argus-c2-updates').iterdir())
+        self.assertEqual((backup / 'state/probe.db').read_bytes(), before)
+        self.assertEqual((backup / 'programs/0').read_bytes(), b'old-program')
+        self.assertEqual(json.loads((backup / 'update.json').read_text())['phase'], 'complete')
+        for target in backup.rglob('*'):
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode) & 0o077, 0)
+        self.assertIn(['systemctl', 'start', plan['unit']], calls)
+
+    def test_failed_update_restores_old_program_without_rewinding_database(self):
+        args, plan, bundle, system, calls = self.update_fixture()
+        def fail_health(_plan):
+            with contextlib.closing(sqlite3.connect(plan['state'] / 'probe.db')) as db:
+                db.execute('INSERT INTO preserved VALUES("newly committed result")')
+                db.commit()
+            raise installer.InstallError('simulated health failure')
+        with patch.object(installer, 'run', side_effect=system), patch.object(installer, 'validate_update'), \
+                patch.object(installer, 'verify_updated_service', side_effect=[installer.InstallError('not ready'), None]), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(installer.InstallError, 'previous programs'):
+            # Commit a new record just after replacement and before failure.
+            actual_replace = installer.replace_file
+            def replace(dest, data, mode):
+                actual_replace(dest, data, mode)
+                if dest == plan['files'][0][1] and data == b'new-program':
+                    try:
+                        fail_health(plan)
+                    except installer.InstallError:
+                        pass
+            with patch.object(installer, 'replace_file', side_effect=replace):
+                installer.update_component(args, plan, bundle)
+        self.assertEqual(plan['files'][0][1].read_bytes(), b'old-program')
+        with contextlib.closing(sqlite3.connect(plan['state'] / 'probe.db')) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM preserved').fetchone()[0], 2)
+        self.assertEqual(calls.count(['systemctl', 'start', plan['unit']]), 2)
+
+    def test_update_rejects_incompatible_candidate_before_replacing_program(self):
+        args, plan, bundle, system, calls = self.update_fixture()
+        with patch.object(installer, 'run', side_effect=system), \
+                patch.object(installer, 'validate_update', side_effect=installer.InstallError('incompatible schema')), \
+                patch.object(installer, 'verify_updated_service'), contextlib.redirect_stdout(io.StringIO()), \
+                self.assertRaisesRegex(installer.InstallError, 'previous programs'):
+            installer.update_component(args, plan, bundle)
+        self.assertEqual(plan['files'][0][1].read_bytes(), b'old-program')
+        self.assertIn(['systemctl', 'start', plan['unit']], calls)
+
+    def test_stopped_component_stays_stopped_after_update(self):
+        args, plan, bundle, system, calls = self.update_fixture(active=False)
+        with patch.object(installer, 'run', side_effect=system), patch.object(installer, 'validate_update'), \
+                patch.object(installer, 'verify_updated_service') as verify, contextlib.redirect_stdout(io.StringIO()):
+            installer.update_component(args, plan, bundle)
+        verify.assert_not_called()
+        self.assertNotIn(['systemctl', 'start', plan['unit']], calls)
+
+    def test_snapshot_rejects_symlinks_and_special_files(self):
+        source = self.root / 'source'
+        source.mkdir()
+        (source / 'escape').symlink_to(self.root / 'outside')
+        with self.assertRaises(OSError):
+            installer.copy_private_tree(source, self.root / 'snapshot1')
+        (source / 'escape').unlink()
+        os.mkfifo(source / 'pipe')
+        with self.assertRaisesRegex(installer.InstallError, 'special files'):
+            installer.copy_private_tree(source, self.root / 'snapshot2')
+
+    def test_update_snapshot_detects_wrong_component_and_corruption(self):
+        _, plan, _, _, _ = self.update_fixture()
+        self.assertEqual(installer.database_stamp(plan['state'], 'agent'), (0x41524741, 101))
+        (plan['state'] / 'probe.db').write_bytes(b'corrupt database')
+        with self.assertRaises(sqlite3.DatabaseError):
+            installer.database_stamp(plan['state'], 'agent')
 
     def test_identifiers_ports_and_certificate_options_are_validated(self):
         for host in ('0.0.0.0', '::', 'bad;cmd', 'bad%host', 'foo\nbar', '-x.example', 'https://x.example', 'a..b', '224.0.0.1'):

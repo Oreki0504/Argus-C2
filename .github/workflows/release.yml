@@ -75,7 +75,9 @@ jobs:
           {command}
           ```
 
-          The installer downloads the matching version, verifies its SHA-256, and asks for a domain or IP to configure HTTPS. Python 3.10+, OpenSSL and systemd-sysusers are required. On success, an interactive terminal displays the 15-minute bootstrap code and `/setup` URL. The code is also saved at `/etc/argus-c2/setup/bootstrap.token`; read it locally with `sudo cat /etc/argus-c2/setup/bootstrap.token`. Complete Auth0/OIDC configuration and bind your first administrator in `/setup`.
+          The installer first asks for Chinese or English, downloads the matching version, verifies its SHA-256, and asks for a domain or IP to configure HTTPS. Python 3.10+, OpenSSL and systemd-sysusers are required. On success, an interactive terminal displays the 15-minute bootstrap code and `/setup` URL. The code is also saved at `/etc/argus-c2/setup/bootstrap.token`; read it locally with `sudo cat /etc/argus-c2/setup/bootstrap.token`. Complete Auth0/OIDC configuration and bind your first administrator in `/setup`.
+
+          To update an existing standard installation, append `--update server` or `--update agent` to the `sudo python3 "$f"` invocation above. Updates preserve configuration and identity, back up state, check database compatibility on a copy, and restore previous programs if startup fails. Update Agents individually on their hosts. See the tagged installation guide for backup and recovery details.
 
           ACME logs use the private `/var/lib/argus-certbot/logs` directory, so normal group-writable system log directories are supported without changing their permissions. Early installation failures preserve the Certbot environment and ACME state for a retry.
 

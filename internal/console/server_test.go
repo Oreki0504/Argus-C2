@@ -486,6 +486,15 @@ func TestConsoleRealManagementAndPublicProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pendingAgents := decodeTest[page[managedAgent]](t, admin.request("GET", "/v1/console/admin/agents", nil, "", nil), 200)
+	if len(pendingAgents.Items) != 1 {
+		t.Fatal("enrolled Agent must remain available to administrators")
+	}
+	beforeHeartbeat := newBrowser(t, s)
+	if pending := decodeTest[publicSummary](t, beforeHeartbeat.request("GET", "/v1/console/public/summary", nil, "", nil), 200); len(pending.Nodes) != 0 {
+		t.Fatal("unseen Agent appeared in public overview")
+	}
+	decodeTest[map[string]string](t, beforeHeartbeat.request("GET", "/v1/console/public/nodes/"+pendingAgents.Items[0].PublicID+"/history?range=1h", nil, "", nil), 404)
 	if err = s.store.Heartbeat(ctx, cert, "private-10.0.0.7", protocol.AgentMetadata{ProtocolVersion: protocol.Version, AgentVersion: "test"}); err != nil {
 		t.Fatal(err)
 	}

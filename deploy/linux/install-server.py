@@ -6,9 +6,11 @@ Certbot >= 5.3 (standalone HTTP-01); the installer can provision an isolated ven
 on Debian/Ubuntu. ROOT is an internal test seam, not a deployment flag.
 """
 import argparse
+import contextlib
 import fcntl
 import grp
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
@@ -16,8 +18,10 @@ from pathlib import Path
 import platform
 import pwd
 import re
+import shlex
 import shutil
 import socket
+import sqlite3
 import ssl
 import stat
 import subprocess
@@ -40,10 +44,29 @@ ACME = 'https://acme-v02.api.letsencrypt.org/directory'
 GITHUB = 'https://github.com/Oreki0504/Argus-C2/releases'
 LATEST_RELEASE = 'https://api.github.com/repos/Oreki0504/Argus-C2/releases/latest'
 DEFAULT_RELEASE = None  # Replaced by the release builder to pin matching assets.
+LANGUAGE = 'en'
 
 
 class InstallError(Exception):
     pass
+
+
+def text(en, zh):
+    return zh if LANGUAGE == 'zh-CN' else en
+
+
+def choose_language(args, interactive):
+    global LANGUAGE
+    if args.language:
+        LANGUAGE = args.language
+    elif interactive:
+        print('请选择语言 / Choose a language:\n1. 中文\n2. English')
+        choice = input('选择 / Select [1/2, default 1]: ').strip() or '1'
+        if choice not in ('1', '2'):
+            raise InstallError('请选择 1 或 2 / Select 1 or 2.')
+        LANGUAGE = 'zh-CN' if choice == '1' else 'en'
+    else:
+        LANGUAGE = 'en'
 
 
 def path(value):
@@ -153,6 +176,8 @@ def parser():
     p.add_argument('--console-key', type=Path)
     p.add_argument('--fleet-port', type=int, default=8443)
     p.add_argument('--console-port', type=int, default=9443)
+    p.add_argument('--update', choices=('server', 'agent'), help='update an installed component while preserving configuration and identity')
+    p.add_argument('--language', choices=('zh-CN', 'en'), help='prompt language; interactive sessions ask for this first')
     p.add_argument('--deploy-certificate', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--sync-certificate', action='store_true', help=argparse.SUPPRESS)
     return p
@@ -160,11 +185,11 @@ def parser():
 
 def configure(args, interactive):
     if not args.host and interactive:
-        print('ARGUS Server 安装 / installation\n1. 域名 / domain (Let’s Encrypt)\n2. IP 地址 / IP address')
-        choice = input('选择 / select [1/2]: ').strip()
+        print(text('ARGUS Server installation\n1. Domain (Let’s Encrypt)\n2. IP address', 'ARGUS Server 安装\n1. 域名（Let’s Encrypt）\n2. IP 地址'))
+        choice = input(text('Select [1/2]: ', '选择 [1/2]: ')).strip()
         if choice not in ('1', '2'):
             raise InstallError('Select 1 or 2.')
-        args.host = input('域名 / hostname: ' if choice == '1' else 'IP: ').strip()
+        args.host = input(text('Hostname: ', '域名：') if choice == '1' else text('IP: ', 'IP 地址：')).strip()
         _, address = host_value(args.host)
         if (choice == '2') != (address is not None):
             raise InstallError('The identifier does not match the selected domain/IP mode.')
@@ -180,8 +205,8 @@ def configure(args, interactive):
     if not args.tls and args.address and not args.address.is_global:
         if not interactive:
             raise InstallError('Private IPs cannot use Let’s Encrypt. Select --tls local-ca or provide an existing certificate.')
-        print('私有 IP 无法申请公开 CA 证书。可生成独立本地 CA；浏览器和 Agent 主机需安装其信任证书。')
-        if input('生成本地 CA / create local CA? [y/N]: ').strip().lower() != 'y':
+        print(text('Private IPs cannot receive public CA certificates. A separate local CA can be generated; browsers and Agent hosts must trust it.', '私有 IP 无法申请公开 CA 证书。可生成独立本地 CA；浏览器和 Agent 主机需安装其信任证书。'))
+        if input(text('Create local CA? [y/N]: ', '生成本地 CA？[y/N]：')).strip().lower() != 'y':
             raise InstallError('Installation cancelled before changes.')
         args.tls = 'local-ca'
     args.tls = args.tls or 'letsencrypt'
@@ -195,11 +220,11 @@ def configure(args, interactive):
         if 80 in (args.console_port, args.fleet_port):
             raise InstallError('Port 80 must remain available for ACME HTTP-01 renewals.')
         if interactive:
-            print('需要公网 TCP 80 可达 / public TCP 80 must reach this host for issuance and renewal.')
-            args.email = args.email or input('证书账户邮箱 / ACME email: ').strip()
+            print(text('Public TCP 80 must reach this host for issuance and renewal.', '证书申请及续期需要公网 TCP 80 能访问此主机。'))
+            args.email = args.email or input(text('ACME account email: ', '证书账户邮箱：')).strip()
             if not args.agree_tos:
-                print('Let’s Encrypt subscriber terms: https://letsencrypt.org/repository/')
-                args.agree_tos = input('同意服务条款 / agree to terms? [y/N]: ').strip().lower() == 'y'
+                print(text('Let’s Encrypt subscriber terms: ', 'Let’s Encrypt 服务条款：') + 'https://letsencrypt.org/repository/')
+                args.agree_tos = input(text('Agree to terms? [y/N]: ', '同意服务条款？[y/N]：')).strip().lower() == 'y'
         if not args.email or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', args.email) or not args.agree_tos:
             raise InstallError('ACME requires --email and explicit --agree-tos consent.')
     return args
@@ -306,7 +331,7 @@ def obtain_bundle(args, stage, arch):
     dest = stage / 'release.tar.gz'
     digest = hashlib.sha256()
     if args.bundle_url:
-        print(f'Downloading Linux {arch} Server bundle / 正在下载对应架构安装包…')
+        print(text(f'Downloading Linux {arch} release bundle…', f'正在下载 Linux {arch} 安装包…'))
         actual = download(args.bundle_url, dest, MAX_ARCHIVE)
         if actual != args.sha256.lower():
             raise InstallError('Bundle SHA-256 mismatch; nothing was executed.')
@@ -425,7 +450,7 @@ def certbot_executable(args):
         raise InstallError('Incomplete /opt/argus-certbot preserved; repair it or supply --certbot PATH.')
     if not shutil.which('apt-get'):
         raise InstallError('Install Certbot >= 5.3 using your distribution instructions, then supply --certbot PATH.')
-    print('Installing an isolated Certbot environment / 安装独立 Certbot 环境…')
+    print(text('Installing an isolated Certbot environment…', '正在安装独立 Certbot 环境…'))
     run(['apt-get', 'update'], timeout=600)
     run(['apt-get', 'install', '-y', 'python3-venv'], timeout=600)
     run([sys.executable, '-m', 'venv', str(venv)])
@@ -457,7 +482,7 @@ def certificates(args, stage):
         for directory in ACME_DIRECTORIES:
             mkdir(path(directory), 0o700)
         certbot = certbot_executable(args)
-        print('Requesting a Let’s Encrypt certificate / 正在申请证书…')
+        print(text('Requesting a Let’s Encrypt certificate…', '正在申请 Let’s Encrypt 证书…'))
         run(acme_arguments(args, certbot), timeout=300)
         lineage = path('/etc/argus-c2/acme/live/' + CERT_NAME)
         write_new(cert, read_bounded(lineage / 'fullchain.pem', 65536))
@@ -569,40 +594,43 @@ def install(args, stage, bundle, certdir, certbot):
     if certbot:
         run(['systemctl', 'enable', '--now', 'argus-console-renew.timer'])
         run(['systemctl', 'is-active', '--quiet', 'argus-console-renew.timer'])
-    print(f'ARGUS Server installed / 安装完成\nConsole: {origin(args.host, args.console_port)}/setup\nFleet: {origin(args.host, args.fleet_port)}')
+    print(text('ARGUS Server installed', 'ARGUS Server 安装完成') + f'\nConsole: {origin(args.host, args.console_port)}/setup\nFleet: {origin(args.host, args.fleet_port)}')
     print_setup_instructions()
     if args.tls == 'local-ca':
-        print(f'Install this Console CA into browser and Agent-host trust stores: {console / "ca.pem"}')
-        print('Local certificates are not publicly trusted and are not ACME-renewed; replace the leaf before 90 days.')
+        print(text('Install this Console CA into browser and Agent-host trust stores: ', '请在浏览器和 Agent 主机的信任库中安装此 Console CA：') + str(console / 'ca.pem'))
+        print(text('Local certificates are not publicly trusted and are not ACME-renewed; replace the leaf before 90 days.', '本地证书不受公开信任，也不通过 ACME 续期；请在 90 天到期前更换叶证书。'))
 
 
 def print_setup_instructions():
     secret_file = path('/etc/argus-c2/setup/bootstrap.token')
-    print('Console 首次认证 / first administrator setup:')
-    print('1. 打开上方 /setup 地址，输入一次性初始化码（有效期 15 分钟）。 / Enter the bootstrap code at /setup (valid for 15 minutes).')
-    print(f'   在服务器本机读取 / Read locally: sudo cat {secret_file}')
+    print(text('Console first administrator setup:', 'Console 首次管理员认证：'))
+    print(text('1. Enter the bootstrap code at the /setup URL above (valid for 15 minutes).', '1. 打开上方 /setup 地址，输入一次性初始化码（有效期 15 分钟）。'))
+    print(text('   Read locally: ', '   在服务器本机读取：') + f'sudo cat {secret_file}')
     # The operator asked to see the first-login code. Show it only during an
     # interactive terminal installation; redirected output must not carry secrets.
     if sys.stdin.isatty() and sys.stdout.isatty():
         secret = read_bounded(secret_file, 256).decode('ascii').strip()
-        print(f'   一次性初始化码 / Bootstrap code: {secret}')
-    print('2. 配置 Auth0/OIDC，然后通过 GitHub/Google 登录并绑定首位管理员。 / Configure Auth0/OIDC, then sign in to bind the first Admin.')
-    print('   初始化码只用于 /setup；它不是日常登录密码，也不是 CLI admin.token。 / The bootstrap code is for setup only, not a login password or CLI token.')
-    print('   尚无 Auth0/OIDC 应用时，请先准备；初始化码过期可以在本机重新签发。 / Prepare your identity provider first; expired codes can be reissued locally.')
-    print('Agent installers are already published / Agent 安装程序已就绪。')
+        print(text('   Bootstrap code: ', '   一次性初始化码：') + secret)
+    print(text('2. Configure Auth0/OIDC, then sign in with GitHub/Google to bind the first Admin.', '2. 配置 Auth0/OIDC，然后通过 GitHub/Google 登录并绑定首位管理员。'))
+    print(text('   The bootstrap code is for /setup only, not a login password or CLI admin.token.', '   初始化码只用于 /setup；它不是日常登录密码，也不是 CLI admin.token。'))
+    print(text('   Prepare your Auth0/OIDC application first; expired codes can be reissued locally.', '   尚无 Auth0/OIDC 应用时，请先准备；初始化码过期可以在本机重新签发。'))
+    print(text('Agent installers are already published.', 'Agent 安装程序已就绪。'))
 
 
-def report_failure(error):
+def report_failure(error, updating=False):
     # Do not print raw HTTP/ACME exceptions, which can contain request URLs.
     print(str(error) if isinstance(error, InstallError) else f'Installation failed ({type(error).__name__}).', file=sys.stderr)
+    if updating:
+        print(text('Update did not complete. Preserve the existing state and inspect the private update records under /var/lib/argus-c2-updates.', '更新未完成。请保留现有状态，并检查 /var/lib/argus-c2-updates 中的私有更新记录。'), file=sys.stderr)
+        return
     if not path('/etc/argus-c2/server').exists() and not path('/var/lib/argus-c2-server').exists():
-        print('Server 尚未初始化，本次没有生成 Console 初始化码。修复原因后可重试；已有 Certbot 环境及 ACME 状态会保留。 / Server initialization has not completed; no Console bootstrap code was created. Fix the cause and retry; Certbot/ACME state is preserved.', file=sys.stderr)
+        print(text('Server initialization has not completed; no Console bootstrap code was created. Fix the cause and retry; Certbot/ACME state is preserved.', 'Server 尚未初始化，本次没有生成 Console 初始化码。修复原因后可重试；已有 Certbot 环境及 ACME 状态会保留。'), file=sys.stderr)
     else:
-        print('Existing Server data was preserved / 已保留 Server 数据。检查服务 / Inspect: sudo journalctl -u argus-c2-server -n 50 --no-pager', file=sys.stderr)
+        print(text('Existing Server data was preserved. Inspect: ', '已保留 Server 数据。检查服务：') + 'sudo journalctl -u argus-c2-server -n 50 --no-pager', file=sys.stderr)
         secret_file = path('/etc/argus-c2/setup/bootstrap.token')
         if secret_file.is_file():
-            print(f'初始化码文件 / Bootstrap file (may have expired): {secret_file}', file=sys.stderr)
-    print(f'ACME logs / 证书申请日志: {path(ACME_DIRECTORIES[2])}', file=sys.stderr)
+            print(text('Bootstrap file (may have expired): ', '初始化码文件（可能已过期）：') + str(secret_file), file=sys.stderr)
+    print(text('ACME logs: ', '证书申请日志：') + str(path(ACME_DIRECTORIES[2])), file=sys.stderr)
 
 
 def replace_file(dest, data, mode):
@@ -614,9 +642,241 @@ def replace_file(dest, data, mode):
             out.flush()
             os.fsync(out.fileno())
         os.replace(temporary, dest)
+        directory_fd = os.open(dest.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if os.path.lexists(temporary):
             os.unlink(temporary)
+
+
+def managed_file(source, limit):
+    trusted_parents(source.parent)
+    info = source.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+        raise InstallError(f'Expected a root-managed regular file: {source}')
+    return read_bounded(source, limit)
+
+
+def copy_private_tree(source, destination):
+    """Snapshot stopped state without following links or copying special files."""
+    if source.is_symlink() or not source.is_dir():
+        raise InstallError(f'Expected a real state/configuration directory: {source}')
+    destination.mkdir(mode=0o700)
+    for current, directories, files, directory_fd in os.fwalk(source, follow_symlinks=False):
+        target = destination / Path(current).relative_to(source)
+        for name in directories:
+            info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if not stat.S_ISDIR(info.st_mode):
+                raise InstallError('Update snapshots cannot contain directory symlinks.')
+            (target / name).mkdir(mode=0o700)
+        for name in files:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+            with os.fdopen(fd, 'rb') as incoming:
+                if not stat.S_ISREG(os.fstat(incoming.fileno()).st_mode):
+                    raise InstallError('Update snapshots cannot contain special files.')
+                with (target / name).open('xb') as outgoing:
+                    os.fchmod(outgoing.fileno(), 0o600)
+                    shutil.copyfileobj(incoming, outgoing, 1024 * 1024)
+                    outgoing.flush()
+                    os.fsync(outgoing.fileno())
+
+
+def database_stamp(state, component):
+    name = 'argus.db' if component == 'server' else 'probe.db'
+    with contextlib.closing(sqlite3.connect((state / name).as_uri() + '?mode=ro', uri=True, timeout=5)) as db:
+        deadline = time.monotonic() + 60
+        db.set_progress_handler(lambda: time.monotonic() > deadline, 10000)
+        if db.execute('PRAGMA quick_check').fetchone() != ('ok',):
+            raise InstallError('Database snapshot failed its integrity check; original state was preserved.')
+        return (db.execute('PRAGMA application_id').fetchone()[0], db.execute('PRAGMA user_version').fetchone()[0])
+
+
+def update_plan(component, arch):
+    if not path('/run/systemd/system').is_dir():
+        raise InstallError('A running systemd host is required.')
+    for tool in ('systemctl', 'runuser'):
+        if not shutil.which(tool):
+            raise InstallError(f'Required command missing: {tool}')
+    account = pwd.getpwnam('argus-' + component)
+    config_file = path(f'/etc/argus-c2/{component}.json')
+    config = json.loads(managed_file(config_file, 8192))
+    state = path(f'/var/lib/argus-c2-{component}')
+    if config.get('state_dir') != str(state):
+        raise InstallError('Automatic updates require the standard installer state directory; use the documented manual procedure for custom deployments.')
+    trusted_parents(state.parent)
+    info = state.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != account.pw_uid or info.st_mode & 0o077:
+        raise InstallError('Component state must be a private directory owned by its service account.')
+    binaries = path('/usr/local/libexec/argus-c2')
+    files = [(component if component == 'server' else f'agent-linux-{arch}', binaries / component, 0o755)]
+    if component == 'server':
+        files += [('argus', binaries / 'argus', 0o755),
+                  ('install-server.py', binaries / 'install-server.py', 0o644)]
+        files += [(f'agent-linux-{a}', path(f'/usr/local/share/argus-c2/agents/agent-linux-{a}'), 0o644)
+                  for a in ('amd64', 'arm64')]
+        managed_file(path('/etc/argus-c2/console-install.json'), 4096)
+    for _, dest, _ in files:
+        managed_file(dest, 64 << 20)
+    unit = f'argus-c2-{component}.service'
+    if run(['systemctl', 'show', unit, '--property=LoadState', '--value']).stdout.strip() != b'loaded':
+        raise InstallError('The component must already have an installed systemd service.')
+    service_user = run(['systemctl', 'show', unit, '--property=User', '--value']).stdout.decode().strip()
+    if service_user != account.pw_name:
+        raise InstallError('The service does not use the expected dedicated account.')
+    active = run(['systemctl', 'is-active', '--quiet', unit], check=False).returncode == 0
+    return {'component': component, 'account': account, 'config': config, 'config_file': config_file,
+            'state': state, 'unit': unit, 'files': files, 'active': active}
+
+
+def validate_update(plan, bundle, snapshot):
+    component, account = plan['component'], plan['account']
+    expected = database_stamp(snapshot, component)
+    expected_id = 0x41524753 if component == 'server' else 0x41524741
+    if expected[0] != expected_id:
+        raise InstallError('Update snapshot belongs to a different component.')
+    # Candidate inspection only sees a copy. Agent storage can recover interrupted
+    # tasks locally; those writes must never reach the real identity/database.
+    with tempfile.TemporaryDirectory(prefix='argus-update-check-', dir=path('/var/tmp')) as temporary:
+        validation = Path(temporary)
+        copy_private_tree(snapshot, validation / 'state')
+        candidate_name = 'server' if component == 'server' else f'agent-linux-{architecture()}'
+        write_new(validation / 'candidate', (bundle / candidate_name).read_bytes(), 0o755)
+        config = {**plan['config'], 'state_dir': str(validation / 'state')}
+        write_new(validation / 'config.json', json.dumps(config))
+        for current, directories, files in os.walk(validation):
+            os.chown(current, account.pw_uid, account.pw_gid)
+            for name in files:
+                os.chown(Path(current) / name, account.pw_uid, account.pw_gid)
+        run(['runuser', '-u', account.pw_name, '--', validation / 'candidate', 'storage',
+             '-config', validation / 'config.json'])
+        if database_stamp(validation / 'state', component) != expected:
+            raise InstallError('Automatic updates cannot migrate the database schema. Use the explicit migration procedure.')
+        if component == 'server':
+            local = json.loads(managed_file(path('/etc/argus-c2/server-local.json'), 8192))
+            local['state_dir'] = str(validation / 'state')
+            write_new(validation / 'local.json', json.dumps(local))
+            dropin = managed_file(path('/etc/systemd/system/argus-c2-server.service.d/console.conf'), 16384).decode()
+            commands = [line[len('ExecStart='):] for line in dropin.splitlines() if line.startswith('ExecStart=') and line != 'ExecStart=']
+            if len(commands) != 1:
+                raise InstallError('Automatic Server updates require the generated Console service configuration.')
+            arguments = shlex.split(commands[0])
+            if arguments[:4] != [str(path('/usr/local/libexec/argus-c2/server')), 'run', '-config', str(plan['config_file'])]:
+                raise InstallError('Custom service commands require the manual update procedure.')
+            flags = arguments[4:]
+            allowed = {'-console-listen', '-console-origin', '-console-cert', '-console-key', '-console-installer-dir', '-console-fleet-origin'}
+            if len(flags) != 12 or set(flags[::2]) != allowed:
+                raise InstallError('Custom Console options require the manual update procedure.')
+            values = dict(zip(flags[::2], flags[1::2]))
+            values['-console-key'] = str(path('/etc/argus-c2/console/browser-key.pem'))
+            values['-console-installer-dir'] = str(bundle)
+            run([validation / 'candidate', 'run', '-check', '-config', validation / 'local.json',
+                 *[item for pair in values.items() for item in pair]])
+        else:
+            run(['runuser', '-u', account.pw_name, '--', validation / 'candidate', 'run', '-check',
+                 '-config', validation / 'config.json'])
+
+
+def verify_updated_service(plan):
+    for _ in range(3):
+        time.sleep(1)
+        run(['systemctl', 'is-active', '--quiet', plan['unit']])
+    if plan['component'] == 'server':
+        settings = json.loads(managed_file(path('/etc/argus-c2/console-install.json'), 4096))
+        host, _ = host_value(settings['host'])
+        listen = plan['config']['listen']
+        port = int(listen.rsplit(':', 1)[1])
+        context = ssl.create_default_context(cafile=plan['config']['ca'])
+        context.minimum_version = ssl.TLSVersion.TLSv1_3
+        # Validate the original Fleet identity over loopback, without depending on
+        # public DNS/NAT routing or a possibly revoked initial CLI token.
+        with socket.create_connection(('::1' if listen.startswith('[') else '127.0.0.1', port), timeout=5) as raw:
+            with context.wrap_socket(raw, server_hostname=host) as connection:
+                client = http.client.HTTPConnection(host, timeout=5)
+                client.sock = connection
+                try:
+                    client.request('GET', '/v1/health')
+                    response = client.getresponse()
+                    if response.status not in (200, 401):
+                        raise InstallError('Updated Fleet listener failed its readiness check.')
+                    response.read(4096)
+                finally:
+                    client.close()
+
+
+def update_component(args, plan, bundle):
+    component, unit, account = plan['component'], plan['unit'], plan['account']
+    backups = path('/var/lib/argus-c2-updates')
+    mkdir(backups, 0o700)
+    backup = Path(tempfile.mkdtemp(prefix=component + '-', dir=backups))
+    programs = backup / 'programs'
+    programs.mkdir(mode=0o700)
+    records = []
+    for index, (name, dest, mode) in enumerate(plan['files']):
+        data = managed_file(dest, 64 << 20)
+        saved = programs / str(index)
+        write_new(saved, data)
+        records.append({'path': str(dest), 'saved': str(saved.relative_to(backup)),
+                        'mode': stat.S_IMODE(dest.stat().st_mode), 'sha256': hashlib.sha256(data).hexdigest()})
+    metadata = {'component': component, 'release': args.release or DEFAULT_RELEASE, 'bundle_sha256': args.sha256,
+                'was_active': plan['active'], 'files': records, 'phase': 'prepared'}
+    write_new(backup / 'update.json', json.dumps(metadata, indent=2) + '\n')
+    print(text(f'Updating {component}; private backup: {backup}', f'正在更新 {component}；私有更新备份：{backup}'))
+    stopped, replaced = False, False
+    try:
+        stopped = True
+        run(['systemctl', 'stop', unit])
+        if run(['systemctl', 'is-active', '--quiet', unit], check=False).returncode == 0:
+            raise InstallError('The component did not stop; no program was replaced.')
+        lock_name = 'server.lock' if component == 'server' else 'probe.lock'
+        fd = os.open(plan['state'] / lock_name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'w') as lock:
+            os.fchown(lock.fileno(), account.pw_uid, account.pw_gid)
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise InstallError('Another process holds the component state; no program was replaced.') from error
+            copy_private_tree(plan['state'], backup / 'state')
+            config_backup = backup / 'configuration'
+            config_backup.mkdir(mode=0o700)
+            config_names = ['server.json', 'server-local.json', 'server', 'console', 'console-install.json', 'setup'] if component == 'server' else ['agent.json', 'policy.json', 'ca.pem']
+            for name in config_names:
+                source = path('/etc/argus-c2') / name
+                if source.is_dir() and not source.is_symlink():
+                    copy_private_tree(source, config_backup / name)
+                elif os.path.lexists(source):
+                    write_new(config_backup / name, managed_file(source, 65536))
+            validate_update(plan, bundle, backup / 'state')
+            metadata['phase'] = 'replacing'
+            replace_file(backup / 'update.json', (json.dumps(metadata, indent=2) + '\n').encode(), 0o600)
+            replaced = True
+            for name, dest, mode in plan['files']:
+                data = Path(__file__).read_bytes() if name == 'install-server.py' else (bundle / name).read_bytes()
+                replace_file(dest, data, mode)
+        if plan['active']:
+            run(['systemctl', 'start', unit])
+            verify_updated_service(plan)
+        metadata['phase'] = 'complete'
+        replace_file(backup / 'update.json', (json.dumps(metadata, indent=2) + '\n').encode(), 0o600)
+    except (Exception, KeyboardInterrupt) as error:
+        try:
+            if replaced:
+                run(['systemctl', 'stop', unit])
+                for record in records:
+                    replace_file(Path(record['path']), read_bounded(backup / record['saved'], 64 << 20), record['mode'])
+            if stopped and plan['active']:
+                run(['systemctl', 'start', unit])
+                verify_updated_service(plan)
+            metadata['phase'] = 'rolled_back'
+            replace_file(backup / 'update.json', (json.dumps(metadata, indent=2) + '\n').encode(), 0o600)
+        except (Exception, KeyboardInterrupt) as recovery_error:
+            raise InstallError(f'Update failed and automatic recovery could not complete. Preserve state and inspect {backup}/update.json and journalctl -u {unit}.') from recovery_error
+        raise InstallError(f'Update failed; previous programs and service state restored. Database and identity were not reset. Backup: {backup}') from error
+    print(text(f'{component} update complete. Configuration, identity and database preserved; backup: {backup}', f'{component} 更新完成。配置、身份和数据库均已保留；备份：{backup}'))
+    if not plan['active']:
+        print(text('The service was stopped before the update and remains stopped.', '服务更新前已停止，现仍保持停止。'))
 
 
 def deploy_certificate(require_hook=True):
@@ -652,10 +912,11 @@ def main(argv=None):
     # Root subprocesses use only system paths, not caller-controlled PATH entries.
     os.environ['PATH'] = '/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin'
     args = parser().parse_args(argv)
+    choose_language(args, sys.stdin.isatty() and not (args.deploy_certificate or args.sync_certificate))
     if os.geteuid() != 0:
         raise InstallError('Run with sudo or as root.')
     arch = architecture()
-    lockpath = path('/run/argus-c2-server-install.lock')
+    lockpath = path('/run/argus-c2-install.lock' if args.update == 'agent' else '/run/argus-c2-server-install.lock')
     fd = os.open(lockpath, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'w'):
         try:
@@ -663,7 +924,20 @@ def main(argv=None):
         except BlockingIOError as exc:
             raise InstallError('Another Server install or certificate deployment is running.') from exc
         if args.deploy_certificate or args.sync_certificate:
+            if args.update:
+                raise InstallError('Update and certificate maintenance cannot be combined.')
             deploy_certificate(require_hook=not args.sync_certificate)
+            return
+        if args.update:
+            if args.host or args.tls or args.email or args.agree_tos or args.console_cert or args.console_key or args.certbot:
+                raise InstallError('Updates preserve existing TLS and configuration; omit installation-only options.')
+            plan = update_plan(args.update, arch)
+            with tempfile.TemporaryDirectory(prefix='argus-update-', dir=path('/var/tmp')) as temporary:
+                stage = Path(temporary)
+                archive = obtain_bundle(args, stage, arch)
+                bundle = stage / 'bundle'
+                unpack_bundle(archive, bundle, arch)
+                update_component(args, plan, bundle)
             return
         args = configure(args, sys.stdin.isatty())
         preflight(args)
@@ -680,5 +954,5 @@ if __name__ == '__main__':
     try:
         main()
     except (InstallError, OSError, ValueError, EOFError, KeyboardInterrupt, tarfile.TarError, subprocess.SubprocessError) as error:
-        report_failure(error)
+        report_failure(error, updating=any(arg == '--update' or arg.startswith('--update=') for arg in sys.argv[1:]))
         sys.exit(1)

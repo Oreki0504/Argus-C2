@@ -12,7 +12,7 @@
 cd web
 npm ci --ignore-scripts
 cd ..
-sh deploy/linux/build-server-bundles.sh /tmp/argus-server-release v0.1.0-preview.3
+sh deploy/linux/build-server-bundles.sh /tmp/argus-server-release v0.1.0-preview.4
 ```
 
 生成：
@@ -30,23 +30,23 @@ SHA256SUMS
 
 ## 一条命令启动交互安装
 
-预览版本使用固定 tag 的下载链接。以下是 [v0.1.0-preview.3](https://github.com/Oreki0504/Argus-C2/releases/tag/v0.1.0-preview.3) 发布后的安装入口：在新服务器粘贴命令，即可下载安装脚本、启动交互并自动取得匹配的安装包。下载链接须等待对应 Release 工作流成功完成；仅有 commit 或 tag 不会产生安装包。
+预览版本使用固定 tag 的下载链接。以下是 [v0.1.0-preview.4](https://github.com/Oreki0504/Argus-C2/releases/tag/v0.1.0-preview.4) 发布后的安装入口：在新服务器粘贴命令，即可下载安装脚本、启动交互并自动取得匹配的安装包。下载链接须等待对应 Release 工作流成功完成；仅有 commit 或 tag 不会产生安装包。
 
 curl：
 
 ```sh
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.3/install-server.py -o "$f" && sudo python3 "$f" )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.4/install-server.py -o "$f" && sudo python3 "$f" )
 ```
 
 GNU wget：
 
 ```sh
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; wget --https-only --max-redirect=5 -O "$f" https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.3/install-server.py && sudo python3 "$f" )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; wget --https-only --max-redirect=5 -O "$f" https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.4/install-server.py && sudo python3 "$f" )
 ```
 
 脚本完整下载后才执行，终端标准输入保留给域名/IP 提问。脚本识别架构，从其绑定的 Release 获取 `SHA256SUMS` 和安装包，校验后才运行包内程序。用户不需要填写安装包 URL 或摘要。GitHub 的 HTTPS 资产重定向受支持，不允许降级到 HTTP 或带凭据跳转。
 
-预发布版本不会成为 `latest`。发布首个稳定版本后，可将链接中的 `download/v0.1.0-preview.3` 换成 `latest/download`，取得最新稳定版；测试预览版时应保留固定版本链接。每个 Release 的说明会给出该版本的完整命令。`v0.1.0-preview.1` 在发布检查中失败，保留 tag 供追溯，没有公开安装包。
+预发布版本不会成为 `latest`。发布首个稳定版本后，可将链接中的 `download/v0.1.0-preview.4` 换成 `latest/download`，取得最新稳定版；测试预览版时应保留固定版本链接。每个 Release 的说明会给出该版本的完整命令。`v0.1.0-preview.1` 在发布检查中失败，保留 tag 供追溯，没有公开安装包。
 
 已有本地安装目录时，也可以继续执行：
 
@@ -56,8 +56,8 @@ sudo python3 install-server.py
 
 安装器自动识别当前架构，然后询问：
 
-1. 使用域名还是 IP 地址。
-2. 具体域名或 IP。
+1. 第一条提示选择 **中文 / English**，之后的提问和完成指引使用所选语言。可传 `--language zh-CN` 或 `--language en` 跳过语言选择；非交互默认英文。
+2. 使用域名还是 IP 地址，并输入具体地址。
 3. 公开证书申请需要 ACME 账户邮箱，并明确同意 Let’s Encrypt 条款。
 
 **域名模式**：域名 A/AAAA 必须指向这台主机。通过 Certbot standalone HTTP-01 自动申请 Let’s Encrypt 证书。
@@ -105,7 +105,7 @@ sudo python3 install-server.py \
 
 以上下载地址是部署示例。自定义单个包的 `--bundle-url` 必须显式传入可信 SHA-256，支持最多五次 HTTPS 重定向；本地包使用 `--bundle /path/archive.tar.gz` 并默认读取同目录 `SHA256SUMS`。完整下载及校验通过后才会执行包内程序，解包不接受目录穿越、链接、重复或意外文件。
 
-自托管整个发布目录时，可以改用 `--release-base https://downloads.example.com/argus/v0.1.0`，自动读取同目录清单并选择架构；或用 `--release v0.1.0-preview.3` 选择 GitHub 上已发布的版本。没有本地包、没有绑定版本的源码安装器会查询 GitHub 最新稳定 Release；没有 Release 时明确报错，不会回退到源码构建或未经校验的二进制。
+自托管整个发布目录时，可以改用 `--release-base https://downloads.example.com/argus/v0.1.0`，自动读取同目录清单并选择架构；或用 `--release v0.1.0-preview.4` 选择 GitHub 上已发布的版本。没有本地包、没有绑定版本的源码安装器会查询 GitHub 最新稳定 Release；没有 Release 时明确报错，不会回退到源码构建或未经校验的二进制。
 
 ## 发布 GitHub 下载入口
 
@@ -166,10 +166,32 @@ sudo journalctl -u argus-c2-server.service -n 50 --no-pager
 
 ## 重复执行和故障恢复
 
-已有 Server 用户、状态、配置、程序或 unit 时，安装器拒绝覆盖。它不是升级器，不会删除数据库、轮换身份或静默迁移旧 schema。升级及数据库迁移沿用现有运维流程。
+普通安装模式遇到已有 Server 用户、状态、配置、程序或 unit 时仍拒绝覆盖。更新已有服务使用下方显式更新模式；不会通过重新安装来清空身份。
 
 缺包、校验失败、端口占用和输入错误会在应用安装前中止。自动申请证书可能已经创建独立 Certbot 环境、ACME 账户或证书；这些内容保留供诊断及重试，不应为重试随意删除 ACME 账户。若已写入 Server 状态后启动失败，保留该状态并检查日志及配置，按[手动部署](deployment.md)完成恢复；不会自动清理或重新初始化。
 
 旧版 `v0.1.0-preview.2` 在 `/var/log` 允许日志组写入的系统上可能报 `Installation parent must be root-owned and not writable by others: /var/log`。这是安装器路径选择的问题，不应通过 `chmod /var/log` 修复。此时流程尚未执行 Server 初始化，因而还没有 Console 初始化码。改用本页新版命令重试即可复用已安装的 Certbot 和 ACME 准备目录；无需删除这些目录或修改系统日志权限。
 
 隔离测试覆盖可组写的系统日志目录、早期失败重试、真实包初始化和终端凭据显示。CI 还会在一次性 VM 上执行完整安装器、启动真实 systemd 服务，并通过受信任的 HTTPS 验证 `/setup`、初始化码及重新签发流程。ACME 请求由模拟命令验证，不会在测试中申请公开证书或消耗 Let’s Encrypt 配额；真实域名/IP 的外网验证仍需在实际部署时验收。
+
+## 更新 Server 或 Agent
+
+`v0.1.0-preview.4` 起，同一个下载脚本支持显式更新。旧版已安装主机也可下载新版脚本更新，无需重新安装、重新申请证书或重新注册 Agent。在目标主机执行：
+
+```sh
+# Server：更新服务端、内嵌前端、CLI 和供新 Agent 下载的二进制
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.4/install-server.py -o "$f" && sudo python3 "$f" --update server )
+
+# Agent：在每台 Agent 主机单独执行，只替换本机 Agent 程序
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.4/install-server.py -o "$f" && sudo python3 "$f" --update agent )
+```
+
+已取得安装包目录时可运行 `sudo python3 install-server.py --update server --bundle /path/argus-server-linux-amd64.tar.gz`。同一脚本支持 `--release TAG`、`--release-base URL` 和原有 SHA-256 校验；默认使用下载脚本绑定的版本。更新时不重新询问域名、邮箱或证书，`--host` 等首次安装参数不适用。
+
+更新顺序：先下载并校验包，再停止对应服务、锁定状态、备份旧程序及配置/身份/数据库，在数据库副本上运行新版本的兼容性检查，随后原子替换各程序并恢复服务。原先停止的服务仍保持停止。Server 更新不会启动或更新同机 Agent，也不会远程批量更新其他主机。
+
+运行失败或启动检查失败时，自动恢复旧程序和此前的服务运行状态。**不会自动回退数据库快照**，以免丢掉新接收的结果和审计；当前更新仅允许相同 schema 的兼容版本，数据库迁移仍按[运维文档](operations.md#database-compatibility-and-upgrades)显式执行。配置、证书、Auth0、管理员、Agent 身份和策略均保留，systemd unit/drop-in 及续期计划不改写。Server 重启会让现有浏览器会话失效，需要重新登录。
+
+每次更新在 `/var/lib/argus-c2-updates/server-*` 或 `agent-*` 留下 root 私有备份，包含 `update.json`、旧程序、`state` 和 `configuration`。它包含凭据，应按私有备份保管，并由管理员在验收后管理保留时间。确保磁盘容纳完整状态快照；脚本不会自动删除旧备份。
+
+自动更新支持项目标准路径和专用 systemd 账户；自定义路径、命令、旧 schema 使用手动流程。断电、强制结束进程或恢复失败时，查看 `update.json` 的阶段和原程序位置，保留现有数据库，停止对应服务后按记录恢复程序及权限，再检查启动。不要用旧数据库覆盖现有状态来强行恢复。服务存活检查不等于远端连通验收；Agent 更新后还应在 Console 确认心跳和结果上报。

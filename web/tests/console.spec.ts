@@ -13,7 +13,7 @@ test('anonymous overview uses five-column cards, login action and keyboard detai
   await expect(page.getByRole('link', { name: 'Log in', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'ARGUS', exact: true })).toBeVisible()
   const filters = page.getByRole('group', { name: 'Filter heartbeat status' })
-  await expect(filters.getByRole('button')).toHaveCount(5)
+  await expect(filters.getByRole('button')).toHaveCount(4)
   await expect(filters.getByRole('button', { name: 'All Server 6', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true',
@@ -24,10 +24,10 @@ test('anonymous overview uses five-column cards, login action and keyboard detai
   await filters.getByRole('button', { name: 'Stale 1', exact: true }).click()
   await expect(page.getByRole('article', { name: 'Build runner · 01', exact: true })).toBeVisible()
   await expect(page.locator('.agent-card')).toHaveCount(1)
-  await filters.getByRole('button', { name: 'Offline 1', exact: true }).click()
+  await filters.getByRole('button', { name: 'Offline 2', exact: true }).click()
   await expect(page.getByRole('article', { name: 'Staging · Atlas', exact: true })).toBeVisible()
-  await filters.getByRole('button', { name: 'Never seen 1', exact: true }).click()
   await expect(page.getByRole('article', { name: 'Archive · 01', exact: true })).toBeVisible()
+  await expect(filters.getByRole('button', { name: /Never seen/ })).toHaveCount(0)
   await filters.getByRole('button', { name: 'All Server 6', exact: true }).focus()
   await page.keyboard.press('Enter')
   await expect(page.locator('.agent-card')).toHaveCount(6)
@@ -73,6 +73,38 @@ test('anonymous overview uses five-column cards, login action and keyboard detai
   await expect(page.getByText('6.8.0', { exact: true })).toBeVisible()
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
   expect(errors).toEqual([])
+})
+
+test('overview clock follows browser local time without a timezone label', async ({ browser }) => {
+  for (const [timezoneId, expected] of [
+    ['Asia/Tokyo', '21:34:56'],
+    ['America/New_York', '07:34:56'],
+  ]) {
+    const context = await browser.newContext({ timezoneId })
+    const page = await context.newPage()
+    await page.clock.install({ time: new Date('2026-11-08T12:34:56Z') })
+    await page.clock.pauseAt(new Date('2026-11-08T12:34:56Z'))
+    await page.goto('/')
+    await expect(page.locator('.overview-updated time')).toHaveText(expected)
+    await expect(page.locator('.overview-updated time')).not.toHaveAttribute('title')
+    await page.clock.runFor(1000)
+    await expect(page.locator('.overview-updated time')).toHaveText(expected.slice(0, -2) + '57')
+    await context.close()
+  }
+})
+
+test('unseen enrollment records do not enter overview counts or cards', async ({ page }) => {
+  const data = fleetFixture()
+  data.nodes[5].last_seen_at = 0
+  await page.route('**/v1/me', (route) =>
+    route.fulfill({ status: 401, json: { code: 'session_expired' } }),
+  )
+  await page.route('**/v1/console/public/summary', (route) => route.fulfill({ json: data }))
+  await page.goto('http://127.0.0.1:4173/')
+  await expect(page.getByRole('button', { name: 'All Server 5', exact: true })).toBeVisible()
+  await expect(page.locator('.agent-card')).toHaveCount(5)
+  await expect(page.getByRole('link', { name: 'View Archive · 01' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Never seen/ })).toHaveCount(0)
 })
 
 test('User and Admin have no sidebar, and Admin pages remain reachable from the header', async ({
@@ -293,7 +325,7 @@ for (const viewport of [
     const controlTops = await page
       .locator('.agent-toolbar .search-input, .heartbeat-filter')
       .evaluateAll((controls) => controls.map((control) => control.getBoundingClientRect().top))
-    expect(controlTops).toHaveLength(6)
+    expect(controlTops).toHaveLength(5)
     expect(new Set(controlTops).size).toBe(1)
     const fits = () =>
       page.evaluate(() => ({

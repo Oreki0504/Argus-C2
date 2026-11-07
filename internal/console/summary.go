@@ -143,7 +143,7 @@ func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
  FROM nodes n JOIN console_nodes p ON p.node_id=n.id
  LEFT JOIN results i ON i.task_id=(SELECT r.task_id FROM results r JOIN tasks t ON t.id=r.task_id WHERE r.node_id=n.id AND r.status='SUCCEEDED' AND t.task_type='system.info' ORDER BY r.received_at DESC,r.task_id DESC LIMIT 1)
  LEFT JOIN results m ON m.task_id=(SELECT r.task_id FROM results r JOIN tasks t ON t.id=r.task_id WHERE r.node_id=n.id AND r.status='SUCCEEDED' AND t.task_type='system.metrics' ORDER BY r.received_at DESC,r.task_id DESC LIMIT 1)
- ORDER BY p.public_id LIMIT 1001`)
+ WHERE n.last_seen_at>0 ORDER BY p.public_id LIMIT 1001`)
 	if err != nil {
 		storeProblem(w, err)
 		return
@@ -208,7 +208,7 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var node string
-	err := s.store.DB.QueryRowContext(r.Context(), "SELECT node_id FROM console_nodes WHERE public_id=?", id).Scan(&node)
+	err := s.store.DB.QueryRowContext(r.Context(), "SELECT p.node_id FROM console_nodes p JOIN nodes n ON n.id=p.node_id WHERE p.public_id=? AND n.last_seen_at>0", id).Scan(&node)
 	if err == sql.ErrNoRows {
 		problem(w, 404, "not_found")
 		return

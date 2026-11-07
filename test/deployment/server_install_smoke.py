@@ -9,10 +9,14 @@ import http.cookiejar
 import json
 import os
 from pathlib import Path
+import pwd
+import shutil
 import ssl
 import stat
 import subprocess
 import sys
+import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -104,8 +108,79 @@ def main():
         require(request('/v1/console/setup/prove', {'secret': replacement.read_text().strip()}, csrf)['step'] == 'provider',
                 'Reissued bootstrap code failed against the running Server.')
         require(not Path('/var/lib/argus-c2-agent').exists(), 'Server installer created an Agent identity.')
-        print('Real Server installation: systemd, verified HTTPS, setup page, bootstrap proof and local reissue passed.')
+        identity_files = [root / 'server/ca.pem', root / 'server/ca-key.pem', root / 'server/admin.token',
+                          root / 'console/browser-key.pem', root / 'server.json', root / 'server-local.json']
+        original_identity = {p: p.read_bytes() for p in identity_files}
+        run(sys.executable, installer, '--bundle', bundle, '--update', 'server', '--language', 'en')
+        for p, contents in original_identity.items():
+            require(p.read_bytes() == contents, 'Server update replaced existing identity or configuration.')
+        require(request('/v1/console/auth/status')['state'] == 'SETUP_PENDING', 'Server update reset Console state.')
+        require(b'<html' in request('/setup').lower(), 'Console disappeared after update.')
+
+        # Install and enroll a real Agent on this disposable VM, then update it
+        # without reenrollment. The Server and Agent paths must remain independent.
+        agent_unit = Path('/etc/systemd/system/argus-c2-agent.service')
+        agent_unit.write_bytes(Path('deploy/linux/argus-c2-agent.service').read_bytes())
+        agent_unit.chmod(0o644)
+        sysusers = Path('/etc/sysusers.d/argus-c2-agent.conf')
+        sysusers.write_text('u argus-agent - "ARGUS test Agent" /var/lib/argus-c2-agent /usr/sbin/nologin\n')
+        sysusers.chmod(0o644)
+        run('systemd-sysusers', sysusers)
+        agent_account = pwd.getpwnam('argus-agent')
+        agent_state = Path('/var/lib/argus-c2-agent')
+        agent_state.mkdir(mode=0o700)
+        os.chown(agent_state, agent_account.pw_uid, agent_account.pw_gid)
+        agent_binary = Path('/usr/local/libexec/argus-c2/agent')
+        with tarfile.open(bundle) as archive:
+            agent_binary.write_bytes(archive.extractfile('agent-linux-amd64').read())
+        agent_binary.chmod(0o755)
+        shutil.copyfile(root / 'server/ca.pem', root / 'ca.pem')
+        shutil.copyfile('examples/policy.json', root / 'policy.json')
+        (root / 'agent.json').write_text(json.dumps({'server': 'https://127.0.0.1:8443', 'ca': str(root / 'ca.pem'),
+                                                   'state_dir': str(agent_state), 'policy': str(root / 'policy.json')}))
+        for p in (root / 'ca.pem', root / 'policy.json', root / 'agent.json'):
+            p.chmod(0o644)
+        token = agent_state / 'enroll.token'
+        cli = ['/usr/local/libexec/argus-c2/argus', '-server', 'https://127.0.0.1:8443',
+               '-ca', root / 'server/ca.pem', '-token-file', root / 'server/admin.token']
+        run(*cli, 'enrollment-token', '-out', token)
+        os.chown(token, agent_account.pw_uid, agent_account.pw_gid)
+        run('runuser', '-u', 'argus-agent', '--', agent_binary, 'enroll', '-config', root / 'agent.json', '-token-file', token)
+        token.unlink()
+        run('systemctl', 'daemon-reload')
+        run('systemctl', 'start', 'argus-c2-agent.service')
+        agent_identity = {p: p.read_bytes() for p in (agent_state / 'agent.pem', agent_state / 'agent-key.pem', root / 'agent.json', root / 'policy.json')}
+        before_nodes = json.loads(run(*cli, 'nodes'))
+        run(sys.executable, installer, '--bundle', bundle, '--update', 'agent', '--language', 'en')
+        for p, contents in agent_identity.items():
+            require(p.read_bytes() == contents, 'Agent update replaced identity or policy.')
+        after_nodes = json.loads(run(*cli, 'nodes'))
+        require(len(after_nodes) == 1 and after_nodes[0]['id'] == before_nodes[0]['id'], 'Agent update reenrolled the node.')
+        run('systemctl', 'is-active', '--quiet', 'argus-c2-agent.service')
+        # A valid archive containing a failing candidate must leave old programs
+        # and the live service available. Unit tests also cover failures after replacement.
+        with tempfile.TemporaryDirectory(prefix='argus-bad-update-') as temporary:
+            bad = Path(temporary) / 'candidate.tar.gz'
+            with tarfile.open(bundle) as archive:
+                files = {item.name: archive.extractfile(item).read() for item in archive.getmembers()}
+            import hashlib, io
+            files['server'] = files['server'][:64]
+            manifest = json.loads(files['manifest.json'])
+            manifest['files']['server'] = {'size': 64, 'sha256': hashlib.sha256(files['server']).hexdigest()}
+            files['manifest.json'] = json.dumps(manifest).encode()
+            with tarfile.open(bad, 'w:gz') as archive:
+                for name, contents in files.items():
+                    entry = tarfile.TarInfo(name)
+                    entry.size = len(contents)
+                    archive.addfile(entry, io.BytesIO(contents))
+            result = subprocess.run([sys.executable, str(installer), '--update', 'server', '--bundle', str(bad),
+                                     '--sha256', hashlib.sha256(bad.read_bytes()).hexdigest()], capture_output=True, timeout=180)
+            require(result.returncode != 0, 'Invalid update candidate was accepted.')
+            run('systemctl', 'is-active', '--quiet', unit)
+            require(request('/v1/console/auth/status')['state'] == 'SETUP_PENDING', 'Rejected update lost setup state.')
+        print('Real installation: HTTPS, bootstrap/reissue, Server and Agent updates, identity preservation and rejected-candidate recovery passed.')
     finally:
+        subprocess.run(['systemctl', 'stop', 'argus-c2-agent.service'], capture_output=True, timeout=60)
         subprocess.run(['systemctl', 'disable', '--now', unit], capture_output=True, timeout=60)
 
 

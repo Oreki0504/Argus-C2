@@ -124,7 +124,7 @@ export function FleetPage({ overview = false }: { overview?: boolean }) {
           <Metric
             label="Needs a look"
             value={String(data.nodes.length - (counts.Online ?? 0))}
-            hint={`${counts.Stale ?? 0} stale · ${counts.Offline ?? 0} offline · ${counts['Never seen'] ?? 0} unseen`}
+            hint={`${counts.Stale ?? 0} stale · ${counts.Offline ?? 0} offline`}
             icon={<CircleHelp size={18} />}
           />
           <Metric
@@ -175,8 +175,8 @@ export function FleetPage({ overview = false }: { overview?: boolean }) {
                 value={status}
                 onChange={(event) => change('status', event.target.value)}
               >
-                <option value="all">All heartbeat states</option>
-                {['Online', 'Stale', 'Offline', 'Never seen'].map((value) => (
+                <option value="all">All Server</option>
+                {['Online', 'Stale', 'Offline'].map((value) => (
                   <option key={value}>{value}</option>
                 ))}
               </select>

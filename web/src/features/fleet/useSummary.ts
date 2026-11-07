@@ -9,17 +9,19 @@ export function useSummary() {
   return useQuery({
     queryKey: [...(identity ? consoleKey(identity) : ['public-console']), 'summary'],
     queryFn: ({ signal }) => (identity ? api.summary(signal) : api.publicSummary(signal)),
+    // Also tolerate older Servers that still project enrolled, unseen Agents.
+    select: (data) => ({ ...data, nodes: data.nodes.filter((node) => node.last_seen_at > 0) }),
     enabled: !identity || identity.capabilities.includes('summary:read'),
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
   })
 }
 
-export function useNow() {
+export function useNow(interval = 15_000) {
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now() / 1000), 15_000)
+    const timer = window.setInterval(() => setNow(Date.now() / 1000), interval)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [interval])
   return now
 }

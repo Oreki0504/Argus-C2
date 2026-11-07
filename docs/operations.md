@@ -86,6 +86,8 @@ For repeatable same-root server leaf rotation: back up the old leaf/key separate
 
 ## Database compatibility and upgrades
 
+For standard Linux/systemd installations, the release installer supports `--update server` and `--update agent`. It verifies the bundle, snapshots stopped state/configuration and old programs, checks a copy with the candidate, and restores previous programs on failure without rewinding the live database. See [update commands and recovery](server-installation.zh-CN.md#更新-server-或-agent). Custom deployments and schema migrations use the explicit procedure below.
+
 The server requires Schema **103**; the agent remains on Schema **101**, independently versioned. Server databases have SQLite application ID `0x41524753` (`ARGS`); agent databases use `0x41524741` (`ARGA`). Server Schema 101 is incompatible with 102 because it lacks trusted receipt and durable execution-authorization timestamps and the task-query indexes. Wrong-component and other unsupported versions are rejected; startup never resets or converts them. Do not change `PRAGMA user_version` to bypass the check.
 
 Before replacing binaries:
