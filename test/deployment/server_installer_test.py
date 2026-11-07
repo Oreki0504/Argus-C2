@@ -189,7 +189,7 @@ class InstallerTests(unittest.TestCase):
                     installer.update_plan(component, 'amd64')
                 installer.mkdir(config.parent)
                 state = installer.path(f'/var/lib/argus-c2-{component}')
-                config.write_text(json.dumps({'state_dir': str(state)}))
+                installer.write_new(config, json.dumps({'state_dir': str(state)}))
                 with self.assertRaisesRegex(installer.UpdatePreflightError, str(state)):
                     installer.update_plan(component, 'amd64')
                 self.assertFalse(installer.path('/var/lib/argus-c2-updates').exists())
