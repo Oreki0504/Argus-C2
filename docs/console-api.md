@@ -98,7 +98,7 @@ Every route below requires a current **Web Admin** session. The server does not 
 
 Pages have exactly `{items,total,next_cursor}` with a nullable cursor. Limit defaults to 8, ranges 1–200. Tasks sort by descending `(created_at,id)`; other pages by descending ID. Cursors bind to the route and filters. Listings are live, not frozen snapshots; filters may change membership between requests. Unknown/duplicate query keys and malformed bounds are rejected. Text search is literal and case-insensitive under SQLite's default LIKE behavior.
 
-Agent DTO: `{node_id,public_id,display_name,hostname,status,last_seen_at,created_at,agent_version,protocol_version,certificate_expires_at}`. Unlike the public projection this exposes the hostname, but never certificate/private-key material.
+Agent DTO: `{node_id,public_id,display_name,hostname,status,last_seen_at,created_at,agent_version,protocol_version,certificate_expires_at}`. Unlike the public projection this exposes the hostname, but never certificate/private-key material. Enrolled Agents with `last_seen_at=0` remain available here for administration; public summaries omit them and their public history returns 404 until the first heartbeat.
 
 Task DTO extends the existing task fields with `agent_name`, nullable `execution_authorized_at` and `result_received_at`. Result DTO is `{status,error,completed_at,payload}`. Payload is the retained diagnostic JSON, available only to Admin. `ACCEPTED` means selected for delivery, not confirmed Agent receipt. `UNKNOWN` retains the existing unresolved/persisted-result semantics; it is not proof of cancellation. Writes are never automatically retried after uncertainty.
 

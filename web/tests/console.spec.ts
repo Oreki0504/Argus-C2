@@ -82,12 +82,11 @@ test('overview clock follows browser local time without a timezone label', async
   ]) {
     const context = await browser.newContext({ timezoneId })
     const page = await context.newPage()
-    await page.clock.install({ time: new Date('2026-11-08T12:34:56Z') })
-    await page.clock.pauseAt(new Date('2026-11-08T12:34:56Z'))
+    await page.clock.setFixedTime(new Date('2026-11-08T12:34:56Z'))
     await page.goto('/')
     await expect(page.locator('.overview-updated time')).toHaveText(expected)
     await expect(page.locator('.overview-updated time')).not.toHaveAttribute('title')
-    await page.clock.runFor(1000)
+    await page.clock.setFixedTime(new Date('2026-11-08T12:34:57Z'))
     await expect(page.locator('.overview-updated time')).toHaveText(expected.slice(0, -2) + '57')
     await context.close()
   }

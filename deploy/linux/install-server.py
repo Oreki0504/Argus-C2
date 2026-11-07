@@ -953,6 +953,6 @@ def main(argv=None):
 if __name__ == '__main__':
     try:
         main()
-    except (InstallError, OSError, ValueError, EOFError, KeyboardInterrupt, tarfile.TarError, subprocess.SubprocessError) as error:
+    except (InstallError, OSError, ValueError, EOFError, KeyboardInterrupt, tarfile.TarError, subprocess.SubprocessError, sqlite3.Error) as error:
         report_failure(error, updating=any(arg == '--update' or arg.startswith('--update=') for arg in sys.argv[1:]))
         sys.exit(1)
