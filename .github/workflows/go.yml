@@ -21,6 +21,9 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./... -count=1
+      - name: Isolated Server installer tests
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s test/deployment -p 'server_installer_test.py' -v
       - name: Race detector
         if: runner.os == 'Linux'
         run: go test -race ./... -count=1

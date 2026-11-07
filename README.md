@@ -55,6 +55,8 @@ done
 
 Follow the [local quick start](docs/quickstart.md) to complete a single-node workflow. Use [Linux deployment](docs/deployment.md) when preparing authorized test hosts. Agent enrollment, execution, and renewal require a non-root Linux user. Windows builds and selected tests do not establish Windows agent deployment support.
 
+For a new Linux Server with the Web Console, the [one-command installer](docs/server-installation.zh-CN.md) asks for a domain or IP, configures HTTPS and renewal, initializes state and publishes Agent installers. Release bundles include the compiled UI and both Agent architectures; target hosts do not need Go or Node.
+
 ## Documentation
 
 | Document | Purpose |
@@ -67,6 +69,7 @@ Follow the [local quick start](docs/quickstart.md) to complete a single-node wor
 | [Architecture and state](docs/architecture.md) | Task code path, SQLite model, and failure behavior |
 | [Security boundaries](docs/security.md) | Trust assumptions, credentials, audit, and limitations |
 | [Linux deployment](docs/deployment.md) | Accounts, permissions, systemd, and enrollment |
+| [Server installation](docs/server-installation.zh-CN.md) · [Agent installation](docs/agent-installation.zh-CN.md) | Release bundles, one-command setup, domain/IP certificates and renewal |
 | [Operations](docs/operations.md) | Accounts, renewal, logs, backup, recovery, and troubleshooting |
 | [Web Console](docs/web-design.md) | React UI, OIDC sessions, Admin management and [HTTPS setup](docs/console.md) |
 | [Development and validation](docs/validation.md) | Test commands, evidence, CI, and remaining fleet acceptance |

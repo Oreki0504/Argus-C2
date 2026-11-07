@@ -32,7 +32,14 @@ jobs:
       - run: npm test
         env:
           ARGUS_CONSOLE_CONTRACT_FILE: ${{ runner.temp }}/argus-console-contract.json
-      - run: npm run build
+      - name: Build Console and Linux Server release bundles
+        run: sh deploy/linux/build-server-bundles.sh "$RUNNER_TEMP/argus-server-release"
+        working-directory: .
+      - name: Verify real Server bundle with isolated system operations
+        run: python3 -m unittest discover -s test/deployment -p 'server_installer_test.py' -v
+        working-directory: .
+        env:
+          ARGUS_SERVER_TEST_BUNDLE: ${{ runner.temp }}/argus-server-release/argus-server-linux-amd64.tar.gz
       - run: npm audit --audit-level=moderate
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
@@ -40,6 +47,11 @@ jobs:
         with:
           name: console-assets
           path: internal/webui/dist
+          if-no-files-found: error
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: server-bundles
+          path: ${{ runner.temp }}/argus-server-release
           if-no-files-found: error
   go-ui:
     needs: web

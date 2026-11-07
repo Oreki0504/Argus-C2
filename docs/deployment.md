@@ -6,6 +6,8 @@ This guide installs one server and one or more agents on explicitly authorized L
 
 The management host needs one configured HTTPS port. Agents need only outbound access to it. The server certificate must include the DNS name or IP address clients use. Synchronize host clocks because certificate and task validity depend on time.
 
+For a new Server with the Web Console, use the [one-command Server installer](server-installation.zh-CN.md). Its interactive setup accepts a domain or IP, obtains a Let's Encrypt certificate when publicly reachable, configures renewal, initializes Fleet/database state and publishes Agent installers. A local-CA option supports private LAN addresses. It installs only the Server service; the manual steps below remain available for custom deployments.
+
 ## 1. Build and install
 
 Build the three programs for the target architecture from the repository root:

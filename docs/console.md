@@ -4,6 +4,8 @@
 
 The Console uses an independent browser HTTPS listener in the same server process. It is disabled unless all four Console flags are supplied. CLI and Agent traffic continues to use the Fleet address.
 
+New Linux/systemd deployments can use the [interactive Server installer](server-installation.zh-CN.md) to configure these listeners, initialize state, publish Agent binaries, and request/renew Let's Encrypt domain or public-IP certificates. It still requires the operator to configure OIDC and bind the first administrator in `/setup`.
+
 ## Build and database upgrade
 
 Build the production UI, then the embedded server:

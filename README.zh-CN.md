@@ -55,6 +55,8 @@ done
 
 按[中文快速开始](docs/quickstart.zh-CN.md)完成单节点闭环；准备测试主机时使用[Linux 部署指南](docs/deployment.md)。Agent 的注册、运行和续期要求 Linux 非 root 用户；Windows 构建与部分测试不代表支持 Windows Agent 部署。
 
+新 Linux Server 可使用[一键安装器](docs/server-installation.zh-CN.md)：交互选择域名或 IP，自动配置 HTTPS、证书续期、初始状态和 Agent 下载服务。发布包内置前端及两种架构的 Agent，目标机无需 Go 或 Node。
+
 ## 文档导航
 
 | 文档 | 内容 |
@@ -67,6 +69,7 @@ done
 | [架构与状态](docs/architecture.md) | 任务代码路径、数据库与故障语义 |
 | [安全边界](docs/security.md) | 信任假设、凭证、审计和限制 |
 | [Linux 部署](docs/deployment.md) | 账户、权限、systemd 与注册 |
+| [Server 一键安装](docs/server-installation.zh-CN.md) · [Agent 一键安装](docs/agent-installation.zh-CN.md) | 发布包、交互安装、域名／IP 证书和自动续期 |
 | [日常运维](docs/operations.md) | 账号、续期、日志、备份恢复和排障 |
 | [Web Console](docs/web-design.md) | React 界面、OIDC 会话、Admin 管理及 [Auth0 + GitHub／Google 配置](docs/console-auth0.zh-CN.md) |
 | [开发与验证](docs/validation.md) | 测试命令、证据、CI 与后续验收 |
