@@ -264,6 +264,7 @@ def resolve_release(args, stage, arch):
             try:
                 download(LATEST_RELEASE, stage / 'release.json', 1024 * 1024)
             except urllib.error.HTTPError as error:
+                error.close()
                 if error.code == 404:
                     raise InstallError('No stable GitHub Release is published. Use a published preview tag with --release TAG, or provide a local bundle.') from error
                 raise
@@ -274,6 +275,7 @@ def resolve_release(args, stage, arch):
     try:
         download(base + '/SHA256SUMS', stage / 'SHA256SUMS', 16384)
     except urllib.error.HTTPError as error:
+        error.close()
         if error.code == 404:
             raise InstallError('This release has no installation assets. Publish SHA256SUMS and the Server bundles before using its URL.') from error
         raise
