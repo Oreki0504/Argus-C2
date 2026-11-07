@@ -1,7 +1,13 @@
 #!/bin/sh
 # Build operator-published Server bundles. Nothing is installed on this host.
 set -eu
-[ "$#" -eq 1 ] || { printf '%s\n' 'usage: build-server-bundles.sh NEW_OUTPUT_DIRECTORY' >&2; exit 1; }
+[ "$#" -ge 1 ] && [ "$#" -le 2 ] || { printf '%s\n' 'usage: build-server-bundles.sh NEW_OUTPUT_DIRECTORY [RELEASE_TAG]' >&2; exit 1; }
+release_tag=${2-}
+python3 - "$release_tag" <<'PY'
+import re, sys
+if sys.argv[1] and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}', sys.argv[1]):
+    sys.exit('Invalid release tag.')
+PY
 [ ! -e "$1" ] && [ ! -L "$1" ] || { printf '%s\n' 'Output directory must be new.' >&2; exit 1; }
 source_dir=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 output_dir=$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$1")
@@ -35,7 +41,16 @@ for arch in ('amd64', 'arm64'):
             info.size, info.mode = len(data), 0o644
             archive.addfile(info, io.BytesIO(data))
 PY
-cp deploy/linux/install-server.py "$stage/release/"
+python3 - "$stage/release/install-server.py" "$release_tag" <<'PY'
+import json, pathlib, sys
+source = pathlib.Path('deploy/linux/install-server.py').read_text()
+marker = 'DEFAULT_RELEASE = None  # Replaced by the release builder to pin matching assets.'
+if source.count(marker) != 1:
+    sys.exit('Missing installer release marker.')
+if sys.argv[2]:
+    source = source.replace(marker, 'DEFAULT_RELEASE = ' + json.dumps(sys.argv[2]) + '  # Release-pinned assets.')
+pathlib.Path(sys.argv[1]).write_text(source)
+PY
 mkdir -m 0755 -- "$output_dir"
 cp "$stage/release/"* "$output_dir/"
 cd "$output_dir"

@@ -55,7 +55,7 @@ done
 
 Follow the [local quick start](docs/quickstart.md) to complete a single-node workflow. Use [Linux deployment](docs/deployment.md) when preparing authorized test hosts. Agent enrollment, execution, and renewal require a non-root Linux user. Windows builds and selected tests do not establish Windows agent deployment support.
 
-For a new Linux Server with the Web Console, the [one-command installer](docs/server-installation.zh-CN.md) asks for a domain or IP, configures HTTPS and renewal, initializes state and publishes Agent installers. Release bundles include the compiled UI and both Agent architectures; target hosts do not need Go or Node.
+For a new Linux Server with the Web Console, the [one-command installer](docs/server-installation.zh-CN.md) supports curl/wget download links, selects the matching architecture and release, asks for a domain or IP, configures HTTPS and renewal, initializes state and publishes Agent installers. Release bundles include the compiled UI and both Agent architectures; target hosts do not need Go or Node. Public installation URLs become available when a maintainer publishes a GitHub Release through the manual release workflow.
 
 ## Documentation
 

@@ -1,0 +1,85 @@
+name: Publish Server release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to build and publish, for example v0.1.0-preview.1'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: server-release-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: Validate the selected version tag
+        run: |
+          python3 - <<'PY'
+          import os, re
+          tag = os.environ['RELEASE_TAG']
+          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9][A-Za-z0-9.-]*)?', tag):
+              raise SystemExit('Use a version tag, not a branch or arbitrary ref.')
+          PY
+          git show-ref --verify "refs/tags/$RELEASE_TAG"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - run: npm ci --ignore-scripts
+        working-directory: web
+      - run: npm run lint && npm test
+        working-directory: web
+      - name: Build version-pinned release assets
+        run: sh deploy/linux/build-server-bundles.sh "$RUNNER_TEMP/argus-release" "$RELEASE_TAG"
+      - run: go test -tags ui ./... -count=1
+      - name: Validate installation and download flows
+        run: python3 -m unittest discover -s test/deployment -p 'server_installer_test.py' -v
+        env:
+          ARGUS_SERVER_TEST_BUNDLE: ${{ runner.temp }}/argus-release/argus-server-linux-amd64.tar.gz
+      - name: Publish verified assets without replacing an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/argus-release"
+          sha256sum --check SHA256SUMS
+          python3 - <<'PY'
+          import os, pathlib
+          tag = os.environ['RELEASE_TAG']
+          url = f'https://github.com/Oreki0504/Argus-C2/releases/download/{tag}/install-server.py'
+          command = f'''( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' '{url}' -o "$f" && sudo python3 "$f" )'''
+          notes = f'''Install ARGUS Server on a new Linux/systemd host (x86_64 or ARM64):
+
+          ```sh
+          {command}
+          ```
+
+          The installer downloads the matching version, verifies its SHA-256, and asks for a domain or IP to configure HTTPS. Python 3.10+, OpenSSL and systemd-sysusers are required. Complete Auth0/OIDC setup in `/setup` after installation.
+
+          Public certificate issuance requires inbound TCP 80; private LAN IPs use a separately trusted local CA. Existing Server installations are preserved. See `docs/server-installation.zh-CN.md` at this tag for deployment and renewal details.
+          '''
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'argus-release-notes.md').write_text(notes)
+          PY
+          flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); else flags+=(--latest); fi
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+            --title "ARGUS $RELEASE_TAG" --notes-file "$RUNNER_TEMP/argus-release-notes.md" \
+            install-server.py SHA256SUMS argus-server-linux-amd64.tar.gz argus-server-linux-arm64.tar.gz
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false "${flags[@]}"

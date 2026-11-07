@@ -26,6 +26,8 @@ import tarfile
 import tempfile
 import time
 import urllib.request
+import urllib.error
+from urllib.parse import urlsplit
 
 ROOT = Path('/')
 SERVICE = 'argus-c2-server.service'
@@ -34,6 +36,9 @@ MAX_ARCHIVE = 128 * 1024 * 1024
 FILES = {'server': 64 << 20, 'argus': 32 << 20, 'agent-linux-amd64': 32 << 20,
          'agent-linux-arm64': 32 << 20, 'argus-c2-server.service': 16384, 'manifest.json': 16384}
 ACME = 'https://acme-v02.api.letsencrypt.org/directory'
+GITHUB = 'https://github.com/Oreki0504/Argus-C2/releases'
+LATEST_RELEASE = 'https://api.github.com/repos/Oreki0504/Argus-C2/releases/latest'
+DEFAULT_RELEASE = None  # Replaced by the release builder to pin matching assets.
 
 
 class InstallError(Exception):
@@ -134,7 +139,9 @@ def parser():
     p = argparse.ArgumentParser(description='Install a new ARGUS Server; without flags, ask for domain/IP and certificate setup.')
     source = p.add_mutually_exclusive_group()
     source.add_argument('--bundle', type=Path, help='local release archive; defaults to the archive next to this script')
-    source.add_argument('--bundle-url', help='direct HTTPS release archive URL (no redirects)')
+    source.add_argument('--bundle-url', help='HTTPS release archive URL; HTTPS redirects are supported')
+    source.add_argument('--release', help='GitHub release tag; normally pinned by the downloaded installer')
+    source.add_argument('--release-base', help='HTTPS directory containing a published release and SHA256SUMS')
     p.add_argument('--sha256', help='trusted release archive SHA-256; required for URL downloads')
     p.add_argument('--host', help='reachable Console/Fleet DNS hostname or IP')
     p.add_argument('--tls', choices=('letsencrypt', 'local-ca', 'existing'))
@@ -197,41 +204,114 @@ def configure(args, interactive):
     return args
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
+def https_url(value):
+    u = urlsplit(value)
+    if u.scheme != 'https' or not u.hostname or u.username or u.password or u.fragment:
+        raise InstallError('Downloads require HTTPS without credentials or fragments.')
+    return value
+
+
+class HTTPSRedirects(urllib.request.HTTPRedirectHandler):
+    max_redirections = 5
+    max_repeats = 2
+
     def redirect_request(self, *args, **kwargs):
-        raise InstallError('Release redirects are disabled; supply a direct HTTPS download URL.')
+        # GitHub assets redirect to release-assets.githubusercontent.com. Never
+        # downgrade TLS or forward credentials to redirected hosts.
+        newurl = kwargs.get('newurl', args[5] if len(args) > 5 else '')
+        https_url(newurl)
+        return super().redirect_request(*args, **kwargs)
+
+
+def download(url, destination, limit):
+    https_url(url)
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    request = urllib.request.Request(url, headers={'User-Agent': 'ARGUS-Installer'})
+    opener = urllib.request.build_opener(HTTPSRedirects(), urllib.request.HTTPSHandler(context=context))
+    digest = hashlib.sha256()
+    with opener.open(request, timeout=30) as source, open(destination, 'xb') as out:
+        total, deadline = 0, time.monotonic() + 300
+        while True:
+            chunk = source.read(min(1024 * 1024, limit + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > limit or time.monotonic() > deadline:
+                raise InstallError('Download exceeds its size or time limit.')
+            digest.update(chunk)
+            out.write(chunk)
+    return digest.hexdigest()
+
+
+def archive_digest(sums, filename):
+    matches = [line.split()[0] for line in sums.splitlines()
+               if len(line.split()) == 2 and line.split()[1] == filename]
+    if len(matches) != 1 or not re.fullmatch('[0-9a-fA-F]{64}', matches[0]):
+        raise InstallError('SHA256SUMS must identify exactly one valid digest for the selected archive.')
+    return matches[0].lower()
+
+
+def resolve_release(args, stage, arch):
+    filename = f'argus-server-linux-{arch}.tar.gz'
+    if args.release_base:
+        base = https_url(args.release_base.rstrip('/'))
+        if urlsplit(base).query:
+            raise InstallError('Release directory URL must not contain a query string.')
+    else:
+        tag = args.release or DEFAULT_RELEASE
+        if not tag:
+            try:
+                download(LATEST_RELEASE, stage / 'release.json', 1024 * 1024)
+            except urllib.error.HTTPError as error:
+                if error.code == 404:
+                    raise InstallError('No stable GitHub Release is published. Use a published preview tag with --release TAG, or provide a local bundle.') from error
+                raise
+            tag = json.loads((stage / 'release.json').read_text()).get('tag_name')
+        if not isinstance(tag, str) or not re.fullmatch('[A-Za-z0-9][A-Za-z0-9._-]{0,63}', tag):
+            raise InstallError('Invalid release tag.')
+        base = f'{GITHUB}/download/{tag}'
+    try:
+        download(base + '/SHA256SUMS', stage / 'SHA256SUMS', 16384)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            raise InstallError('This release has no installation assets. Publish SHA256SUMS and the Server bundles before using its URL.') from error
+        raise
+    expected = archive_digest((stage / 'SHA256SUMS').read_text(), filename)
+    if args.sha256 and args.sha256.lower() != expected:
+        raise InstallError('The supplied SHA-256 does not match the release manifest.')
+    args.sha256, args.bundle_url = expected, base + '/' + filename
 
 
 def obtain_bundle(args, stage, arch):
+    if not args.bundle_url and not args.bundle:
+        local = Path(__file__).resolve().parent / f'argus-server-linux-{arch}.tar.gz'
+        if local.is_file() and not args.release and not args.release_base:
+            args.bundle = local
+        else:
+            resolve_release(args, stage, arch)
     if args.bundle_url:
-        from urllib.parse import urlsplit
-        u = urlsplit(args.bundle_url)
-        if u.scheme != 'https' or not u.hostname or u.username or u.password or u.fragment:
-            raise InstallError('Bundle URL must use HTTPS without credentials or fragments.')
+        https_url(args.bundle_url)
         if not args.sha256:
             raise InstallError('--sha256 from a trusted release is required for downloads.')
     else:
-        args.bundle = args.bundle or Path(__file__).resolve().parent / f'argus-server-linux-{arch}.tar.gz'
         if not args.sha256:
             sums = read_bounded(args.bundle.parent / 'SHA256SUMS', 16384).decode()
-            matches = [line.split()[0] for line in sums.splitlines()
-                       if len(line.split()) == 2 and line.split()[1] == args.bundle.name]
-            if len(matches) != 1:
-                raise InstallError('The local SHA256SUMS must identify exactly one archive.')
-            args.sha256 = matches[0]
+            args.sha256 = archive_digest(sums, args.bundle.name)
     if not re.fullmatch('[0-9a-fA-F]{64}', args.sha256):
         raise InstallError('Invalid SHA-256 digest.')
     dest = stage / 'release.tar.gz'
     digest = hashlib.sha256()
     if args.bundle_url:
-        context = ssl.create_default_context()
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        stream = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPSHandler(context=context)).open(args.bundle_url, timeout=30)
-    else:
-        stream = open(args.bundle, 'rb')
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-            stream.close()
-            raise InstallError('Bundle must be a regular file.')
+        print(f'Downloading Linux {arch} Server bundle / 正在下载对应架构安装包…')
+        actual = download(args.bundle_url, dest, MAX_ARCHIVE)
+        if actual != args.sha256.lower():
+            raise InstallError('Bundle SHA-256 mismatch; nothing was executed.')
+        return dest
+    stream = open(args.bundle, 'rb')
+    if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+        stream.close()
+        raise InstallError('Bundle must be a regular file.')
     with stream, open(dest, 'xb') as out:
         total, deadline = 0, time.monotonic() + 300
         while True:

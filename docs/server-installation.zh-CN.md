@@ -12,7 +12,7 @@
 cd web
 npm ci --ignore-scripts
 cd ..
-sh deploy/linux/build-server-bundles.sh /tmp/argus-server-release
+sh deploy/linux/build-server-bundles.sh /tmp/argus-server-release v0.1.0-preview.1
 ```
 
 生成：
@@ -24,13 +24,31 @@ argus-server-linux-arm64.tar.gz
 SHA256SUMS
 ```
 
-构建需要项目规定的 Go 和 Node 版本。可以将目录放在自己的 HTTPS 下载站、GitHub Release，或通过可信渠道复制到目标主机。CI 会生成 `server-bundles` artifact，但不会自动发布 GitHub Release。目标服务器首次安装不依赖一个已经运行的 Argus Server。
+构建需要项目规定的 Go 和 Node 版本。第二个参数是计划发布的版本 tag，构建器将它写入安装脚本，保证脚本与安装包使用同一个版本；省略 tag 时保留本地目录安装及最新稳定 Release 查询能力。可以将目录放在自己的 HTTPS 下载站、GitHub Release，或通过可信渠道复制到目标主机。普通 CI 会生成 `server-bundles` artifact；发布流程需手动运行，见下文。目标服务器首次安装不依赖一个已经运行的 Argus Server。
 
 安装脚本与 SHA256SUMS 应从可信来源一起取得。SHA-256 检测损坏和替换，不替代发布者身份认证。仅传输目标架构的 Server 压缩包即可，其中已附带两种架构的 Agent。
 
 ## 一条命令启动交互安装
 
-将安装目录复制到目标机器后执行：
+**发布首个稳定 GitHub Release 后**，用户在新服务器粘贴以下命令即可下载安装脚本、启动交互并自动取得匹配的安装包。当前代码准备了下载与发布流程，是否已有 Release 应以仓库 Releases 页面为准；仅在本地 commit 不会使链接生效。
+
+curl：
+
+```sh
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/latest/download/install-server.py -o "$f" && sudo python3 "$f" )
+```
+
+GNU wget：
+
+```sh
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; wget --https-only --max-redirect=5 -O "$f" https://github.com/Oreki0504/Argus-C2/releases/latest/download/install-server.py && sudo python3 "$f" )
+```
+
+脚本完整下载后才执行，终端标准输入保留给域名/IP 提问。脚本识别架构，从其绑定的 Release 获取 `SHA256SUMS` 和安装包，校验后才运行包内程序。用户不需要填写安装包 URL 或摘要。GitHub 的 HTTPS 资产重定向受支持，不允许降级到 HTTP 或带凭据跳转。
+
+预发布版本不会成为 `latest`。要安装预发布版或固定版本，将链接中的 `latest/download` 换成 `download/实际TAG`，例如首次预发布采用 `download/v0.1.0-preview.1`；该 tag 和资产必须已经发布。每个 Release 的说明会给出该版本的完整命令。
+
+已有本地安装目录时，也可以继续执行：
 
 ```sh
 sudo python3 install-server.py
@@ -85,7 +103,15 @@ sudo python3 install-server.py \
   --sha256 ACTUAL_TRUSTED_ARCHIVE_SHA256
 ```
 
-以上下载地址是部署示例，仓库尚未为你发布一个公网下载链接。此命令仍会询问域名/IP。URL 必须直达文件，不跟随重定向；本地包使用 `--bundle /path/archive.tar.gz`。URL 下载必须显式传入可信 SHA-256；本地包默认读取同目录 `SHA256SUMS`。完整下载及校验通过后才会执行包内程序，解包不接受目录穿越、链接、重复或意外文件。
+以上下载地址是部署示例。自定义单个包的 `--bundle-url` 必须显式传入可信 SHA-256，支持最多五次 HTTPS 重定向；本地包使用 `--bundle /path/archive.tar.gz` 并默认读取同目录 `SHA256SUMS`。完整下载及校验通过后才会执行包内程序，解包不接受目录穿越、链接、重复或意外文件。
+
+自托管整个发布目录时，可以改用 `--release-base https://downloads.example.com/argus/v0.1.0`，自动读取同目录清单并选择架构；或用 `--release v0.1.0-preview.1` 选择 GitHub 上已发布的版本。没有本地包、没有绑定版本的源码安装器会查询 GitHub 最新稳定 Release；没有 Release 时明确报错，不会回退到源码构建或未经校验的二进制。
+
+## 发布 GitHub 下载入口
+
+维护者先提交并推送代码及所选版本 tag，再从 GitHub Actions 手动运行 **Publish Server release**，输入已经存在的 tag。流程会校验 tag、构建两种架构安装包、运行 Go 和隔离安装测试，再将安装器、SHA256SUMS、amd64 包和 arm64 包上传到草稿 Release，全部上传成功后才公开。预发布 tag（含 `-`）标记为 prerelease，正式 tag 更新 latest；已有 Release 不覆盖，上传失败留下的草稿需维护者检查。
+
+该流程需要仓库写权限。普通 commit/push 和前端 CI 不会自动发布版本，也不会擅自升级现有下载入口。下载链接必须等这一发布流程成功完成后才能交给用户执行。
 
 ## 安装完成后的配置
 

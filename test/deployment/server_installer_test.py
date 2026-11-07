@@ -5,6 +5,7 @@ Only systemd/account management is mocked in that opt-in integration test.
 """
 import contextlib
 import hashlib
+import http.server
 import importlib.util
 import io
 import json
@@ -15,8 +16,11 @@ import stat
 import subprocess
 import tarfile
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
+import urllib.error
+import urllib.request
 from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[2]
@@ -143,14 +147,102 @@ class InstallerTests(unittest.TestCase):
                     installer.unpack_bundle(archive, directory / 'unpacked', 'amd64')
                 self.assertFalse((directory / 'outside').exists())
 
-    def test_download_requires_verified_https_and_refuses_redirects(self):
+    def test_download_requires_verified_https_and_rejects_redirect_downgrades(self):
         for url, digest in [('http://example.com/a', 'a' * 64), ('https://user:password@example.com/a', 'a' * 64),
                             ('https://example.com/a', None)]:
             args = SimpleNamespace(bundle_url=url, sha256=digest)
             with self.subTest(url=url), self.assertRaises(installer.InstallError):
                 installer.obtain_bundle(args, self.root, 'amd64')
-        with self.assertRaises(installer.InstallError):
-            installer.NoRedirect().redirect_request(None, None, 302, '', {}, 'https://other.example')
+        for target in ('http://other.example', 'https://user:password@other.example', 'file:///etc/passwd'):
+            with self.assertRaises(installer.InstallError):
+                installer.HTTPSRedirects().redirect_request(None, None, 302, '', {}, target)
+        request = urllib.request.Request('https://github.com/example/asset')
+        redirected = installer.HTTPSRedirects().redirect_request(request, None, 302, '', {}, 'https://release-assets.githubusercontent.com/asset')
+        self.assertEqual(redirected.full_url, 'https://release-assets.githubusercontent.com/asset')
+
+    def test_release_installer_pins_matching_assets_and_architecture(self):
+        urls = []
+        def download(url, destination, limit):
+            urls.append(url)
+            destination.write_text('a' * 64 + '  argus-server-linux-arm64.tar.gz\n')
+        args = installer.parser().parse_args([])
+        with patch.object(installer, 'DEFAULT_RELEASE', 'v0.1.0-preview.1'), patch.object(installer, 'download', side_effect=download):
+            installer.resolve_release(args, self.root, 'arm64')
+        self.assertEqual(urls, [installer.GITHUB + '/download/v0.1.0-preview.1/SHA256SUMS'])
+        self.assertEqual(args.bundle_url, installer.GITHUB + '/download/v0.1.0-preview.1/argus-server-linux-arm64.tar.gz')
+        self.assertEqual(args.sha256, 'a' * 64)
+
+    def test_missing_release_has_actionable_error_and_no_fabricated_fallback(self):
+        args = installer.parser().parse_args([])
+        error = urllib.error.HTTPError(installer.LATEST_RELEASE, 404, 'Not found', {}, None)
+        with patch.object(installer, 'DEFAULT_RELEASE', None), patch.object(installer, 'download', side_effect=error):
+            with self.assertRaisesRegex(installer.InstallError, 'No stable GitHub Release'):
+                installer.resolve_release(args, self.root, 'amd64')
+
+    def test_release_digest_rejects_duplicate_missing_and_conflicting_entries(self):
+        filename = 'argus-server-linux-amd64.tar.gz'
+        for content in ('', 'bad  ' + filename, ('a' * 64 + '  ' + filename + '\n') * 2):
+            with self.assertRaises(installer.InstallError):
+                installer.archive_digest(content, filename)
+        args = installer.parser().parse_args(['--release', '../main'])
+        with self.assertRaisesRegex(installer.InstallError, 'Invalid release tag'):
+            installer.resolve_release(args, self.root, 'amd64')
+        args = installer.parser().parse_args(['--release', 'v1.0.0', '--sha256', 'b' * 64])
+        with patch.object(installer, 'download', side_effect=lambda url, dest, limit: dest.write_text('a' * 64 + '  ' + filename)):
+            with self.assertRaisesRegex(installer.InstallError, 'does not match'):
+                installer.resolve_release(args, self.root, 'amd64')
+
+    def test_real_https_release_download_follows_secure_redirects_and_verifies_bundle(self):
+        args = options('--host', '127.0.0.1', '--tls', 'local-ca')
+        certdir, _ = installer.certificates(args, self.root)
+        archive, digest = make_bundle(self.root)
+        content = archive.read_bytes()
+        calls = []
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                calls.append(self.path)
+                if self.path == '/release/SHA256SUMS':
+                    body = (digest + '  argus-server-linux-amd64.tar.gz\n').encode()
+                elif self.path == '/release/argus-server-linux-amd64.tar.gz':
+                    self.send_response(302)
+                    self.send_header('Location', '/objects/archive')
+                    self.end_headers()
+                    return
+                elif self.path == '/objects/archive':
+                    body = content
+                else:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            def log_message(self, *args):
+                pass
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certdir / 'browser.pem', certdir / 'browser-key.pem')
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = f'https://127.0.0.1:{server.server_port}/release'
+            args = installer.parser().parse_args(['--release-base', base])
+            stage = self.root / 'download'
+            stage.mkdir()
+            # Trust only this ephemeral fixture CA; production TLS verification
+            # is unchanged and no public service or root installation is used.
+            with patch.dict(os.environ, SSL_CERT_FILE=str(certdir / 'ca.pem')), contextlib.redirect_stdout(io.StringIO()):
+                downloaded = installer.obtain_bundle(args, stage, 'amd64')
+                installer.unpack_bundle(downloaded, self.root / 'unpacked', 'amd64')
+                with self.assertRaisesRegex(installer.InstallError, 'size or time limit'):
+                    installer.download(base + '/SHA256SUMS', self.root / 'oversized', 16)
+            self.assertEqual(downloaded.read_bytes(), content)
+            self.assertIn('/objects/archive', calls)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
 
     def test_existing_and_symlink_installations_are_preserved(self):
         args = options('--host', '192.168.9.40', '--tls', 'local-ca')
