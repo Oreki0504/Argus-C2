@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Oreki0504/Argus-C2/internal/database"
 )
@@ -250,7 +251,7 @@ func TestGitHubFailuresCannotBindOrReplay(t *testing.T) {
 					t.Fatal(dest)
 				}
 			}
-			reason := map[string]string{"bad-client": "github_client_invalid", "exchange-error": "github_exchange_failed", "pkce": "github_exchange_failed", "profile-error": "github_unavailable", "profile-redirect": "github_unavailable", "missing-id": "github_profile_failed", "organization": "github_profile_failed"}[mode]
+			reason := map[string]string{"bad-client": "github_client_invalid", "callback-mixup": "oauth_callback_mismatch", "state": "oauth_callback_invalid", "replay": "oauth_cookie_missing", "exchange-error": "github_exchange_failed", "pkce": "github_exchange_failed", "profile-error": "github_unavailable", "profile-redirect": "github_unavailable", "missing-id": "github_profile_failed", "organization": "github_profile_failed"}[mode]
 			if reason == "" {
 				reason = "oidc_callback_invalid"
 			}
@@ -355,4 +356,50 @@ func newGitHubFixture(t *testing.T) *githubFixture {
 	}))
 	t.Cleanup(g.server.Close)
 	return g
+}
+
+func TestGitHubCallbackDiagnosticsKeepStateAndCookieChecks(t *testing.T) {
+	for _, mode := range []string{"cookie", "expired", "state", "path", "issuer", "changed", "missing-code"} {
+		t.Run(mode, func(t *testing.T) {
+			s, _, gh, b, csrf, settings := socialConsole(t)
+			decodeTest[map[string]any](t, b.request("POST", "/v1/console/setup/provider", settings, csrf, nil), 200)
+			callback := startSocial(t, b, "github", csrf, true)
+			u, _ := url.Parse(callback)
+			q := u.Query()
+			reason := ""
+			switch mode {
+			case "cookie":
+				b = newBrowser(t, s)
+				reason = "oauth_cookie_missing"
+			case "expired":
+				s.now = func() time.Time { return time.Now().Add(6 * time.Minute) }
+				reason = "oauth_flow_expired"
+			case "state":
+				q.Set("state", "untrusted-secret")
+				reason = "oauth_state_mismatch"
+			case "path":
+				u.Path = callbackPath("google")
+				reason = "oauth_callback_mismatch"
+			case "issuer":
+				q.Set("iss", "https://untrusted.example")
+				reason = "oauth_issuer_mismatch"
+			case "changed":
+				decodeTest[map[string]any](t, b.request("POST", "/v1/console/setup/provider", settings, csrf, nil), 200)
+				reason = "oauth_configuration_changed"
+			case "missing-code":
+				q.Del("code")
+				reason = "oauth_provider_rejected"
+			}
+			u.RawQuery = q.Encode()
+			if got := b.request("GET", u.RequestURI(), nil, "", nil).Header().Get("Location"); got != "/login?reason="+reason {
+				t.Fatal(got)
+			}
+			gh.mu.Lock()
+			exchanges := gh.exchanges
+			gh.mu.Unlock()
+			if exchanges != 0 {
+				t.Fatal("unsafe callback exchanged authorization code")
+			}
+		})
+	}
 }

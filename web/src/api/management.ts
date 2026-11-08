@@ -59,6 +59,13 @@ export const management = {
       body: disableAgentSchema.parse({ confirm_node_id: confirmation }),
       csrf,
     }),
+  rename: (nodeId: string, display_name: string, csrf: string) =>
+    request(`${root}/agents/${id(nodeId)}/rename`, emptySchema, { body: { display_name }, csrf }),
+  remove: (nodeId: string, confirmation: string, csrf: string) =>
+    request(`${root}/agents/${id(nodeId)}/delete`, emptySchema, {
+      body: disableAgentSchema.parse({ confirm_node_id: confirmation }),
+      csrf,
+    }),
   audit: (filters: ListFilters, signal?: AbortSignal) =>
     request(listPath('audit', filters), auditPageSchema, { signal }),
   users: (filters: ListFilters, signal?: AbortSignal) =>

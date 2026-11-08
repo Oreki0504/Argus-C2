@@ -1137,6 +1137,19 @@
   cursor: pointer;
   margin-bottom: 20px;
 }
+.account-token-settings {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+.account-token-settings .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.account-token-settings .button {
+  justify-self: start;
+}
 @media (max-width: 600px) {
   .account-page {
     padding: 16px;

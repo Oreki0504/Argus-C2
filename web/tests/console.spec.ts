@@ -208,6 +208,9 @@ test('token opens management first, then optional OAuth binds to the account', a
   for (const provider of ['GitHub', 'Google'])
     await page.getByRole('button', { name: `Bind with ${provider}`, exact: true }).click()
   await expect(page.getByRole('button', { name: 'Linked', exact: true })).toHaveCount(2)
+  await page.getByLabel('I can sign in with OAuth and want to disable the original token.').check()
+  await page.getByRole('button', { name: 'Disable token login', exact: true }).click()
+  await expect(page.getByText('Token login disabled', { exact: true })).toBeVisible()
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
   const storage = await page.evaluate(() =>
     JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }),
@@ -216,11 +219,14 @@ test('token opens management first, then optional OAuth binds to the account', a
   expect(storage).not.toContain('a'.repeat(64))
   await page.getByRole('button', { name: 'Sign out' }).click()
   await page.getByRole('link', { name: 'Log in', exact: true }).click()
+  await expect(page.getByLabel('Administrator token', { exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'Continue with Google', exact: true }).click()
   await expect(page.getByRole('link', { name: 'Management', exact: true })).toBeVisible()
 })
 
 test('GitHub failures explain the failed stage on login and account pages', async ({ page }) => {
+  await page.goto('/login?reason=oauth_cookie_missing')
+  await expect(page.getByText(/The browser did not return the login cookie/)).toBeVisible()
   await page.goto('/login?reason=github_client_invalid')
   await expect(page.getByText(/GitHub rejected the OAuth app credentials/)).toBeVisible()
   await page.goto('/account?scenario=admin&reason=github_unavailable')

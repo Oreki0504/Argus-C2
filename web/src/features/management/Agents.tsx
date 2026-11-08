@@ -1,8 +1,8 @@
 import { uncertainWrite, useListNavigation, useManagement } from './hooks'
 import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { Copy, MoreHorizontal, Plus, ShieldOff } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Copy, MoreHorizontal, Plus, ShieldOff, Pencil, Trash2 } from 'lucide-react'
 import { management } from '../../api/management'
 import type { ManagedAgent } from '../../api/management-contracts'
 import { usePreferences } from '../../preferences/context'
@@ -155,66 +155,103 @@ export function AgentsPage() {
 
 function AgentActionsDialog({ agent, onClose }: { agent: ManagedAgent; onClose: () => void }) {
   const { t } = usePreferences()
-  const { identity, refresh } = useManagement()
-  const [disabling, setDisabling] = useState(false)
+  const { identity } = useManagement()
+  const client = useQueryClient()
+  const [mode, setMode] = useState<'actions' | 'rename' | 'disable' | 'delete'>('actions')
   const [confirmation, setConfirmation] = useState('')
+  const [name, setName] = useState(agent.display_name)
   const mutation = useMutation({
-    mutationFn: () => management.disable(agent.node_id, confirmation, identity.csrf_token),
+    mutationFn: async () => {
+      if (mode === 'rename')
+        await management.rename(agent.node_id, name.trim(), identity.csrf_token)
+      else if (mode === 'delete')
+        await management.remove(agent.node_id, confirmation, identity.csrf_token)
+      else await management.disable(agent.node_id, confirmation, identity.csrf_token)
+    },
     onSuccess: () => {
-      void refresh()
+      void client.invalidateQueries({ queryKey: ['console'] })
+      void client.invalidateQueries({ queryKey: ['public-console'] })
       onClose()
     },
   })
+  const action =
+    mode === 'rename' ? 'Rename agent' : mode === 'delete' ? 'Delete agent' : 'Disable agent'
+  const valid =
+    mode === 'rename'
+      ? name.trim().length > 0 && name.trim().length <= 64
+      : confirmation === agent.node_id
   return (
     <Dialog
-      title={disabling ? t('Disable agent') : agent.display_name}
+      title={mode === 'actions' ? agent.display_name : t(action)}
       onClose={onClose}
       busy={mutation.isPending}
     >
       <p className="form-intro">
         {agent.display_name} · <code>{agent.node_id}</code>
       </p>
-      {disabling ? (
+      {mode !== 'actions' ? (
         <form
           className="management-form"
           onSubmit={(event) => {
             event.preventDefault()
-            if (confirmation === agent.node_id) mutation.mutate()
+            if (valid) mutation.mutate()
           }}
         >
-          <Notice kind="warning">
-            {t(
-              'Disabling rejects this agent’s future requests and affects unfinished tasks. There is no re-enable action; reconnecting requires new enrollment.',
-            )}
-          </Notice>
-          <label htmlFor="disable-confirm">{t('Type the agent ID to confirm')}</label>
-          <input
-            id="disable-confirm"
-            value={confirmation}
-            onChange={(event) => setConfirmation(event.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-            required
-          />
+          {mode === 'rename' ? (
+            <>
+              <p>
+                {t(
+                  'This name is visible in the public overview. Do not include private information.',
+                )}
+              </p>
+              <label htmlFor="agent-name">{t('Display name')}</label>
+              <input
+                id="agent-name"
+                maxLength={64}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                required
+              />
+            </>
+          ) : (
+            <>
+              <Notice kind="warning">
+                {t(
+                  mode === 'delete'
+                    ? 'Delete this agent and its task and metric history. Its credentials will stop working. Audit records remain. This does not uninstall software on the host.'
+                    : 'Disabling rejects this agent’s future requests and affects unfinished tasks. There is no re-enable action; reconnecting requires new enrollment.',
+                )}
+              </Notice>
+              <label htmlFor="agent-confirm">{t('Type the agent ID to confirm')}</label>
+              <input
+                id="agent-confirm"
+                value={confirmation}
+                onChange={(event) => setConfirmation(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                required
+              />
+            </>
+          )}
           <MutationError error={mutation.error} />
           <div className="dialog-actions">
             <button
               type="button"
               className="button secondary"
               disabled={mutation.isPending}
-              onClick={() => setDisabling(false)}
+              onClick={() => {
+                setMode('actions')
+                setConfirmation('')
+                mutation.reset()
+              }}
             >
               {t('Back')}
             </button>
             <button
-              className="button danger"
-              disabled={
-                mutation.isPending ||
-                confirmation !== agent.node_id ||
-                uncertainWrite(mutation.error)
-              }
+              className={mode === 'rename' ? 'button primary' : 'button danger'}
+              disabled={mutation.isPending || !valid || uncertainWrite(mutation.error)}
             >
-              {t(mutation.isPending ? 'Submitting…' : 'Disable agent')}
+              {t(mutation.isPending ? 'Submitting…' : action)}
             </button>
           </div>
         </form>
@@ -223,24 +260,32 @@ function AgentActionsDialog({ agent, onClose }: { agent: ManagedAgent; onClose: 
           <Link className="button secondary" to={`/fleet/${agent.public_id}`}>
             {t('View monitoring')}
           </Link>
-          {canManage(identity, 'tasks:read') && (
-            <Link className="button secondary" to={`/manage/tasks?node_id=${agent.node_id}`}>
-              {t('View tasks')}
+          <Link className="button secondary" to={`/manage/tasks?node_id=${agent.node_id}`}>
+            {t('View tasks')}
+          </Link>
+          {canManage(identity, 'tasks:write') && agent.status === 'active' && (
+            <Link className="button primary" to={`/manage/tasks?new=1&agent=${agent.public_id}`}>
+              {t('Dispatch task')}
             </Link>
           )}
-          {canManage(identity, 'tasks:read') &&
-            canManage(identity, 'tasks:write') &&
-            agent.status === 'active' && (
-              <Link className="button primary" to={`/manage/tasks?new=1&agent=${agent.public_id}`}>
-                {t('Dispatch task')}
-              </Link>
-            )}
           <AuditLink nodeId={agent.node_id} />
-          {canManage(identity, 'agents:write') && agent.status === 'active' && (
-            <button className="button danger" onClick={() => setDisabling(true)}>
-              <ShieldOff size={16} />
-              {t('Disable agent')}
-            </button>
+          {canManage(identity, 'agents:write') && (
+            <>
+              <button className="button secondary" onClick={() => setMode('rename')}>
+                <Pencil size={16} />
+                {t('Rename agent')}
+              </button>
+              {agent.status === 'active' && (
+                <button className="button danger" onClick={() => setMode('disable')}>
+                  <ShieldOff size={16} />
+                  {t('Disable agent')}
+                </button>
+              )}
+              <button className="button danger" onClick={() => setMode('delete')}>
+                <Trash2 size={16} />
+                {t('Delete agent')}
+              </button>
+            </>
           )}
           {agent.status === 'disabled' && (
             <Notice>{t('This agent is disabled. New enrollment is required to reconnect.')}</Notice>

@@ -10,6 +10,18 @@ import {
   summarySchema,
 } from './contracts'
 
+export const oauthCallbackReasons = [
+  'oauth_callback_invalid',
+  'oauth_cookie_missing',
+  'oauth_flow_expired',
+  'oauth_state_mismatch',
+  'oauth_callback_mismatch',
+  'oauth_issuer_mismatch',
+  'oauth_provider_rejected',
+  'oauth_configuration_changed',
+  'oauth_account_failed',
+] as const
+
 export const githubAuthReasons = [
   'github_access_denied',
   'github_client_invalid',
@@ -22,6 +34,29 @@ export const githubAuthReasons = [
 ] as const
 
 const messages: Record<string, string> = {
+  oauth_callback_invalid:
+    'The provider returned an incomplete authorization callback. Start sign-in again.',
+  oauth_cookie_missing:
+    'The browser did not return the login cookie. Use the same browser and Console address, allow cookies, then start sign-in again.',
+  oauth_flow_expired:
+    'This authorization attempt expired or was replaced, or the server restarted. Start sign-in again in one tab.',
+  oauth_state_mismatch:
+    'This callback belongs to a different authorization attempt. Close older sign-in tabs and start again.',
+  oauth_callback_mismatch:
+    'The callback path does not match the selected provider. Copy its exact callback URL from app settings.',
+  oauth_issuer_mismatch:
+    'The authorization issuer does not match the configured provider. Check the provider and callback settings.',
+  oauth_provider_rejected:
+    'The provider declined authorization or returned no code. Check the app permissions and try again.',
+  oauth_configuration_changed:
+    'Login settings changed during authorization. Start a fresh sign-in attempt.',
+  oauth_account_failed:
+    'ARGUS could not read or update the account state. Check the server callback diagnostics.',
+  oauth_verification_required:
+    'Sign in with a linked OAuth account, or complete linking, within ten minutes before disabling token login.',
+  last_signin_method:
+    'Token login is disabled. Keep a provider linked to your administrator account enabled.',
+
   github_access_denied:
     'GitHub authorization was cancelled. Start linking again and approve access.',
   github_client_invalid:
@@ -148,6 +183,8 @@ export async function request<T>(
 export const api = {
   tokenLogin: (token: string, csrf: string) =>
     request('/v1/console/auth/token', identitySchema, { body: { token }, csrf }),
+  disableToken: (csrf: string) =>
+    request('/v1/console/account/token/disable', emptySchema, { body: { confirm: true }, csrf }),
   account: (signal?: AbortSignal) => request('/v1/console/account', accountSchema, { signal }),
   accountProviders: (signal?: AbortSignal) =>
     request('/v1/console/account/providers', setupSchema, { signal }),

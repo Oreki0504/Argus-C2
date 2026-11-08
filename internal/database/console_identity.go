@@ -46,6 +46,12 @@ func (v ConsoleState) SetupOpen(now int64) bool {
 // including shared Fleet services. Local recovery/role changes cannot race a
 // previously authorized browser request into performing a new write.
 type consoleActorKey struct{}
+type consoleTokenSessionKey struct{}
+
+func WithConsoleTokenSession(ctx context.Context) context.Context {
+	return context.WithValue(ctx, consoleTokenSessionKey{}, true)
+}
+
 type consoleActor struct {
 	ID                  string
 	Version, Generation int64
@@ -69,6 +75,14 @@ func authorizeConsoleContext(ctx context.Context, tx *sql.Tx) error {
 	}
 	if n != 1 {
 		return ErrUnauthorized
+	}
+	if token, _ := ctx.Value(consoleTokenSessionKey{}).(bool); token {
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM console_token WHERE digest<>'' AND generation=?", a.Generation).Scan(&n); err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrUnauthorized
+		}
 	}
 	return nil
 }

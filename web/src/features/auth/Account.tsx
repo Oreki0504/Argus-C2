@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useSearchParams } from 'react-router-dom'
-import { api, ApiError, githubAuthReasons } from '../../api/client'
+import { api, ApiError, githubAuthReasons, oauthCallbackReasons } from '../../api/client'
 import { consoleKey } from '../../api/query'
 import { ErrorState, Loading, Notice } from '../../components/ui'
 import { usePreferences } from '../../preferences/context'
@@ -20,6 +20,7 @@ function AccountSettings() {
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [disableConfirm, setDisableConfirm] = useState(false)
   const [configure, setConfigure] = useState(false)
   const client = useQueryClient()
   const key = [...consoleKey(viewer), 'account']
@@ -36,6 +37,7 @@ function AccountSettings() {
   const reason = params.get('reason')
   const allowed = [
     ...githubAuthReasons,
+    ...oauthCallbackReasons,
     'session_expired',
     'identity_conflict',
     'oidc_callback_invalid',
@@ -45,9 +47,7 @@ function AccountSettings() {
     <section className="account-page">
       <h1>{t('Account & sign-in')}</h1>
       <p className="muted">
-        {t(
-          'Link Google or GitHub to this account. Your permissions and administrator token stay unchanged.',
-        )}
+        {t('Link Google or GitHub to this account, then manage how you sign in.')}
       </p>
       {reason && allowed.includes(reason) && (
         <Notice kind="warning">{t(new ApiError(400, reason).message)}</Notice>
@@ -133,6 +133,57 @@ function AccountSettings() {
           </Notice>
         )}
       </div>
+      {viewer.role === 'Admin' && (
+        <section className="panel account-token-settings">
+          <h2>{t('Administrator token login')}</h2>
+          <p>{t(account.data.token_enabled ? 'Enabled' : 'Token login disabled')}</p>
+          <p className="muted">
+            {t(
+              'Disabling permanently invalidates the original token and ends token-only sessions. OAuth access stays available. Recovery requires access to the server.',
+            )}
+          </p>
+          {account.data.token_enabled && (
+            <>
+              {!account.data.can_disable_token && (
+                <Notice>
+                  {t(
+                    'Sign in with a linked OAuth account, or complete linking, within ten minutes before disabling token login.',
+                  )}
+                </Notice>
+              )}
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={disableConfirm}
+                  onChange={(event) => setDisableConfirm(event.target.checked)}
+                  disabled={!account.data.can_disable_token || busy}
+                />
+                {t('I can sign in with OAuth and want to disable the original token.')}
+              </label>
+              <button
+                className="button danger"
+                disabled={!account.data.can_disable_token || !disableConfirm || busy}
+                onClick={async () => {
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    await api.disableToken(account.data.csrf_token)
+                    await account.refetch()
+                    void client.invalidateQueries({ queryKey: ['auth-status'] })
+                    setDisableConfirm(false)
+                  } catch (caught) {
+                    setError(caught)
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+              >
+                {t('Disable token login')}
+              </button>
+            </>
+          )}
+        </section>
+      )}
       {error !== null && <ErrorState error={error} />}
     </section>
   )

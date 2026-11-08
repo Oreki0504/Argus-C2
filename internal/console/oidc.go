@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -419,13 +420,21 @@ func (s *Server) saveProvider(w http.ResponseWriter, r *http.Request, v session,
 	}
 	if err == nil {
 		if account {
-			err = s.store.ConfigureConsoleProvider(r.Context(), v.Generation, state.ProviderID, id)
+			issuers := make([]string, 0, len(items))
+			for _, p := range items {
+				issuers = append(issuers, p.Issuer)
+			}
+			err = s.store.ConfigureConsoleProvider(r.Context(), v.Generation, state.ProviderID, id, issuers...)
 		} else {
 			err = s.store.SetConsoleProvider(r.Context(), v.Generation, id)
 		}
 	}
 	if err != nil {
 		_ = os.Remove(path)
+		if errors.Is(err, database.ErrOAuthRequired) {
+			problem(w, 409, "last_signin_method")
+			return
+		}
 		storeProblem(w, err)
 		return
 	}
@@ -532,18 +541,39 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	fail := func(code string) { http.Redirect(w, r, "/login?reason="+code, http.StatusSeeOther) }
+	providerKind := "oidc"
+	if r.URL.Path == callbackPath("github") {
+		providerKind = "github"
+	}
+	if r.URL.Path == callbackPath("google") {
+		providerKind = "google"
+	}
+	callbackFailure := func(reason string) {
+		slog.Warn("Console OAuth failed", "provider", providerKind, "stage", "callback", "reason", reason)
+		fail(reason)
+	}
 	q, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil || len(q["state"]) != 1 {
-		fail("oidc_callback_invalid")
+		callbackFailure("oauth_callback_invalid")
 		return
 	}
-	key := database.TokenDigest(cookieValue(r, flowCookie))
+	rawCookie := cookieValue(r, flowCookie)
+	if rawCookie == "" {
+		callbackFailure("oauth_cookie_missing")
+		return
+	}
+	key := database.TokenDigest(rawCookie)
 	s.mu.Lock()
 	s.cleanLocked()
 	v, ok := s.flows[key]
-	if !ok || !v.Started || subtle.ConstantTimeCompare([]byte(v.StateDigest), []byte(database.TokenDigest(q.Get("state")))) != 1 {
+	if !ok || !v.Started {
 		s.mu.Unlock()
-		fail("oidc_callback_invalid")
+		callbackFailure("oauth_flow_expired")
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(v.StateDigest), []byte(database.TokenDigest(q.Get("state")))) != 1 {
+		s.mu.Unlock()
+		callbackFailure("oauth_state_mismatch")
 		return
 	}
 	delete(s.flows, key)
@@ -561,11 +591,11 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 			fail("github_access_denied")
 			return
 		}
-		fail("oidc_callback_invalid")
+		callbackFailure("oauth_provider_rejected")
 		return
 	}
 	if r.URL.Path != callbackPath(v.ProviderKind) {
-		fail("oidc_callback_invalid")
+		callbackFailure("oauth_callback_mismatch")
 		return
 	}
 	p, err := s.getProvider(r.Context(), v.ProviderID, v.ProviderKind)
@@ -574,7 +604,16 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(q["iss"]) > 1 || q.Has("iss") && q.Get("iss") != p.Credentials.Issuer {
-		fail("oidc_callback_invalid")
+		callbackFailure("oauth_issuer_mismatch")
+		return
+	}
+	current, stateErr := s.store.ConsoleState(r.Context())
+	if stateErr != nil {
+		callbackFailure("oauth_account_failed")
+		return
+	}
+	if current.ProviderID != v.ProviderID || current.Generation != v.Generation {
+		callbackFailure("oauth_configuration_changed")
 		return
 	}
 	token, err := p.OAuth.Exchange(oidc.ClientContext(r.Context(), s.httpClient), q.Get("code"), oauth2.VerifierOption(v.Verifier))
@@ -606,7 +645,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			fail("oidc_callback_invalid")
+			callbackFailure("oauth_account_failed")
 			return
 		}
 		http.Redirect(w, r, "/account?bound=1", http.StatusSeeOther)
@@ -614,7 +653,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := s.store.FinishConsoleLogin(r.Context(), v.Generation, p.ID, issuer, subject, name, v.Setup)
 	if err != nil {
-		fail("oidc_callback_invalid")
+		callbackFailure("oauth_account_failed")
 		return
 	}
 	if u.Status == "pending" {
@@ -625,7 +664,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		fail("forbidden")
 		return
 	}
-	_, ok = s.putSession(w, r, sessionCookie, session{Kind: "user", UserID: u.ID, Version: u.Version, Generation: v.Generation, Expires: s.now().Add(8 * time.Hour)})
+	_, ok = s.putSession(w, r, sessionCookie, session{Kind: "user", UserID: u.ID, Version: u.Version, Generation: v.Generation, Expires: s.now().Add(8 * time.Hour), OAuthProviderID: p.ID, OAuthIssuer: issuer, OAuthVerifiedAt: s.now()})
 	if !ok {
 		fail("service_unavailable")
 		return

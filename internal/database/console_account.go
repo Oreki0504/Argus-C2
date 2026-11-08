@@ -14,6 +14,28 @@ import (
 
 const localConsoleIssuer = "urn:argus:local"
 
+var ErrOAuthRequired = errors.New("verified alternative login required")
+
+func (s *Store) DisableConsoleToken(ctx context.Context, providerID, issuer string) error {
+	a, ok := ctx.Value(consoleActorKey{}).(consoleActor)
+	if !ok || !a.Admin {
+		return ErrUnauthorized
+	}
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM console_identities i CROSS JOIN console_state s WHERE i.user_id=? AND i.issuer=? AND s.id=1 AND s.provider_id=?`, a.ID, issuer, providerID).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 || providerID == "" {
+			return ErrOAuthRequired
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE console_token SET digest='' WHERE id=1"); err != nil {
+			return err
+		}
+		return auditSubject(ctx, tx, "web:"+a.ID, "console.token.disable", "", "", a.ID, "succeeded")
+	})
+}
+
 // IssueConsoleToken is local-only. Recovery explicitly revokes sessions and
 // replaces administrator access on the next successful token login.
 func (s *Store) IssueConsoleToken(ctx context.Context, recovery bool) (string, error) {
@@ -167,12 +189,29 @@ func (s *Store) BindConsoleIdentity(ctx context.Context, userID string, version,
 
 // The authenticated actor is checked inside Write; expected snapshots reject
 // concurrent configuration edits and stale login/binding transactions.
-func (s *Store) ConfigureConsoleProvider(ctx context.Context, generation int64, previousID, providerID string) error {
+func (s *Store) ConfigureConsoleProvider(ctx context.Context, generation int64, previousID, providerID string, issuers ...string) error {
 	a, ok := ctx.Value(consoleActorKey{}).(consoleActor)
 	if !ok || !a.Admin {
 		return ErrUnauthorized
 	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		var tokenCount int
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM console_token WHERE digest<>'' AND generation=?", generation).Scan(&tokenCount); err != nil {
+			return err
+		}
+		if tokenCount == 0 {
+			linked := false
+			for _, issuer := range issuers {
+				var count int
+				if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM console_identities WHERE user_id=? AND issuer=?", a.ID, issuer).Scan(&count); err != nil {
+					return err
+				}
+				linked = linked || count > 0
+			}
+			if !linked {
+				return ErrOAuthRequired
+			}
+		}
 		result, err := tx.ExecContext(ctx, "UPDATE console_state SET provider_id=? WHERE id=1 AND initialized=1 AND recovery=0 AND generation=? AND provider_id=?", providerID, generation, previousID)
 		if err != nil {
 			return err

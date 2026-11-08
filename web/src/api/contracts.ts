@@ -57,6 +57,8 @@ export const setupSchema = z.strictObject({
 export type Setup = z.infer<typeof setupSchema>
 
 export const accountSchema = z.strictObject({
+  token_enabled: z.boolean(),
+  can_disable_token: z.boolean(),
   csrf_token: z.string().min(1),
   providers: z.array(providerSummarySchema.extend({ issuer: z.string() })),
   identities: z.array(

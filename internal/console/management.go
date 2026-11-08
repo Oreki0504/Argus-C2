@@ -210,6 +210,8 @@ func (s *Server) managementRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/console/admin/agents", wrap(s.agents))
 	mux.HandleFunc("POST /v1/console/admin/enrollment-tokens", wrap(s.enrollment))
 	mux.HandleFunc("POST /v1/console/admin/agents/{id}/disable", wrap(s.disable))
+	mux.HandleFunc("POST /v1/console/admin/agents/{id}/rename", wrap(s.renameAgent))
+	mux.HandleFunc("POST /v1/console/admin/agents/{id}/delete", wrap(s.deleteAgent))
 	mux.HandleFunc("GET /v1/console/admin/tasks", wrap(s.tasks))
 	mux.HandleFunc("POST /v1/console/admin/tasks", wrap(s.createTask))
 	mux.HandleFunc("GET /v1/console/admin/tasks/{id}", wrap(s.task))
@@ -296,6 +298,49 @@ func (s *Server) disable(w http.ResponseWriter, r *http.Request, u database.Cons
 		return
 	}
 	reply(w, a)
+}
+
+func (s *Server) renameAgent(w http.ResponseWriter, r *http.Request, u database.ConsoleUser, _ session) {
+	var b struct {
+		Name string `json:"display_name"`
+	}
+	if !decode(w, r, &b, "display_name") {
+		return
+	}
+	id := r.PathValue("id")
+	b.Name = strings.TrimSpace(b.Name)
+	if !identity.Valid(id) || !database.ValidNodeName(b.Name) {
+		problem(w, 400, "invalid_request")
+		return
+	}
+	if err := s.store.RenameConsoleNode(r.Context(), "web:"+u.ID, id, b.Name); err != nil {
+		storeProblem(w, err)
+		return
+	}
+	reply(w, struct{}{})
+}
+
+func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request, u database.ConsoleUser, v session) {
+	var b struct {
+		Confirm string `json:"confirm_node_id"`
+	}
+	if !decode(w, r, &b, "confirm_node_id") {
+		return
+	}
+	id := r.PathValue("id")
+	if !identity.Valid(id) || b.Confirm != id {
+		problem(w, 400, "invalid_request")
+		return
+	}
+	if s.now().Sub(v.Created) > 10*time.Minute {
+		problem(w, 403, "reauthentication_required")
+		return
+	}
+	if err := s.store.DeleteConsoleNode(r.Context(), "web:"+u.ID, id); err != nil {
+		storeProblem(w, err)
+		return
+	}
+	reply(w, struct{}{})
 }
 func (s *Server) tasks(w http.ResponseWriter, r *http.Request, _ database.ConsoleUser, _ session) {
 	if !listParams(w, r, "node_id", "status", "task_type") {

@@ -4,6 +4,46 @@ export type Language = 'en' | 'zh-CN'
 
 const chinese: Record<string, string> = {
   ...managementChinese,
+  'Rename agent': '重命名 Agent',
+  'Delete agent': '删除 Agent',
+  'Display name': '显示名称',
+  'This name is visible in the public overview. Do not include private information.':
+    '此名称会显示在公开概览中，请勿包含私密信息。',
+  'Delete this agent and its task and metric history. Its credentials will stop working. Audit records remain. This does not uninstall software on the host.':
+    '删除此 Agent 及其任务、指标历史，原凭据立即失效，审计记录保留。此操作不会卸载主机上的程序。',
+  'Link Google or GitHub to this account, then manage how you sign in.':
+    '将 Google 或 GitHub 关联到当前账号，再管理你的登录方式。',
+  'Administrator token login': '管理员 Token 登录',
+  Enabled: '已启用',
+  'Token login disabled': 'Token 登录已禁用',
+  'Disabling permanently invalidates the original token and ends token-only sessions. OAuth access stays available. Recovery requires access to the server.':
+    '禁用后，原始 Token 永久失效，仅用 Token 登录的会话会结束，OAuth 登录不受影响。需要访问服务器本机才能恢复管理员访问。',
+  'I can sign in with OAuth and want to disable the original token.':
+    '我已确认可以通过 OAuth 登录，并希望禁用原始 Token。',
+  'Disable token login': '禁用 Token 登录',
+  'Sign in with a linked OAuth account, or complete linking, within ten minutes before disabling token login.':
+    '请先使用已关联的 OAuth 账号登录，或完成账号关联，然后在十分钟内禁用 Token 登录。',
+  'Token login is disabled. Keep a provider linked to your administrator account enabled.':
+    'Token 登录已禁用，请至少保留一个已关联到当前管理员账号的登录平台。',
+  'The provider returned an incomplete authorization callback. Start sign-in again.':
+    '平台返回的授权回调不完整，请重新发起登录。',
+  'The browser did not return the login cookie. Use the same browser and Console address, allow cookies, then start sign-in again.':
+    '浏览器没有带回登录 Cookie。请使用同一浏览器和控制台地址，允许 Cookie 后重新发起登录。',
+  'This authorization attempt expired or was replaced, or the server restarted. Start sign-in again in one tab.':
+    '本次授权已过期、被新请求替换，或服务已重启。请在一个标签页内重新发起登录。',
+  'This callback belongs to a different authorization attempt. Close older sign-in tabs and start again.':
+    '回调与当前授权请求不匹配。请关闭旧的登录标签页，重新发起登录。',
+  'The callback path does not match the selected provider. Copy its exact callback URL from app settings.':
+    '回调路径与所选平台不匹配，请从应用设置中复制该平台的完整回调地址。',
+  'The authorization issuer does not match the configured provider. Check the provider and callback settings.':
+    '授权签发方与配置的平台不匹配，请核对平台与回调设置。',
+  'The provider declined authorization or returned no code. Check the app permissions and try again.':
+    '平台拒绝授权或未返回授权码，请核对应用权限后重试。',
+  'Login settings changed during authorization. Start a fresh sign-in attempt.':
+    '授权期间登录配置发生变化，请重新发起登录。',
+  'ARGUS could not read or update the account state. Check the server callback diagnostics.':
+    'ARGUS 无法读取或更新账号状态，请检查服务端回调诊断。',
+
   '1. Configure this Console’s OAuth apps (Admin)': '1. 配置本控制台的 OAuth 应用（管理员）',
   'Link your own account': '关联你自己的账号',
   '2. Link your own account': '2. 关联你自己的账号',

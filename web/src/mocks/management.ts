@@ -266,6 +266,38 @@ export function managementHandlers(
         expires_at: Math.floor(Date.now() / 1000) + parsed.data.ttl_seconds,
       })
     }),
+    http.post(`${root}/agents/:id/rename`, async ({ request, params }) => {
+      const denied = authorize(request, 'agents:write', true)
+      if (denied) return denied
+      const body = (await readBody(request)) as { display_name?: string }
+      if (
+        typeof body.display_name !== 'string' ||
+        !body.display_name.trim() ||
+        body.display_name.trim().length > 64
+      )
+        return problem('invalid_request')
+      const agent = state.agents.find((a) => a.node_id === params.id)
+      if (!agent) return problem('not_found', 404)
+      agent.display_name = body.display_name.trim()
+      for (const entry of state.tasks)
+        if (entry.task.node_id === agent.node_id) entry.task.agent_name = agent.display_name
+      state.addAudit('node.rename', { node_id: agent.node_id })
+      return json({})
+    }),
+    http.post(`${root}/agents/:id/delete`, async ({ request, params }) => {
+      const denied = authorize(request, 'agents:write', true)
+      if (denied) return denied
+      const body = disableAgentSchema.safeParse(await readBody(request))
+      if (!body.success || body.data.confirm_node_id !== params.id)
+        return problem('invalid_request')
+      const index = state.agents.findIndex((a) => a.node_id === params.id)
+      if (index < 0) return problem('not_found', 404)
+      state.agents.splice(index, 1)
+      for (let i = state.tasks.length - 1; i >= 0; i--)
+        if (state.tasks[i].task.node_id === params.id) state.tasks.splice(i, 1)
+      state.addAudit('node.delete', { node_id: String(params.id) })
+      return json({})
+    }),
     http.post(`${root}/agents/:id/disable`, async ({ request, params }) => {
       const denied = authorize(request, 'agents:write', true)
       if (denied) return denied

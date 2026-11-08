@@ -75,7 +75,11 @@ bin/server console-token issue -config /private/argus/server.json -out /private/
 
 The output file must be new, in a private directory. Reissuing invalidates previous tokens and setup sessions. A still-valid unconsumed legacy bootstrap code can also enter through token login; expired or already consumed bootstrap codes cannot. The deprecated bootstrap API remains compatible, but the UI no longer requires its provider-first flow.
 
-Account & sign-in lets an authenticated administrator save provider credentials, then any active user can bind a configured identity to their own account. Both operations require a session created within ten minutes. The OAuth flow pins the originating session, user, version, generation and provider snapshot; logout, recovery, revocation and provider edits invalidate pending bindings. A provider identity already owned by another account cannot be reassigned. OAuth binding does not disable the installation token.
+Account & sign-in lets an authenticated administrator save provider credentials, then any active user can bind a configured identity to their own account. Both operations require a session created within ten minutes. The OAuth flow pins the originating session, user, version, generation and provider snapshot; logout, recovery, revocation and provider edits invalidate pending bindings. A provider identity already owned by another account cannot be reassigned. OAuth binding does not automatically disable the installation token.
+
+An Admin can explicitly disable Token login in Account & sign-in after successful OAuth login or binding within ten minutes. This permanently invalidates the token and all token-only sessions, including their in-flight mutations, while verified OAuth sessions remain valid. Provider changes must retain a linked login method. The local token file is not deleted, but its old value is unusable. Recovery requires the explicit local `console-token recover` command.
+
+Management → Agents supports public display-name editing and deletion. Deletion requires exact-ID confirmation and recent login, revokes the registered identity, removes task/result history and consumed enrollment tokens, and preserves audit records. It does not uninstall software from the remote host. Disable remains available when history should be retained.
 
 Provider credentials remain mode-0600 `console-provider-<id>.json` files in the state directory. Back them up along with the database and root-only token file. Credentials never return to the browser or enter frontend environment variables.
 

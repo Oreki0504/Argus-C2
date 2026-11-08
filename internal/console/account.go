@@ -26,7 +26,7 @@ func (s *Server) tokenLogin(w http.ResponseWriter, r *http.Request) {
 		problem(w, 401, "token_invalid")
 		return
 	}
-	v, ok := s.putSession(w, r, sessionCookie, session{Kind: "user", UserID: u.ID, Version: u.Version, Generation: generation, Expires: s.now().Add(8 * time.Hour)})
+	v, ok := s.putSession(w, r, sessionCookie, session{Kind: "user", TokenAuthenticated: true, UserID: u.ID, Version: u.Version, Generation: generation, Expires: s.now().Add(8 * time.Hour)})
 	if !ok {
 		problem(w, 503, "service_unavailable")
 		return
@@ -62,7 +62,46 @@ func (s *Server) account(w http.ResponseWriter, r *http.Request, u database.Cons
 			providers = append(providers, map[string]string{"kind": p.Kind, "name": providerLabel(p), "issuer": p.Issuer})
 		}
 	}
-	reply(w, map[string]any{"identities": items, "providers": providers, "csrf_token": v.CSRF})
+	enabled, err := s.store.ConsoleTokenAvailable(r.Context())
+	if err != nil {
+		storeProblem(w, err)
+		return
+	}
+	canDisable := u.Role == "Admin" && v.OAuthProviderID != "" && v.OAuthProviderID == state.ProviderID && s.now().Sub(v.OAuthVerifiedAt) < 10*time.Minute
+	reply(w, map[string]any{"identities": items, "providers": providers, "csrf_token": v.CSRF, "token_enabled": enabled, "can_disable_token": canDisable})
+}
+
+func (s *Server) disableToken(w http.ResponseWriter, r *http.Request, _ database.ConsoleUser, v session) {
+	var body struct {
+		Confirm bool `json:"confirm"`
+	}
+	if !decode(w, r, &body, "confirm") {
+		return
+	}
+	if !body.Confirm {
+		problem(w, 400, "invalid_request")
+		return
+	}
+	if v.OAuthProviderID == "" || s.now().Sub(v.OAuthVerifiedAt) >= 10*time.Minute {
+		problem(w, 403, "oauth_verification_required")
+		return
+	}
+	if err := s.store.DisableConsoleToken(r.Context(), v.OAuthProviderID, v.OAuthIssuer); err != nil {
+		if err == database.ErrOAuthRequired {
+			problem(w, 409, "oauth_verification_required")
+		} else {
+			storeProblem(w, err)
+		}
+		return
+	}
+	s.mu.Lock()
+	for key, existing := range s.sessions {
+		if existing.TokenAuthenticated {
+			delete(s.sessions, key)
+		}
+	}
+	s.mu.Unlock()
+	reply(w, struct{}{})
 }
 
 func (s *Server) accountProviders(w http.ResponseWriter, r *http.Request, _ database.ConsoleUser, v session) {
@@ -115,5 +154,14 @@ func (s *Server) finishBinding(ctx context.Context, f flow, issuer, subject stri
 	if !ok || v.Kind != "user" || v.UserID != f.BindingUser || v.Version != f.BindingVersion || v.Generation != f.Generation {
 		return database.ErrUnauthorized
 	}
-	return s.store.BindConsoleIdentity(ctx, f.BindingUser, f.BindingVersion, f.Generation, f.ProviderID, issuer, subject)
+	if v.TokenAuthenticated {
+		ctx = database.WithConsoleTokenSession(database.WithConsoleActor(ctx, v.UserID, v.Version, v.Generation, false))
+	}
+	if err := s.store.BindConsoleIdentity(ctx, f.BindingUser, f.BindingVersion, f.Generation, f.ProviderID, issuer, subject); err != nil {
+		return err
+	}
+	v.TokenAuthenticated = false
+	v.OAuthProviderID, v.OAuthIssuer, v.OAuthVerifiedAt = f.ProviderID, issuer, s.now()
+	s.sessions[f.BindingSession] = v
+	return nil
 }

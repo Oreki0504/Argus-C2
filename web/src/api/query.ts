@@ -12,7 +12,8 @@ export function createQueryClient(onSessionInvalid: (status: number) => void) {
       (error.status === 401 ||
         (error.status === 403 &&
           error.code !== 'csrf_invalid' &&
-          error.code !== 'reauthentication_required'))
+          error.code !== 'reauthentication_required' &&
+          error.code !== 'oauth_verification_required'))
     )
       onSessionInvalid(error.status)
   }

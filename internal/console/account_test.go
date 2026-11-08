@@ -7,11 +7,79 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Oreki0504/Argus-C2/internal/database"
 )
 
 func loginTokenTest(t *testing.T, b *testBrowser, token string) map[string]any {
 	t.Helper()
 	return decodeTest[map[string]any](t, b.request("POST", "/v1/console/auth/token", map[string]string{"token": token}, b.pre(), nil), 200)
+}
+
+func TestDisableTokenRequiresVerifiedOAuthAndSurvivesRestart(t *testing.T) {
+	s, _, _, _, _, settings := socialConsole(t)
+	secret, err := s.store.IssueConsoleToken(t.Context(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, old := newBrowser(t, s), newBrowser(t, s)
+	owner := loginTokenTest(t, b, secret)
+	loginTokenTest(t, old, secret)
+	csrf := owner["csrf_token"].(string)
+	endpoint := "/v1/console/account/token/disable"
+	confirm := map[string]bool{"confirm": true}
+	decodeTest[map[string]string](t, b.request("POST", endpoint, confirm, csrf, nil), 403)
+	decodeTest[map[string]any](t, b.request("POST", "/v1/console/account/providers", settings, csrf, nil), 200)
+	decodeTest[map[string]string](t, b.request("POST", endpoint, confirm, csrf, nil), 403)
+	callback := bindCallback(t, b, "google", csrf)
+	if dest := b.request("GET", callback, nil, "", nil).Header().Get("Location"); dest != "/account?bound=1" {
+		t.Fatal(dest)
+	}
+	account := decodeTest[map[string]any](t, b.request("GET", "/v1/console/account", nil, "", nil), 200)
+	if account["can_disable_token"] != true {
+		t.Fatal(account)
+	}
+	decodeTest[map[string]string](t, b.request("POST", endpoint, confirm, "wrong", nil), 403)
+	decodeTest[map[string]string](t, b.request("POST", endpoint, map[string]bool{"confirm": false}, csrf, nil), 400)
+	s.now = func() time.Time { return time.Now().Add(11 * time.Minute) }
+	decodeTest[map[string]string](t, b.request("POST", endpoint, confirm, csrf, nil), 403)
+	s.now = time.Now
+	decodeTest[map[string]any](t, b.request("POST", endpoint, confirm, csrf, nil), 200)
+	decodeTest[map[string]string](t, old.request("GET", "/v1/me", nil, "", nil), 401)
+	decodeTest[map[string]any](t, b.request("GET", "/v1/me", nil, "", nil), 200)
+	// Mutation authorization checks token revocation in its own DB transaction.
+	state := mustConsoleState(t, s)
+	ctx := database.WithConsoleTokenSession(database.WithConsoleActor(t.Context(), owner["principal_id"].(string), 1, state.Generation, true))
+	if err = s.store.ConfigureConsoleProvider(ctx, state.Generation, state.ProviderID, "new", googleIssuer); err != database.ErrUnauthorized {
+		t.Fatal("revoked token write", err)
+	}
+	settings.Providers = settings.Providers[1:] // removing the only linked provider is forbidden
+	decodeTest[map[string]string](t, b.request("POST", "/v1/console/account/providers", settings, csrf, nil), 409)
+	// A revoked token must not turn a previously started binding into a new
+	// OAuth-authenticated session after revocation.
+	oldFlow := flow{BindingSession: "revoked-token-session", BindingUser: owner["principal_id"].(string), BindingVersion: 1, Generation: state.Generation, ProviderID: state.ProviderID}
+	s.sessions[oldFlow.BindingSession] = session{Kind: "user", UserID: oldFlow.BindingUser, Version: 1, Generation: state.Generation, TokenAuthenticated: true, Last: time.Now(), Expires: time.Now().Add(time.Hour)}
+	if err = s.finishBinding(t.Context(), oldFlow, githubIssuer, "unbound-user"); err != database.ErrUnauthorized {
+		t.Fatal("revoked token binding accepted", err)
+	}
+	restarted, err := New(s.store, s.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted.httpClient = s.httpClient
+	visitor := newBrowser(t, restarted)
+	status := decodeTest[map[string]any](t, visitor.request("GET", "/v1/console/auth/status", nil, "", nil), 200)
+	if status["token_enabled"] != false {
+		t.Fatal(status)
+	}
+	decodeTest[map[string]string](t, visitor.request("POST", "/v1/console/auth/token", map[string]string{"token": secret}, visitor.pre(), nil), 401)
+	callback = startSocial(t, visitor, "google", visitor.pre(), false)
+	if dest := visitor.request("GET", callback, nil, "", nil).Header().Get("Location"); dest != "/" {
+		t.Fatal(dest)
+	}
+	if visitor.identity()["principal_id"] != owner["principal_id"] {
+		t.Fatal("OAuth lost owner")
+	}
 }
 
 func bindCallback(t *testing.T, b *testBrowser, provider, csrf string) string {

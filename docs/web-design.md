@@ -17,7 +17,7 @@ Anonymous visitors enter the public User overview. Neither User nor Admin has a 
 | Setup / sign-in | Token login opens management immediately; optional Google/GitHub or custom OIDC configuration and binding in account settings |
 | Overview / details | Safe public names, heartbeat, allowlisted system/resource observations and sampled history |
 | Tasks | Six fixed diagnostic collectors, typed parameter forms, TTL/timeouts, list filters, results and related audit |
-| Agents | One-command Linux installation (curl/wget), manual registration token and CLI fallback, access/certificate state, exact-ID disable confirmation |
+| Agents | One-command Linux installation (curl/wget), manual registration token and CLI fallback, access/certificate state, public-name editing, exact-ID disable/delete confirmation |
 | Audit | Action, Agent, task and account filters, stable pagination and related-task links |
 | Users & access | Pending approvals, role/access edits with version checks, session revocation and last-Admin protection |
 
@@ -25,9 +25,11 @@ Anonymous visitors enter the public User overview. Neither User nor Admin has a 
 
 Management uses the shared SQLite-backed Fleet services. A Console-created task is delivered through the existing Agent polling protocol; registration tokens are accepted by Fleet enrollment. Disable uses the existing transaction and unfinished-task semantics. Tasks do not accept arbitrary commands, shell scripts or policy editing. The separate opt-in installer serves a fixed, versioned shell template and operator-published Agent binaries; it runs only when explicitly pasted on a new host. See [installation configuration](agent-installation.zh-CN.md).
 
-Public summaries use a separate Go projection. Names are opaque `Server-<id>` placeholders; hostnames, internal node IDs, IPs, interfaces, mount paths, certificates, raw results and audit never enter public responses. System strings are reduced to a small vocabulary/version representation. Missing observations remain null.
+Public summaries use a separate Go projection. Names default to opaque `Server-<id>` placeholders and can be explicitly renamed by Admin for public display; collected hostnames, internal node IDs, IPs, interfaces, mount paths, certificates, raw results and audit never enter public responses. System strings are reduced to a small vocabulary/version representation. Missing observations remain null.
 
-CPU, memory and disk come from successful `system.metrics` results; system information comes from `system.info`. History uses real result receipt times, selecting the latest result per 60/300/900-second display bucket. Console now schedules information hourly and metrics each minute on idle Agent polls, without overriding local policy or queued operator work. Two recent compatible network-counter samples provide interval-average bit rates. Bandwidth capacity, utilization percentages, traffic totals and coverage remain null until configured baselines and interval accounting exist. History is affected by task/result retention. Public summary currently rejects fleets larger than 1,000 nodes rather than silently truncating them. Public-name editing and continuous traffic telemetry remain future work.
+CPU, memory and disk come from successful `system.metrics` results; system information comes from `system.info`. History uses real result receipt times, selecting the latest result per 60/300/900-second display bucket. Console now schedules information hourly and metrics each minute on idle Agent polls, without overriding local policy or queued operator work. Two recent compatible network-counter samples provide interval-average bit rates. Bandwidth capacity, utilization percentages, traffic totals and coverage remain null until configured baselines and interval accounting exist. History is affected by task/result retention. Public summary currently rejects fleets larger than 1,000 nodes rather than silently truncating them. Continuous traffic accounting remains future work.
+
+Agent deletion removes the registered identity and task/metric history, retains audit, and requires recent login plus exact-ID confirmation. It does not remotely uninstall the host. Account settings also allow an Admin with recently verified OAuth access to permanently disable the original token and revoke token-only sessions.
 
 ## Authentication and storage
 

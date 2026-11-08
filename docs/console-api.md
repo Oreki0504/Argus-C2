@@ -28,7 +28,8 @@ Status endpoints expose minimum state, with bounded sessions/body sizes/rates. `
 | --- | --- | --- |
 | `GET /v1/console/auth/status` | None; bounded pre-login context | `{state, provider_name, providers:[{kind,name}], csrf_token, token_enabled}`; UNINITIALIZED / SETUP_PENDING / ACTIVE |
 | `POST /v1/console/auth/token` | Pre-login CSRF + `{token}` | Validate the high-entropy local administrator token, activate a first owner when needed, establish session and return `/v1/me` DTO |
-| `GET /v1/console/account` | Active browser session | `{csrf_token, providers:[{kind,name,issuer}], identities:[{issuer,subject,created_at}]}` for this account only |
+| `GET /v1/console/account` | Active browser session | `{csrf_token, providers:[{kind,name,issuer}], identities:[{issuer,subject,created_at}], token_enabled, can_disable_token}`; identities belong only to this account |
+| `POST /v1/console/account/token/disable` | Admin + CSRF + `{confirm:true}` + successful OAuth login/binding within ten minutes under the current provider configuration | Invalidate original Token and all token-only sessions; keep OAuth sessions; return `{}` |
 | `GET /v1/console/account/providers` | Admin session | Provider setup DTO without secrets |
 | `POST /v1/console/account/providers` | Admin + CSRF + login within ten minutes | Save provider set; expected generation and snapshot reject stale mutations |
 | `POST /v1/console/account/bind` | Active session + CSRF + login within ten minutes; `{provider}` | Start OAuth binding to this exact local account/session, fixed redirect DTO |
@@ -46,6 +47,10 @@ Status endpoints expose minimum state, with bounded sessions/body sizes/rates. `
 | `GET /v1/console/summary` | Browser session + `summary:read` | Public summary for both roles in this iteration; server projection required |
 
 The redirect route consumes a transaction whose authority is held on the server. Callback failures may redirect to `/login?reason=<allowlisted-code>`, never including raw provider errors, tokens or a caller return destination. The frontend accepts only the exact redirect-path literal, rejecting external URLs and query strings. Mock sign-in skips external redirects and performs no OIDC validation.
+
+Callback diagnostics distinguish `oauth_callback_invalid`, `oauth_cookie_missing`, `oauth_flow_expired`, `oauth_state_mismatch`, `oauth_callback_mismatch`, `oauth_issuer_mismatch`, `oauth_provider_rejected`, `oauth_configuration_changed`, and `oauth_account_failed`. GitHub exchange/profile failures have separate `github_*` classifications. Validated binding transactions return failures to `/account`; no check is relaxed. Logs contain only fixed classifications, not callback queries or upstream response bodies.
+
+Token disabling persists across restarts; the old local token file no longer grants access. `can_disable_token` indicates recent OAuth verification, not merely the presence of saved app credentials. Mutations from token-only sessions recheck revocation inside the database transaction. After disabling, provider edits must retain a provider linked to the current Admin (`last_signin_method` otherwise). Local `console-token recover` is the explicit recovery path; it replaces administrator access rather than re-enabling the old token.
 
 Setup DTO: `{step: "provider" | "bind", csrf_token, callback_uri, issuer, client_id, providers:[{kind,name,issuer,client_id}], callback_uris:{google,github,oidc}}`. All callbacks come from the server's exact configured HTTPS origin. Legacy single-OIDC configuration requests and `{}` login bodies remain accepted; an empty login selection is valid only when exactly one provider is configured. The legacy `callback_uri` remains the custom OIDC callback. New social configurations use their distinct callback paths; callbacks cannot switch the transaction's selected provider.
 
@@ -68,7 +73,7 @@ Envelope: `{generated_at, window_start, window_end, sample_interval_seconds, nod
 
 System values and measurements may be `null`; missing differs from zero. Resource percentages are server-derived aggregates. Rates are **bits/s**, totals are **bytes measured over valid intervals in the envelope window**, never extrapolated/billing usage. Coverage refers to the same window; reset/restart/missing intervals remain unmeasured. Single aggregates cannot produce a history chart; the separate history response supplies the samples. Cards show per-agent rates with resource and traffic observation times; stale observations are explicitly labeled.
 
-The live server currently uses only opaque `Server-<public-id-prefix>` names. System text is reduced to known OS families, architecture names and kernel versions. No hostname/IP/interface/mount paths, certificates, raw tasks/results or sensitive nested data enter this projection. Public-name editing remains future work. Admin models/routes are separate; User never fetches full Fleet payloads to hide fields afterward.
+Names default to opaque `Server-<public-id-prefix>` labels. Admin can explicitly set a public display name; the UI warns against including private information. System text is reduced to known OS families, architecture names and kernel versions. No collected hostname/IP/interface/mount paths, certificates, raw tasks/results or sensitive nested data enter this projection. Admin models/routes are separate; User never fetches full Fleet payloads to hide fields afterward.
 
 ## Errors and validation
 
@@ -97,6 +102,8 @@ Every route below requires a current **Web Admin** session. The server does not 
 | `GET /v1/console/admin/installer` | None | `{enabled,platforms,fleet_origin}`; published Linux platforms, empty when disabled |
 | `POST /v1/console/admin/installations` | `{ttl_seconds}` (60–3600) | `{installation_id,url,expires_at}`; short-lived, single-use install-script URL, no raw Fleet token |
 | `POST /v1/console/admin/agents/{node_id}/disable` | `{confirm_node_id}` matching path | Agent; shared disable/unfinished-task transaction |
+| `POST /v1/console/admin/agents/{node_id}/rename` | `{display_name}`; trimmed, 1–64 printable Unicode characters | `{}`; update public name and audit atomically |
+| `POST /v1/console/admin/agents/{node_id}/delete` | `{confirm_node_id}` matching path; login within ten minutes | `{}`; delete identity, public mapping, tasks/results and consumed enrollment tokens; retain audit |
 | `GET /v1/console/admin/tasks` | `node_id`, `status`, `task_type`, `limit`, `cursor` | Task page; existing request-driven expiry applies |
 | `POST /v1/console/admin/tasks` | Existing strict TaskRequest | Task; six fixed collectors only, TTL 10–3600, timeout 1–30000 ms |
 | `GET /v1/console/admin/tasks/{id}` | Valid task ID | `{task,result}`; nullable result |
@@ -109,11 +116,13 @@ Pages have exactly `{items,total,next_cursor}` with a nullable cursor. Limit def
 
 Agent DTO: `{node_id,public_id,display_name,hostname,status,last_seen_at,created_at,agent_version,protocol_version,certificate_expires_at}`. Unlike the public projection this exposes the hostname, but never certificate/private-key material. Enrolled Agents with `last_seen_at=0` remain available here for administration; public summaries omit them and their public history returns 404 until the first heartbeat.
 
+Deletion removes the Agent from public and management listings. Its old certificates and consumed enrollment tokens cannot restore access. A new registration requires a fresh token. Deletion does not uninstall software or interrupt work already executing on the host. Use disable when history should remain, and the local uninstall command when retiring the host installation. Failed audit insertion rolls back the entire rename/delete transaction.
+
 Task DTO extends the existing task fields with `agent_name`, nullable `execution_authorized_at` and `result_received_at`. Result DTO is `{status,error,completed_at,payload}`. Payload is the retained diagnostic JSON, available only to Admin. `ACCEPTED` means selected for delivery, not confirmed Agent receipt. `UNKNOWN` retains the existing unresolved/persisted-result semantics; it is not proof of cancellation. Writes are never automatically retried after uncertainty.
 
 Account DTO: `{id,name,issuer,subject,role,status,created_at,last_login_at,version}`. Identity matching uses issuer + subject, never display name/email. Approval changes pending to active. Edits use optimistic version checks; Admin-related access changes require a session created within ten minutes. Revoking sessions also changes `version`, so refresh the list before editing again.
 
-Audit DTO: `{id,timestamp,actor,action,node_id,task_id,subject_id,status}` with nullable target IDs. Browser actors use `web:<account-id>`. Existing Fleet action names are preserved; Console actions include `console.user.update`, `console.sessions.revoke`, `console.login/logout`, `console.owner.bind/recover`, bootstrap/provider/migration changes. Secrets, tokens and session IDs are never audit payloads.
+Audit DTO: `{id,timestamp,actor,action,node_id,task_id,subject_id,status}` with nullable target IDs. Browser actors use `web:<account-id>`. Existing Fleet action names are preserved; Console actions include `node.rename`, `node.delete`, `console.token.disable`, `console.user.update`, `console.sessions.revoke`, `console.login/logout`, `console.owner.bind/recover`, bootstrap/provider/migration changes. Secrets, tokens and session IDs are never audit payloads.
 
 Additional allowlisted errors: `invalid_request`, `not_found`, `node_disabled`, `state_conflict`, `user_conflict`, `last_admin`, `self_change`, `reauthentication_required`. Storage/internal/provider failures return generic codes, not raw diagnostics. An uncertain write must be reconciled by reading current records before a new attempt.
 

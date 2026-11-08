@@ -12,6 +12,8 @@ import { managementFixture, managementHandlers } from './management'
 // implementation and has no backing store, OIDC exchange or real credentials.
 export function makeHandlers(scenario: Scenario) {
   let active = scenario !== 'setup'
+  let tokenEnabled = true
+  let oauthVerified = false
   let session = !['guest', 'setup', 'login', 'expired', 'empty', 'unavailable'].includes(scenario)
   let setup: Setup | null = null
   let providers: LoginProvider[] =
@@ -51,8 +53,12 @@ export function makeHandlers(scenario: Scenario) {
   const managed = managementFixture(fleetFixture(size))
   const summary = () => {
     const data = fleetFixture(size)
+    data.nodes = data.nodes.filter((node) =>
+      managed.agents.some((a) => a.public_id === node.public_id),
+    )
     for (const node of data.nodes) {
       const agent = managed.agents.find((agent) => agent.public_id === node.public_id)
+      if (agent) node.display_name = agent.display_name
       if (agent?.status === 'disabled') node.last_seen_at = agent.last_seen_at
     }
     return data
@@ -70,7 +76,7 @@ export function makeHandlers(scenario: Scenario) {
     http.post('/v1/console/auth/token', async ({ request }) => {
       if (!validCSRF(request)) return problem('csrf_invalid', 403)
       const body = (await request.json()) as { token: string }
-      if (!/^[a-f0-9]{64}$/i.test(body.token)) return problem('token_invalid', 401)
+      if (!tokenEnabled || !/^[a-f0-9]{64}$/i.test(body.token)) return problem('token_invalid', 401)
       active = true
       session = true
       return reply(identity('Admin'))
@@ -81,6 +87,8 @@ export function makeHandlers(scenario: Scenario) {
         : reply({
             csrf_token: csrf,
             identities: linked,
+            token_enabled: tokenEnabled,
+            can_disable_token: oauthVerified && role === 'Admin',
             providers: providerState().providers.map(({ kind, name, issuer }) => ({
               kind,
               name,
@@ -88,6 +96,15 @@ export function makeHandlers(scenario: Scenario) {
             })),
           }),
     ),
+    http.post('/v1/console/account/token/disable', async ({ request }) => {
+      if (!session || role !== 'Admin') return problem('forbidden', 403)
+      if (!validCSRF(request)) return problem('csrf_invalid', 403)
+      if (!oauthVerified) return problem('oauth_verification_required', 403)
+      const body = (await request.json()) as { confirm: boolean }
+      if (body.confirm !== true) return problem('invalid_request', 400)
+      tokenEnabled = false
+      return reply({})
+    }),
     http.get('/v1/console/account/providers', () =>
       !session || role !== 'Admin' ? problem('forbidden', 403) : reply(providerState()),
     ),
@@ -95,6 +112,22 @@ export function makeHandlers(scenario: Scenario) {
       if (!session || role !== 'Admin') return problem('forbidden', 403)
       if (!validCSRF(request)) return problem('csrf_invalid', 403)
       const body = (await request.json()) as { providers: ProviderCredentials[] }
+      if (
+        !tokenEnabled &&
+        !body.providers.some((p) =>
+          linked.some(
+            (i) =>
+              i.issuer ===
+              (p.kind === 'github'
+                ? 'https://github.com'
+                : p.kind === 'google'
+                  ? 'https://accounts.google.com'
+                  : p.issuer),
+          ),
+        )
+      )
+        return problem('last_signin_method', 409)
+      oauthVerified = false
       setup = {
         ...providerState(),
         providers: body.providers.map((p) => ({
@@ -118,6 +151,7 @@ export function makeHandlers(scenario: Scenario) {
       const body = (await request.json()) as { provider: string }
       const p = providerState().providers.find((p) => p.kind === body.provider)
       if (!p) return problem('oidc_unavailable', 400)
+      oauthVerified = true
       linked = [...linked, { issuer: p.issuer, subject: 'preview-account', created_at: 1700000000 }]
       return reply({})
     }),
@@ -129,7 +163,7 @@ export function makeHandlers(scenario: Scenario) {
           ? providers
           : (setup?.providers ?? []).map(({ kind, name }) => ({ kind, name })),
         csrf_token: csrf,
-        token_enabled: true,
+        token_enabled: tokenEnabled,
       }),
     ),
     http.get('/v1/me', async () => {
@@ -150,6 +184,7 @@ export function makeHandlers(scenario: Scenario) {
       const body = (await request.json()) as { provider: string }
       if (!providers.some((p) => p.kind === body.provider)) return problem('oidc_unavailable', 400)
       if (scenario === 'oidc-error') return problem('oidc_callback_invalid', 400)
+      oauthVerified = true
       session = true
       return reply({})
     }),

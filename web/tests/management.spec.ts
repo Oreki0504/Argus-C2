@@ -4,6 +4,33 @@ import { identity } from '../src/mocks/fixtures'
 import { managementFixture } from '../src/mocks/management'
 import { fleetFixture } from '../src/mocks/fixtures'
 
+test('Admin renames a public agent and deletes it with explicit confirmation', async ({ page }) => {
+  await page.goto('/manage/agents?scenario=admin')
+  await page.getByRole('button', { name: 'Manage Production · North' }).click()
+  await page.getByRole('button', { name: 'Rename agent', exact: true }).click()
+  await page.getByLabel('Display name', { exact: true }).fill('东京 Web')
+  await page.getByRole('button', { name: 'Rename agent', exact: true }).click()
+  await expect(page.getByRole('link', { name: '东京 Web', exact: true })).toBeVisible()
+  await page.getByRole('link', { name: 'Overview', exact: true }).click()
+  await expect(page.getByRole('article', { name: '东京 Web', exact: true })).toBeVisible()
+  await page.getByRole('link', { name: 'Management', exact: true }).click()
+  await page
+    .getByRole('navigation', { name: 'Management sections' })
+    .getByRole('link', { name: 'Agents', exact: true })
+    .click()
+  await page.getByRole('button', { name: 'Manage 东京 Web' }).click()
+  await page.getByRole('button', { name: 'Delete agent', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Delete agent' })
+  await expect(dialog.getByRole('button', { name: 'Delete agent', exact: true })).toBeDisabled()
+  await dialog.getByLabel('Type the agent ID to confirm').fill('node-0001')
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
+  await dialog.getByRole('button', { name: 'Delete agent', exact: true }).click()
+  await expect(page.getByRole('link', { name: '东京 Web', exact: true })).toHaveCount(0)
+  await page.getByRole('link', { name: 'Overview', exact: true }).click()
+  await expect(page.getByRole('article', { name: '东京 Web', exact: true })).toHaveCount(0)
+  await expect(page.locator('.agent-card')).toHaveCount(5)
+})
+
 test('anonymous and User deep links never fetch management data', async ({ page }) => {
   const requests: string[] = []
   page.on('request', (request) => {

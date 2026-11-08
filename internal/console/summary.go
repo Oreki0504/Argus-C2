@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Oreki0504/Argus-C2/internal/database"
 	"github.com/Oreki0504/Argus-C2/internal/identity"
 	"github.com/Oreki0504/Argus-C2/internal/protocol"
 )
@@ -162,9 +163,12 @@ func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
 			storeProblem(w, err)
 			return
 		}
-		// Public names are opaque until a separately validated naming workflow is
-		// provided. Do not expose arbitrary database/Agent text as a public name.
-		n.DisplayName = publicName("", n.PublicID)
+		// Only the administrator's validated public label may replace the opaque
+		// default; Agent-supplied hostname and other private text stay private.
+		if !database.ValidNodeName(n.DisplayName) {
+			n.DisplayName = ""
+		}
+		n.DisplayName = publicName(n.DisplayName, n.PublicID)
 		if info != "" {
 			n.System = projectSystem(info, completed)
 		}

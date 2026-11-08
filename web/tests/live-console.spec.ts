@@ -30,6 +30,11 @@ test('real HTTPS Console logs in with token, binds OIDC and performs authenticat
     await page.getByRole('button', { name: 'Save sign-in methods', exact: true }).click()
     await page.getByRole('button', { name: /^Bind with / }).click()
     await expect(page.getByText('Account linked successfully.')).toBeVisible()
+    await page
+      .getByLabel('I can sign in with OAuth and want to disable the original token.')
+      .check()
+    await page.getByRole('button', { name: 'Disable token login', exact: true }).click()
+    await expect(page.getByText('Token login disabled', { exact: true })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Management', exact: true })).toBeVisible()
     await expect(page.getByText('Design preview', { exact: true })).toHaveCount(0)
     await page.getByRole('link', { name: 'Management', exact: true }).click()

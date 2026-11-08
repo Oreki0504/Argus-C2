@@ -31,9 +31,12 @@ type Config struct {
 	InstallerDir, FleetOrigin, FleetCA string
 }
 type session struct {
-	Kind, UserID, CSRF     string
-	Version, Generation    int64
-	Created, Last, Expires time.Time
+	Kind, UserID, CSRF           string
+	Version, Generation          int64
+	Created, Last, Expires       time.Time
+	TokenAuthenticated           bool
+	OAuthProviderID, OAuthIssuer string
+	OAuthVerifiedAt              time.Time
 }
 type flow struct {
 	StateDigest, Nonce, Verifier, ProviderID, AuthorizationURL string
@@ -100,6 +103,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/console/account/providers", s.authorized(true, s.accountProviders))
 	mux.HandleFunc("POST /v1/console/account/providers", s.authorized(true, s.configureAccountProviders))
 	mux.HandleFunc("POST /v1/console/account/bind", s.authorized(false, s.bindAccount))
+	mux.HandleFunc("POST /v1/console/account/token/disable", s.authorized(true, s.disableToken))
 	mux.HandleFunc("GET /v1/console/setup", s.setupStatus)
 	mux.HandleFunc("POST /v1/console/setup/prove", s.prove)
 	mux.HandleFunc("POST /v1/console/setup/provider", s.configureProvider)
@@ -307,11 +311,26 @@ func (s *Server) authorized(admin bool, next func(http.ResponseWriter, *http.Req
 			problem(w, 403, "forbidden")
 			return
 		}
+		if v.TokenAuthenticated {
+			enabled, err := s.store.ConsoleTokenAvailable(r.Context())
+			if err != nil {
+				problem(w, 503, "service_unavailable")
+				return
+			}
+			if !enabled {
+				clearCookie(w, sessionCookie)
+				problem(w, 401, "session_expired")
+				return
+			}
+		}
 		if r.Method == http.MethodPost && !csrf(r, v) {
 			problem(w, 403, "csrf_invalid")
 			return
 		}
 		ctx := database.WithConsoleActor(r.Context(), u.ID, u.Version, v.Generation, admin)
+		if v.TokenAuthenticated {
+			ctx = database.WithConsoleTokenSession(ctx)
+		}
 		next(w, r.WithContext(ctx), u, v)
 	}
 }

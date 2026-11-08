@@ -84,7 +84,29 @@ preview.10 起会区分应用凭据错误、回调不匹配、授权码被拒绝
 sudo journalctl -u argus-c2-server -n 80 --no-pager
 ```
 
-找到 `Console OAuth failed`，核对 `stage`（`token_exchange` 或 `user_info`）、`category` 与 `upstream_status`。若仍显示“无法验证登录”，可能在更早的会话/state 检查失败：保持同一浏览器和 Console 域名，重新发起关联，避免授权中途重启服务、编辑平台配置或并行发起多个登录。不要分享完整日志、回调 URL 或密钥；排查时只提供上述分类字段与页面提示。仅凭原来的通用提示无法确定 GitHub 失败根因。
+找到 `Console OAuth failed`，核对 `stage`（`callback`、`token_exchange` 或 `user_info`）、`reason`，以及存在时的 `category` 与 `upstream_status`。preview.11 进一步区分回调前置检查，页面与日志使用同一个固定原因码：
+
+| reason | 含义与下一步 |
+| --- | --- |
+| `oauth_cookie_missing` | 浏览器未带回登录 Cookie；使用同一浏览器和控制台地址，允许 Cookie 后重新发起 |
+| `oauth_flow_expired` | 授权已过期、被新请求替换或服务重启；在一个标签页重新发起 |
+| `oauth_state_mismatch` | 回调不属于当前授权；关闭旧登录页，重新发起 |
+| `oauth_callback_invalid` / `oauth_callback_mismatch` | 回调参数不完整或路径不属于所选平台；核对页面提供的完整回调地址 |
+| `oauth_issuer_mismatch` / `oauth_provider_rejected` | 签发方不匹配，或平台未返回有效授权码 |
+| `oauth_configuration_changed` | 授权期间修改了登录配置；重新发起 |
+| `oauth_account_failed` | ARGUS 读取或保存账号状态失败；检查服务状态和存储 |
+
+这些诊断不放宽 Cookie、state、PKCE 或账号归属校验。不要分享完整日志、回调 URL 或密钥；排查时只提供上述分类字段与页面提示。仅凭原来的通用提示无法确定 GitHub 失败根因。
+
+## 禁用原始 Token 登录
+
+1. 先成功关联 Google、GitHub 或其他 OAuth 身份。仅保存应用凭据不够。
+2. 使用已关联的身份登录，或刚完成绑定后，在十分钟内进入 **账号与登录 → 管理员 Token 登录**。
+3. 勾选确认并点击 **禁用 Token 登录**。
+
+原 Token 永久失效，仅使用 Token 的其他会话立即结束；当前已验证 OAuth 的会话和后续 OAuth 登录保留。重启不会重新启用 Token。本机 `console.token` 文件可能仍存在，但其中旧值不能再登录。禁用后不允许移除当前管理员最后一个已关联平台；如果修改平台凭据，请重新验证可用性。
+
+需要恢复时，只能由有服务器本机权限的所有者执行下面的显式恢复；它会替换管理员访问，不会重新启用原 Token。
 
 ## 本地恢复
 

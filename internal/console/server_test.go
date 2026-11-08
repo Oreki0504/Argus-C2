@@ -442,7 +442,14 @@ func TestConsoleRejectsOIDCReplayAndInvalidClaims(t *testing.T) {
 				}
 				w = b.request("GET", path, nil, "", nil)
 			}
-			if w.Header().Get("Location") != "/login?reason=oidc_callback_invalid" {
+			reason := "oidc_callback_invalid"
+			if mode == "state" {
+				reason = "oauth_state_mismatch"
+			}
+			if mode == "replay" {
+				reason = "oauth_cookie_missing"
+			}
+			if w.Header().Get("Location") != "/login?reason="+reason {
 				t.Fatal("invalid callback accepted", mode, w.Code, w.Header().Get("Location"))
 			}
 			if mode != "replay" {
@@ -589,6 +596,11 @@ func TestConsoleRealManagementAndPublicProjection(t *testing.T) {
 	if w := viewer.request("POST", "/v1/console/admin/enrollment-tokens", map[string]int{"ttl_seconds": 60}, vme["csrf_token"].(string), nil); w.Code != 403 {
 		t.Fatal("User performed write")
 	}
+	for _, action := range []string{"rename", "delete"} {
+		if w := viewer.request("POST", "/v1/console/admin/agents/"+agent.NodeID+"/"+action, map[string]string{"confirm_node_id": agent.NodeID}, vme["csrf_token"].(string), nil); w.Code != 403 {
+			t.Fatal("User changed Agent", action)
+		}
+	}
 	decodeTest[map[string]any](t, admin.request("POST", "/v1/console/admin/users/"+user.ID+"/revoke-sessions", struct{}{}, csrfToken, nil), 200)
 	if w := viewer.request("GET", "/v1/me", nil, "", nil); w.Code != 401 {
 		t.Fatal("revoked session accepted")
@@ -643,6 +655,31 @@ func TestConsoleRealManagementAndPublicProjection(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Renaming is an explicit public label, and deletion removes live access,
+	// task history and the public projection while retaining audit evidence.
+	renamePath := "/v1/console/admin/agents/" + agent.NodeID + "/rename"
+	deletePath := "/v1/console/admin/agents/" + agent.NodeID + "/delete"
+	decodeTest[map[string]string](t, guest.request("POST", renamePath, map[string]string{"display_name": "Web"}, csrfToken, nil), 401)
+	decodeTest[map[string]string](t, admin.request("POST", renamePath, map[string]string{"display_name": "bad\nname"}, csrfToken, nil), 400)
+	decodeTest[map[string]any](t, admin.request("POST", renamePath, map[string]string{"display_name": "东京 Web"}, csrfToken, nil), 200)
+	renamed := decodeTest[publicSummary](t, guest.request("GET", "/v1/console/public/summary", nil, "", nil), 200)
+	if renamed.Nodes[0].DisplayName != "东京 Web" {
+		t.Fatal(renamed)
+	}
+	decodeTest[map[string]string](t, admin.request("POST", deletePath, map[string]string{"confirm_node_id": "other"}, csrfToken, nil), 400)
+	decodeTest[map[string]string](t, admin.request("POST", deletePath, map[string]string{"confirm_node_id": agent.NodeID}, "wrong", nil), 403)
+	decodeTest[map[string]any](t, admin.request("POST", deletePath, map[string]string{"confirm_node_id": agent.NodeID}, csrfToken, nil), 200)
+	removed := decodeTest[publicSummary](t, guest.request("GET", "/v1/console/public/summary", nil, "", nil), 200)
+	if len(removed.Nodes) != 0 {
+		t.Fatal(removed)
+	}
+	decodeTest[map[string]string](t, guest.request("GET", "/v1/console/public/nodes/"+agent.PublicID+"/history?range=1h", nil, "", nil), 404)
+	decodeTest[map[string]string](t, admin.request("GET", "/v1/console/admin/tasks/"+metricsTask.ID, nil, "", nil), 404)
+	deletedAudit := decodeTest[page[auditEvent]](t, admin.request("GET", "/v1/console/admin/audit?action=node.delete", nil, "", nil), 200)
+	if deletedAudit.Total != 1 {
+		t.Fatal(deletedAudit)
+	}
+
 }
 
 func TestConsoleSessionCookieFlagsAndExpiry(t *testing.T) {
