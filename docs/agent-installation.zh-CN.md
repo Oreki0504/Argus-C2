@@ -73,7 +73,7 @@ sudo journalctl -u argus-c2-agent.service -n 50 --no-pager
 在**需要移除的 Agent 主机**执行下列完整命令，可清除当前 Agent 程序、systemd 服务、配置、策略、注册证书、数据库和 `argus-agent` 系统账户：
 
 ```sh
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.11/install-server.py -o "$f" && sudo python3 "$f" --uninstall agent --purge )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.12/install-server.py -o "$f" && sudo python3 "$f" --uninstall agent --purge )
 ```
 
 选择语言后，核对清理清单，输入 `purge agent` 确认。想先查看范围，在 `--purge` 后、右括号前加 `--dry-run`；想保留身份供恢复，去掉 `--purge`。只有 wget 时，将下载部分换为 `wget --https-only --max-redirect=5 -O "$f" 同一个下载地址`。

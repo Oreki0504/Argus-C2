@@ -44,7 +44,13 @@ type providerInput struct {
 }
 
 const googleIssuer = "https://accounts.google.com"
+
+// Preserve the existing GitHub account namespace across upgrades. It is not
+// GitHub's RFC 9207 authorization-response issuer.
 const githubIssuer = "https://github.com"
+
+// Published at https://github.com/login/oauth/.well-known/openid-configuration.
+const githubAuthorizationIssuer = "https://github.com/login/oauth"
 
 func callbackPath(kind string) string {
 	if kind == "google" || kind == "github" {
@@ -603,7 +609,11 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		fail("oidc_unavailable")
 		return
 	}
-	if len(q["iss"]) > 1 || q.Has("iss") && q.Get("iss") != p.Credentials.Issuer {
+	expectedIssuer := p.Credentials.Issuer
+	if p.Credentials.Kind == "github" {
+		expectedIssuer = githubAuthorizationIssuer
+	}
+	if len(q["iss"]) > 1 || q.Has("iss") && q.Get("iss") != expectedIssuer {
 		callbackFailure("oauth_issuer_mismatch")
 		return
 	}

@@ -63,6 +63,8 @@ Register the exact callback supplied by the Console, including its HTTPS origin 
 
 Each provider uses Authorization Code + S256 PKCE and a server-bound state transaction. Distinct callback paths bind the selected provider to the transaction. Google/custom OIDC verify ID token signature, issuer, audience, authorized party, expiry, issued-at and nonce with scopes `openid profile`. GitHub uses `read:user` and obtains the immutable numeric account ID from the authenticated `https://api.github.com/user` response; usernames and email addresses are not identity keys. Provider HTTP uses verified TLS, bounded responses/timeouts and no redirects. Access tokens are transient server-side values, never browser credentials.
 
+For GitHub, an authorization-response `iss` must exactly match `https://github.com/login/oauth`, as published in its [authorization-server metadata](https://github.com/login/oauth/.well-known/openid-configuration). This is separate from the existing `https://github.com` account namespace, which remains unchanged to preserve linked identities. Duplicate, empty or incorrect issuer values are rejected before exchanging the code. Callbacks without this optional parameter remain compatible with the provider-bound state, callback and PKCE checks.
+
 ## First administrator
 
 The installer issues a reusable, random administrator token in `/etc/argus-c2/setup/console.token` (root-only, mode 0600). Enter it at `/login` or `/setup`. The first valid token login atomically creates the local Admin and activates Console; OAuth is not required. The same token can be used after logout or restart. Only its SHA-256 digest is stored in SQLite, and it is exchanged for the normal bounded browser session rather than used as an API bearer credential.

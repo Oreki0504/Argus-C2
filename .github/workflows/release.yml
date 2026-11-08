@@ -75,11 +75,15 @@ jobs:
           {command}
           ```
 
+          Fix GitHub OAuth linking/sign-in rejected with `oauth_issuer_mismatch`: validate the authorization-response issuer against GitHub's published `https://github.com/login/oauth`, separately from ARGUS's stable `https://github.com` account namespace. Existing accounts, app credentials and callback URLs are preserved. No OAuth app recreation or database migration is needed; update Server and start a fresh binding attempt.
+
+          Regression fixtures now include GitHub's actual issuer. Tests reproduce the old failure, verify linking and sign-in, preserve older identities, and reject duplicate, empty or incorrect issuer values before code exchange. State, callback binding and PKCE checks remain enforced.
+
           Admin can now rename or delete Agents in Management. Public names update in Overview. Deletion revokes the identity and removes task/metric history while retaining audit; it does not uninstall the remote host.
 
           Account & sign-in can permanently disable the original administrator Token after successful OAuth login or binding within ten minutes. Token-only sessions are revoked, OAuth sessions remain, and removing the last linked provider is blocked. Server-local recovery remains available.
 
-          GitHub callback errors now distinguish missing cookies, expired/replaced flows, state/path/issuer mismatches, configuration changes and account-state failures. These diagnostics preserve all authentication checks. A live retry is still needed to identify the reported deployment failure; no confirmed GitHub root-cause fix is claimed.
+          GitHub callback errors now distinguish missing cookies, expired/replaced flows, state/path/issuer mismatches, configuration changes and account-state failures. These diagnostics preserve all authentication checks; this release fixes the reproduced GitHub issuer mismatch described above.
 
           These changes require only a Server update. Server schema 104, Agent schema 101 and protocol 1 are unchanged.
 
@@ -87,7 +91,7 @@ jobs:
 
           Console now collects system information hourly and resource metrics each minute through idle Agent polls, respecting local policy and existing queued work. Updated Agents automatically select default-route network interfaces when the local list is empty. Two recent samples provide average network rates; bandwidth capacity/percentages and traffic totals remain unavailable. Monitoring history uses ordinary task retention.
 
-          Account settings now put OAuth app configuration before personal identity linking. GitHub requests explicitly negotiate JSON and include a User-Agent; failures distinguish credentials, callback, code, profile and upstream problems, with secret-free stage diagnostics. A live GitHub retry is still needed to diagnose any deployment-specific failure.
+          Account settings now put OAuth app configuration before personal identity linking. GitHub requests explicitly negotiate JSON and include a User-Agent; failures distinguish credentials, callback, code, profile and upstream problems, with secret-free stage diagnostics.
 
           Agent install output includes a downloadable uninstall/purge command. `--uninstall agent --purge` removes current programs, service, configuration, identity, database and the dedicated account; delete or disable the registered Agent in Console when retiring it. Historical backups remain.
 

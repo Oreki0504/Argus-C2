@@ -78,6 +78,8 @@ https://argus.example.com/v1/console/auth/callback/google
 
 ### GitHub 授权后失败
 
+preview.12 修复了 `oauth_issuer_mismatch` 的一个已复现原因：GitHub 在回调中返回的授权签发方是 `https://github.com/login/oauth`（见 [GitHub 官方元数据](https://github.com/login/oauth/.well-known/openid-configuration)），此前代码错误地用账号身份命名空间 `https://github.com` 比较。更新后无需重新创建 OAuth 应用、修改回调或重新填写密钥；重新发起关联即可。已有账号仍使用原来的身份命名空间，权限与关联关系不变。提供 `iss` 时仍要求唯一且严格匹配，不忽略错误值。
+
 preview.10 起会区分应用凭据错误、回调不匹配、授权码被拒绝、用户资料失败与网络/上游不可用。服务端仅记录固定分类与 HTTP 状态码，不记录授权码、Token、Secret、响应正文或完整回调 URL。失败后在服务器本机检查：
 
 ```sh

@@ -183,6 +183,15 @@ func TestDirectSocialSetupAndStableIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			callback := startSocial(t, b, owner, csrf, true)
+			if owner == "github" {
+				// Existing accounts may have been created before GitHub added
+				// iss to the callback. Their identity must remain unchanged.
+				u, _ := url.Parse(callback)
+				q := u.Query()
+				q.Del("iss")
+				u.RawQuery = q.Encode()
+				callback = u.RequestURI()
+			}
 			if dest := b.request("GET", callback, nil, "", nil).Header().Get("Location"); dest != "/" {
 				t.Fatal(dest)
 			}
@@ -219,6 +228,12 @@ func TestDirectSocialSetupAndStableIdentity(t *testing.T) {
 			}
 			if returning.identity()["principal_id"] != identity["principal_id"] {
 				t.Fatal("stable provider identity changed")
+			}
+			if owner == "github" {
+				identities, err := s.store.ConsoleIdentities(t.Context(), identity["principal_id"].(string))
+				if err != nil || len(identities) != 1 || identities[0].Issuer != "https://github.com" || identities[0].Subject != "42" {
+					t.Fatal("GitHub identity namespace changed", identities, err)
+				}
 			}
 		})
 	}
@@ -304,7 +319,9 @@ func newGitHubFixture(t *testing.T) *githubFixture {
 			code := rand.Text()
 			g.grants[code] = testGrant{challenge: q.Get("code_challenge"), redirect: q.Get("redirect_uri"), mode: g.mode}
 			callback, _ := url.Parse(q.Get("redirect_uri"))
-			callback.RawQuery = url.Values{"code": {code}, "state": {q.Get("state")}}.Encode()
+			// Match GitHub's authorization-server metadata, independently of
+			// ARGUS's stored identity namespace (https://github.com).
+			callback.RawQuery = url.Values{"code": {code}, "state": {q.Get("state")}, "iss": {"https://github.com/login/oauth"}}.Encode()
 			http.Redirect(w, r, callback.String(), 303)
 		case "/login/oauth/access_token":
 			if r.Header.Get("Accept") != "application/json" || r.UserAgent() != "ARGUS-Console" {
@@ -359,7 +376,7 @@ func newGitHubFixture(t *testing.T) *githubFixture {
 }
 
 func TestGitHubCallbackDiagnosticsKeepStateAndCookieChecks(t *testing.T) {
-	for _, mode := range []string{"cookie", "expired", "state", "path", "issuer", "changed", "missing-code"} {
+	for _, mode := range []string{"cookie", "expired", "state", "path", "issuer", "identity-issuer", "empty-issuer", "duplicate-issuer", "issuer-slash", "changed", "missing-code"} {
 		t.Run(mode, func(t *testing.T) {
 			s, _, gh, b, csrf, settings := socialConsole(t)
 			decodeTest[map[string]any](t, b.request("POST", "/v1/console/setup/provider", settings, csrf, nil), 200)
@@ -382,6 +399,18 @@ func TestGitHubCallbackDiagnosticsKeepStateAndCookieChecks(t *testing.T) {
 				reason = "oauth_callback_mismatch"
 			case "issuer":
 				q.Set("iss", "https://untrusted.example")
+				reason = "oauth_issuer_mismatch"
+			case "identity-issuer":
+				q.Set("iss", "https://github.com")
+				reason = "oauth_issuer_mismatch"
+			case "empty-issuer":
+				q.Set("iss", "")
+				reason = "oauth_issuer_mismatch"
+			case "duplicate-issuer":
+				q.Add("iss", "https://github.com/login/oauth")
+				reason = "oauth_issuer_mismatch"
+			case "issuer-slash":
+				q.Set("iss", "https://github.com/login/oauth/")
 				reason = "oauth_issuer_mismatch"
 			case "changed":
 				decodeTest[map[string]any](t, b.request("POST", "/v1/console/setup/provider", settings, csrf, nil), 200)
