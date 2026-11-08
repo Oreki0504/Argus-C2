@@ -6,6 +6,8 @@ This guide runs the server, agent, and CLI on one Linux machine. It stores every
 
 For the Web Console, use the [Server installer](server-installation.zh-CN.md). Its random administrator token opens management immediately; OAuth linking is optional afterward. The CLI demo below uses a separate Fleet admin.token, which cannot authenticate in the browser.
 
+The same installer handles updates (`--update server|agent`) and [uninstall](server-installation.zh-CN.md#卸载-server-或-agent) (`--uninstall server|agent`). Uninstall preserves data by default; add `--purge` explicitly to remove current component data and its dedicated account. Historical backups remain.
+
 ## 1. Build
 
 From the repository root:

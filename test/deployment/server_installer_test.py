@@ -287,6 +287,32 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(plan['files'][0][1].read_bytes(), b'old-program')
         self.assertIn(['systemctl', 'start', plan['unit']], calls)
 
+    def test_update_failure_records_private_command_diagnostics_and_still_rolls_back(self):
+        args, plan, bundle, system, calls = self.update_fixture()
+        secret = b'provider-secret-not-for-terminal'
+        def reject(*_):
+            plan['stage'] = 'migrating_database_copy'
+            installer.run(['candidate', 'console-migrate'])
+        real_run = installer.run
+        def execute(command, **kwargs):
+            return system(command, **kwargs) if command[0] == 'systemctl' else real_run(command, **kwargs)
+        with patch.object(installer, 'run', side_effect=execute), \
+                patch.object(installer.subprocess, 'run', return_value=subprocess.CompletedProcess([], 7, b'', secret)), \
+                patch.object(installer, 'validate_update', side_effect=reject), patch.object(installer, 'verify_updated_service'), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as output, \
+                self.assertRaisesRegex(installer.InstallError, 'previous programs'):
+            installer.update_component(args, plan, bundle)
+        backup = next(installer.path('/var/lib/argus-c2-updates').iterdir())
+        record = json.loads((backup / 'failure.json').read_text())
+        self.assertEqual(record['stage'], 'migrating_database_copy')
+        self.assertEqual(record['exit_code'], 7)
+        self.assertEqual(record['stderr'], secret.decode())
+        self.assertEqual(stat.S_IMODE((backup / 'failure.json').stat().st_mode), 0o600)
+        self.assertIn('migrating_database_copy', output.getvalue())
+        self.assertNotIn(secret.decode(), output.getvalue())
+        self.assertEqual(json.loads((backup / 'update.json').read_text())['phase'], 'rolled_back')
+        self.assertIn(['systemctl', 'start', plan['unit']], calls)
+
     def test_schema_update_failure_preserves_new_state_and_stops_service(self):
         args, plan, bundle, system, calls = self.update_fixture()
         source = plan['state'] / 'probe.db'

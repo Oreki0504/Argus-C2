@@ -66,4 +66,8 @@ sudo journalctl -u argus-c2-agent.service -n 50 --no-pager
 
 使用新版发布脚本的 `--update agent`，在 Agent 主机本地执行，完整命令见 [Server／Agent 更新](server-installation.zh-CN.md#更新-server-或-agent)。它下载并校验当前架构包、停止 Agent、备份身份与待发送结果、检查数据库副本后替换程序，再恢复原服务状态；失败时恢复旧程序。注册证书、节点 ID、策略和现有数据库保留，不需要新的注册 Token。
 
+## 卸载
+
+同一个发布脚本支持 `--uninstall agent`，默认保留配置、注册身份、数据库和策略；`--purge` 才清除当前 Agent 数据及专用账户，便于重新安装。完整下载命令、预览和恢复步骤见 [Server／Agent 卸载](server-installation.zh-CN.md#卸载-server-或-agent)。卸载只影响本机 Agent，不修改同机 Server，也不会自动撤销服务器上的注册身份；退役主机时还需在管理页禁用该 Agent。
+
 Server 更新只刷新其托管的安装文件；已部署的 Agent 需要逐台显式更新。更新后在管理页面确认原节点的心跳恢复，避免把重新注册造成的新节点误认为升级成功。

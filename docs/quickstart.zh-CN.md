@@ -6,6 +6,8 @@
 
 使用 Web 后台请按[Server 一键安装](server-installation.zh-CN.md)部署。安装生成的随机管理员 Token 可直接登录，OAuth 在后台按需绑定；详见[登录说明](console-login.zh-CN.md)。本页下面是独立的 CLI 演示，CLI admin.token 不能登录 Web。
 
+正式部署的[更新和卸载](server-installation.zh-CN.md#卸载-server-或-agent)也由同一个安装脚本提供：`--update server|agent`、`--uninstall server|agent`。卸载默认保留数据，显式 `--purge` 才清除当前部署。
+
 ## 1. 构建
 
 先进入仓库根目录：

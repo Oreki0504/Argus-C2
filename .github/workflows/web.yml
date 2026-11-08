@@ -36,7 +36,7 @@ jobs:
         run: sh deploy/linux/build-server-bundles.sh "$RUNNER_TEMP/argus-server-release"
         working-directory: .
       - name: Verify real Server bundle with isolated system operations
-        run: python3 -m unittest discover -s test/deployment -p 'server_installer_test.py' -v
+        run: python3 -m unittest discover -s test/deployment -p 'server_*test.py' -v
         working-directory: .
         env:
           ARGUS_SERVER_TEST_BUNDLE: ${{ runner.temp }}/argus-server-release/argus-server-linux-amd64.tar.gz

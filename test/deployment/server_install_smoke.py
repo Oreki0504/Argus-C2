@@ -73,6 +73,18 @@ def main():
         require('active' == run('systemctl', 'is-active', unit).strip(), 'Installed Server is not active.')
         require('argus-server' == run('systemctl', 'show', unit, '-p', 'User', '--value').strip(),
                 'Server must run as its dedicated account.')
+        # Exercise schema 103 -> 104 as the actual service user, not root. The
+        # isolated test's mocked runuser cannot expose ownership regressions.
+        run('systemctl', 'stop', unit)
+        run('runuser', '-u', 'argus-server', '--', 'python3', '-c',
+            'import sqlite3; db=sqlite3.connect("/var/lib/argus-c2-server/argus.db"); '
+            'db.executescript("DROP TABLE console_token; DROP TABLE console_identities; PRAGMA user_version=103;"); db.close()')
+        run(sys.executable, installer, '--bundle', bundle, '--update', 'server', '--language', 'en')
+        require(run('systemctl', 'show', unit, '-p', 'ActiveState', '--value').strip() == 'inactive',
+                'Migration restarted an intentionally stopped service.')
+        secret_file = max((root / 'setup').glob('console-*.token'), key=lambda p: p.stat().st_mtime_ns)
+        secret = secret_file.read_text().strip()
+        run('systemctl', 'start', unit)
         origin = 'https://127.0.0.1:9443'
         context = ssl.create_default_context(cafile=str(root / 'console/ca.pem'))
         context.minimum_version = ssl.TLSVersion.TLSv1_3
@@ -194,7 +206,29 @@ def main():
             require(result.returncode != 0, 'Invalid update candidate was accepted.')
             run('systemctl', 'is-active', '--quiet', unit)
             require(request('/v1/console/auth/status')['state'] == 'ACTIVE', 'Rejected update lost setup state.')
-        print('Real installation: HTTPS, bootstrap/reissue, Server and Agent updates, identity preservation and rejected-candidate recovery passed.')
+        # Keep-data uninstall archives program files, stops only the chosen
+        # component, and can be restored without changing identity.
+        state_files = {p: p.read_bytes() for p in identity_files}
+        run(sys.executable, installer, '--uninstall', 'server', '--yes', '--language', 'en')
+        run('systemctl', 'is-active', '--quiet', 'argus-c2-agent.service')
+        for p, contents in state_files.items():
+            require(p.read_bytes() == contents, 'Keep-data uninstall altered identity.')
+        saved = max(Path('/var/lib/argus-c2-uninstall').glob('server-*'), key=lambda p: p.stat().st_mtime_ns)
+        run('tar', '-xpf', saved / 'programs.tar', '-C', '/')
+        run('systemctl', 'daemon-reload')
+        run('systemctl', 'enable', '--now', unit)
+        run('systemctl', 'is-active', '--quiet', unit)
+        # Purge and reinstall: no leftover service account may block a new install.
+        run(sys.executable, installer, '--uninstall', 'agent', '--purge', '--yes', '--language', 'en')
+        require(not agent_state.exists() and not agent_binary.exists(), 'Agent purge retained active installation files.')
+        run('systemctl', 'is-active', '--quiet', unit)
+        run(sys.executable, installer, '--uninstall', 'server', '--purge', '--yes', '--language', 'en')
+        require(not state.exists(), 'Server purge retained its database.')
+        require(Path('/var/lib/argus-c2-updates').is_dir(), 'Purge removed update recovery records.')
+        run(sys.executable, installer, '--uninstall', 'server', '--purge', '--yes', '--language', 'en')
+        run(sys.executable, installer, '--bundle', bundle, '--host', '127.0.0.1', '--tls', 'local-ca')
+        run('systemctl', 'is-active', '--quiet', unit)
+        print('Native installation, schema 103 migration, token login, updates, rollback, component-scoped uninstall, restore and purge/reinstall passed.')
     finally:
         subprocess.run(['systemctl', 'stop', 'argus-c2-agent.service'], capture_output=True, timeout=60)
         subprocess.run(['systemctl', 'disable', '--now', unit], capture_output=True, timeout=60)

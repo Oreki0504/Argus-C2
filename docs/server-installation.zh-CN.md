@@ -12,7 +12,7 @@
 cd web
 npm ci --ignore-scripts
 cd ..
-sh deploy/linux/build-server-bundles.sh /tmp/argus-server-release v0.1.0-preview.7
+sh deploy/linux/build-server-bundles.sh /tmp/argus-server-release v0.1.0-preview.8
 ```
 
 生成：
@@ -30,23 +30,23 @@ SHA256SUMS
 
 ## 一条命令启动交互安装
 
-预览版本使用固定 tag 的下载链接。以下是 [v0.1.0-preview.7](https://github.com/Oreki0504/Argus-C2/releases/tag/v0.1.0-preview.7) 发布后的安装入口：在新服务器粘贴命令，即可下载安装脚本、启动交互并自动取得匹配的安装包。下载链接须等待对应 Release 工作流成功完成；仅有 commit 或 tag 不会产生安装包。
+预览版本使用固定 tag 的下载链接。以下是 [v0.1.0-preview.8](https://github.com/Oreki0504/Argus-C2/releases/tag/v0.1.0-preview.8) 发布后的安装入口：在新服务器粘贴命令，即可下载安装脚本、启动交互并自动取得匹配的安装包。下载链接须等待对应 Release 工作流成功完成；仅有 commit 或 tag 不会产生安装包。
 
 curl：
 
 ```sh
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.7/install-server.py -o "$f" && sudo python3 "$f" )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.8/install-server.py -o "$f" && sudo python3 "$f" )
 ```
 
 GNU wget：
 
 ```sh
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; wget --https-only --max-redirect=5 -O "$f" https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.7/install-server.py && sudo python3 "$f" )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; wget --https-only --max-redirect=5 -O "$f" https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.8/install-server.py && sudo python3 "$f" )
 ```
 
 脚本完整下载后才执行，终端标准输入保留给域名/IP 提问。脚本识别架构，从其绑定的 Release 获取 `SHA256SUMS` 和安装包，校验后才运行包内程序。用户不需要填写安装包 URL 或摘要。GitHub 的 HTTPS 资产重定向受支持，不允许降级到 HTTP 或带凭据跳转。
 
-预发布版本不会成为 `latest`。发布首个稳定版本后，可将链接中的 `download/v0.1.0-preview.7` 换成 `latest/download`，取得最新稳定版；测试预览版时应保留固定版本链接。每个 Release 的说明会给出该版本的完整命令。`v0.1.0-preview.1` 在发布检查中失败，保留 tag 供追溯，没有公开安装包。
+预发布版本不会成为 `latest`。发布首个稳定版本后，可将链接中的 `download/v0.1.0-preview.8` 换成 `latest/download`，取得最新稳定版；测试预览版时应保留固定版本链接。每个 Release 的说明会给出该版本的完整命令。`v0.1.0-preview.1` 在发布检查中失败，保留 tag 供追溯，没有公开安装包。
 
 已有本地安装目录时，也可以继续执行：
 
@@ -105,7 +105,7 @@ sudo python3 install-server.py \
 
 以上下载地址是部署示例。自定义单个包的 `--bundle-url` 必须显式传入可信 SHA-256，支持最多五次 HTTPS 重定向；本地包使用 `--bundle /path/archive.tar.gz` 并默认读取同目录 `SHA256SUMS`。完整下载及校验通过后才会执行包内程序，解包不接受目录穿越、链接、重复或意外文件。
 
-自托管整个发布目录时，可以改用 `--release-base https://downloads.example.com/argus/v0.1.0`，自动读取同目录清单并选择架构；或用 `--release v0.1.0-preview.7` 选择 GitHub 上已发布的版本。没有本地包、没有绑定版本的源码安装器会查询 GitHub 最新稳定 Release；没有 Release 时明确报错，不会回退到源码构建或未经校验的二进制。
+自托管整个发布目录时，可以改用 `--release-base https://downloads.example.com/argus/v0.1.0`，自动读取同目录清单并选择架构；或用 `--release v0.1.0-preview.8` 选择 GitHub 上已发布的版本。没有本地包、没有绑定版本的源码安装器会查询 GitHub 最新稳定 Release；没有 Release 时明确报错，不会回退到源码构建或未经校验的二进制。
 
 ## 发布 GitHub 下载入口
 
@@ -197,10 +197,10 @@ curl -q --noproxy '*' --max-time 5 -H Metadata:true 'http://169.254.169.254/meta
 
 ```sh
 # Server：更新服务端、内嵌前端、CLI 和供新 Agent 下载的二进制
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.7/install-server.py -o "$f" && sudo python3 "$f" --update server )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.8/install-server.py -o "$f" && sudo python3 "$f" --update server )
 
 # Agent：在每台 Agent 主机单独执行，只替换本机 Agent 程序
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.7/install-server.py -o "$f" && sudo python3 "$f" --update agent )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.8/install-server.py -o "$f" && sudo python3 "$f" --update agent )
 ```
 
 已取得安装包目录时可运行 `sudo python3 install-server.py --update server --bundle /path/argus-server-linux-amd64.tar.gz`。同一脚本支持 `--release TAG`、`--release-base URL` 和原有 SHA-256 校验；默认使用下载脚本绑定的版本。更新时不重新询问域名、邮箱或证书，`--host` 等首次安装参数不适用。
@@ -211,4 +211,47 @@ curl -q --noproxy '*' --max-time 5 -H Metadata:true 'http://169.254.169.254/meta
 
 每次更新在 `/var/lib/argus-c2-updates/server-*` 或 `agent-*` 留下 root 私有备份，包含 `update.json`、旧程序、`state` 和 `configuration`。它包含凭据，应按私有备份保管，并由管理员在验收后管理保留时间。确保磁盘容纳完整状态快照；脚本不会自动删除旧备份。
 
+从 preview.8 起，更新失败还会打印失败阶段、命令名称及退出码，并在该次备份中保存 `failure.json`，包含限长的原始错误输出；恢复旧服务也失败时另存 `recovery-failure.json`。这些文件仅 root 可读，可能包含凭据，排查时先在本机查看，不要原样公开。旧版只有“已回滚”的提示不足以确定失败原因；卸载不是修复更新所必需的步骤。
+
 自动更新支持项目标准路径和专用 systemd 账户；自定义路径、命令及不支持的 schema 使用手动流程。断电、强制结束进程或恢复失败时，查看 `update.json` 的阶段和原程序位置，保留现有数据库，停止对应服务后按记录恢复程序及权限，再检查启动。不要用旧数据库覆盖现有状态来强行恢复。服务存活检查不等于远端连通验收；Agent 更新后还应在 Console 确认心跳和结果上报。
+
+## 卸载 Server 或 Agent
+
+preview.8 起，同一个 `install-server.py` 同时包含安装、更新和卸载。卸载不下载安装包，也不申请证书；支持只安装了一部分的主机及重复执行。先选语言，再显示处理范围并确认。
+
+下载新版脚本并卸载 Server（**默认保留数据**）：
+
+```bash
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.8/install-server.py -o "$f" && sudo python3 "$f" --uninstall server )
+```
+
+卸载 Agent 时，将末尾的 `server` 改成 `agent`，在 Agent 所在主机执行。已安装新版 Server 的主机也可以离线使用本地维护脚本：
+
+```bash
+# 只查看计划，不修改文件或服务
+sudo python3 /usr/local/libexec/argus-c2/install-server.py --uninstall server --dry-run
+
+# 停止、禁用并移除程序及服务定义，保留配置、数据库、证书、Token 和账户
+sudo python3 /usr/local/libexec/argus-c2/install-server.py --uninstall server
+
+# 删除当前 Server 部署数据和专用账户，以便全新安装
+sudo python3 /usr/local/libexec/argus-c2/install-server.py --uninstall server --purge
+```
+
+`--purge` 会删除所选组件的标准配置目录、状态数据库、证书、Token 和专用系统账户；Server 还会删除其独立 ACME 账户/证书目录及日志。交互时必须输入 `purge server` 或 `purge agent`。自动化可显式使用 `--yes`；没有终端且未指定 `--yes` 时拒绝卸载。清除 Server 会丢失现有 Fleet 身份，新装后原 Agent 需要重新注册；清除 Agent 后也需要新的注册命令。请先自行备份要保留的数据。
+
+卸载 Server 会先关闭其续期任务，不影响同机 Agent 的程序、配置、账户和服务。卸载 Agent 不修改 Server，也不会自动撤销服务端的注册身份；退役主机时，请在 Console 管理页禁用对应 Agent。
+
+两种模式均保留历史 `/var/lib/argus-c2-updates` 和 `/var/lib/argus-c2-uninstall` 备份、本地维护脚本、Certbot 安装环境及共享父目录。`--purge` 清除的是**当前部署**，并不擦除备份中的历史凭据。验收后由管理员单独管理这些备份；脚本不卸载系统 Python、Certbot 软件包或其他站点的证书。
+
+每次卸载打印 `/var/lib/argus-c2-uninstall/<component>-...` 私有记录目录。`uninstall.json` 记录范围及完成状态，`programs.tar` 保存移除前的程序和服务定义。保留数据卸载后，如需恢复相同身份，将下面路径替换为这次打印的实际路径：
+
+```bash
+sudo tar -xpf /var/lib/argus-c2-uninstall/server-REPLACE_ME/programs.tar -C /
+sudo systemctl daemon-reload
+sudo systemctl enable --now argus-c2-server.service
+```
+
+原先使用 Let’s Encrypt 的 Server 还需执行 `sudo systemctl enable --now argus-console-renew.timer`。Agent 恢复时换用对应归档和 `argus-c2-agent.service`。仅恢复自己这台主机生成、且匹配当前数据库版本的归档；旧版手动部署共用 `argus-c2.conf` 时，恢复前应核对其中另一个组件的账户定义。
+
+保留数据模式不会允许安装器直接覆盖旧数据；恢复旧部署用上述归档，全新安装则先显式执行 `--purge`。清除数据后，仅恢复 `programs.tar` 无法恢复数据库和身份。若卸载中断，保留已打印的记录，检查 `failure.json` 后重试；它不会自动重建服务或悄悄改成新安装。

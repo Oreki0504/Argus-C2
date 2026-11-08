@@ -55,6 +55,16 @@ class UpdatePreflightError(InstallError):
     """Update was rejected before downloading a bundle or changing a service."""
 
 
+class CommandError(InstallError):
+    def __init__(self, args, result):
+        # Never put raw arguments/output (which may include credentials) in the
+        # terminal exception. Update failures save details in a private file.
+        self.command = Path(args[0]).name
+        self.returncode = result.returncode
+        self.stdout, self.stderr = result.stdout, result.stderr
+        super().__init__(f'{self.command} failed (exit {self.returncode}).')
+
+
 def text(en, zh):
     return zh if LANGUAGE == 'zh-CN' else en
 
@@ -83,7 +93,7 @@ def run(args, *, check=True, timeout=180, input=None):
     if check and result.returncode:
         # CLI diagnostics can include credentials or account URLs. Keep them out
         # of terminal output; Certbot maintains its own root-only diagnostic log.
-        raise InstallError(f'{Path(args[0]).name} {args[1]} failed; no success was recorded.')
+        raise CommandError(args, result)
     return result
 
 
@@ -164,7 +174,7 @@ def origin(host, port):
 
 
 def parser():
-    p = argparse.ArgumentParser(description='Install a new ARGUS Server; without flags, ask for domain/IP and certificate setup.')
+    p = argparse.ArgumentParser(description='Install ARGUS Server, or update/uninstall a local Server or Agent. Without flags, ask for domain/IP and certificate setup.')
     source = p.add_mutually_exclusive_group()
     source.add_argument('--bundle', type=Path, help='local release archive; defaults to the archive next to this script')
     source.add_argument('--bundle-url', help='HTTPS release archive URL; HTTPS redirects are supported')
@@ -180,7 +190,12 @@ def parser():
     p.add_argument('--console-key', type=Path)
     p.add_argument('--fleet-port', type=int, default=8443)
     p.add_argument('--console-port', type=int, default=9443)
-    p.add_argument('--update', choices=('server', 'agent'), help='update an installed component while preserving configuration and identity')
+    action = p.add_mutually_exclusive_group()
+    action.add_argument('--update', choices=('server', 'agent'), help='update an installed component while preserving configuration and identity')
+    action.add_argument('--uninstall', choices=('server', 'agent'), help='stop and remove a component; preserve configuration, data and identity by default')
+    p.add_argument('--purge', action='store_true', help='with --uninstall, also delete component configuration, state and dedicated account; historical backups remain')
+    p.add_argument('--dry-run', action='store_true', help='with --uninstall, show the plan without changing services or files')
+    p.add_argument('--yes', action='store_true', help='with --uninstall, explicitly confirm the printed removal plan without prompting')
     p.add_argument('--language', choices=('zh-CN', 'en'), help='prompt language; interactive sessions ask for this first')
     p.add_argument('--deploy-certificate', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--sync-certificate', action='store_true', help=argparse.SUPPRESS)
@@ -407,7 +422,7 @@ def preflight(args):
     targets = ['/etc/argus-c2/server', '/etc/argus-c2/console', '/etc/argus-c2/setup',
                '/etc/argus-c2/server.json', '/etc/argus-c2/server-local.json', '/etc/argus-c2/console-install.json',
                '/var/lib/argus-c2-server', '/usr/local/libexec/argus-c2/server', '/usr/local/libexec/argus-c2/argus',
-               '/usr/local/libexec/argus-c2/install-server.py', '/usr/local/share/argus-c2/agents',
+               '/usr/local/share/argus-c2/agents',
                '/etc/sysusers.d/argus-c2-server.conf', '/etc/systemd/system/' + SERVICE,
                '/etc/systemd/system/' + SERVICE + '.d',
                '/etc/systemd/system/argus-console-renew.service', '/etc/systemd/system/argus-console-renew.timer']
@@ -416,6 +431,9 @@ def preflight(args):
         trusted_parents(dest.parent)
         if os.path.lexists(dest):
             raise InstallError(f'Existing installation preserved: {dest}')
+    helper = path('/usr/local/libexec/argus-c2/install-server.py')
+    if os.path.lexists(helper):
+        managed_file(helper, 1 << 20)  # The maintenance helper survives uninstall.
     if args.tls == 'letsencrypt':
         # Validate persistent ACME paths before downloading bundles or installing
         # tools. Existing account/certificate state from an early failure is reusable.
@@ -607,7 +625,11 @@ def install(args, stage, bundle, certdir, certbot):
         write_new(binaries / name, (bundle / name).read_bytes(), 0o755)
     for arch in ('amd64', 'arm64'):
         write_new(artifacts / f'agent-linux-{arch}', (bundle / f'agent-linux-{arch}').read_bytes(), 0o644)
-    write_new(binaries / 'install-server.py', Path(__file__).read_bytes(), 0o644)
+    helper = binaries / 'install-server.py'
+    if helper.exists():
+        replace_file(helper, Path(__file__).read_bytes(), 0o644)
+    else:
+        write_new(helper, Path(__file__).read_bytes(), 0o644)
     sysusers = path('/etc/sysusers.d/argus-c2-server.conf')
     write_new(sysusers, 'u argus-server - "Argus diagnostics server" /var/lib/argus-c2-server /usr/sbin/nologin\n', 0o644)
     run(['systemd-sysusers', sysusers])
@@ -641,6 +663,7 @@ def install(args, stage, bundle, certdir, certbot):
         run(['systemctl', 'is-active', '--quiet', 'argus-console-renew.timer'])
     print(text('ARGUS Server installed', 'ARGUS Server 安装完成') + f'\nConsole: {origin(args.host, args.console_port)}/login\nFleet: {origin(args.host, args.fleet_port)}')
     print_setup_instructions()
+    print(text('Uninstall (keeps data): ', '卸载（保留数据）：') + f'sudo python3 {helper} --uninstall server')
     if args.tls == 'local-ca':
         print(text('Install this Console CA into browser and Agent-host trust stores: ', '请在浏览器和 Agent 主机的信任库中安装此 Console CA：') + str(console / 'ca.pem'))
         print(text('Local certificates are not publicly trusted and are not ACME-renewed; replace the leaf before 90 days.', '本地证书不受公开信任，也不通过 ACME 续期；请在 90 天到期前更换叶证书。'))
@@ -837,6 +860,7 @@ def inspect_update_plan(component, arch):
 
 
 def validate_update(plan, bundle, snapshot):
+    plan['stage'] = 'checking_database_snapshot'
     component, account = plan['component'], plan['account']
     expected = database_stamp(snapshot, component)
     expected_id = 0x41524753 if component == 'server' else 0x41524741
@@ -857,14 +881,17 @@ def validate_update(plan, bundle, snapshot):
                 os.chown(Path(current) / name, account.pw_uid, account.pw_gid)
         migrate = component == 'server' and expected[1] in (102, 103)
         if migrate:
+            plan['stage'] = 'migrating_database_copy'
             run(['runuser', '-u', account.pw_name, '--', validation / 'candidate', 'console-migrate',
                  '-config', validation / 'config.json', '-backup', validation / 'before-migration.db'])
             expected = (expected_id, 104)
+        plan['stage'] = 'checking_candidate_storage'
         run(['runuser', '-u', account.pw_name, '--', validation / 'candidate', 'storage',
              '-config', validation / 'config.json'])
         if database_stamp(validation / 'state', component) != expected:
             raise InstallError('Automatic updates cannot migrate the database schema. Use the explicit migration procedure.')
         if component == 'server':
+            plan['stage'] = 'checking_console_configuration'
             local = json.loads(managed_file(path('/etc/argus-c2/server-local.json'), 8192))
             local['state_dir'] = str(validation / 'state')
             write_new(validation / 'local.json', json.dumps(local))
@@ -895,6 +922,7 @@ def validate_update(plan, bundle, snapshot):
                     os.fsync(saved.fileno())
                 plan['migration_db'] = upgraded
         else:
+            plan['stage'] = 'checking_agent_configuration'
             run(['runuser', '-u', account.pw_name, '--', validation / 'candidate', 'run', '-check',
                  '-config', validation / 'config.json'])
 
@@ -926,6 +954,29 @@ def verify_updated_service(plan):
                     client.close()
 
 
+def record_failure(backup, plan, error, filename='failure.json'):
+    failure = {'stage': plan.get('stage', 'preparing_update'), 'type': type(error).__name__}
+    if isinstance(error, CommandError):
+        failure.update(command=error.command, exit_code=error.returncode)
+    details = {**failure, 'message': str(error)}
+    for key in ('stdout', 'stderr'):
+        value = getattr(error, key, None)
+        if value:
+            details[key] = value[-65536:].decode('utf-8', errors='replace') if isinstance(value, bytes) else str(value)[-65536:]
+    try:
+        write_new(backup / filename, json.dumps(details, indent=2, ensure_ascii=False) + '\n')
+        location = str(backup / filename)
+    except OSError:
+        # Failure to write diagnostics (e.g. full disk) must not prevent rollback.
+        location = 'could not write private diagnostic file'
+    summary = f"{failure['stage']} ({failure['type']}"
+    if isinstance(error, CommandError):
+        summary += f': {error.command}, exit {error.returncode}'
+    summary += f'). {location}'
+    print(text('Failure at stage: ', '失败阶段：') + summary, file=sys.stderr)
+    return failure
+
+
 def update_component(args, plan, bundle):
     component, unit, account = plan['component'], plan['unit'], plan['account']
     backups = path('/var/lib/argus-c2-updates')
@@ -946,6 +997,7 @@ def update_component(args, plan, bundle):
     print(text(f'Updating {component}; private backup: {backup}', f'正在更新 {component}；私有更新备份：{backup}'))
     stopped, replaced, migrated, candidate_started = False, False, False, False
     try:
+        plan['stage'] = 'stopping_service'
         stopped = True
         run(['systemctl', 'stop', unit])
         if run(['systemctl', 'is-active', '--quiet', unit], check=False).returncode == 0:
@@ -958,6 +1010,7 @@ def update_component(args, plan, bundle):
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as error:
                 raise InstallError('Another process holds the component state; no program was replaced.') from error
+            plan['stage'] = 'backing_up_state'
             copy_private_tree(plan['state'], backup / 'state')
             config_backup = backup / 'configuration'
             config_backup.mkdir(mode=0o700)
@@ -969,6 +1022,7 @@ def update_component(args, plan, bundle):
                 elif os.path.lexists(source):
                     write_new(config_backup / name, managed_file(source, 65536))
             validate_update(plan, bundle, backup / 'state')
+            plan['stage'] = 'replacing_programs'
             metadata['phase'] = 'replacing'
             replace_file(backup / 'update.json', (json.dumps(metadata, indent=2) + '\n').encode(), 0o600)
             replaced = True
@@ -976,6 +1030,7 @@ def update_component(args, plan, bundle):
                 data = Path(__file__).read_bytes() if name == 'install-server.py' else (bundle / name).read_bytes()
                 replace_file(dest, data, mode)
             if plan.get('migration_db'):
+                plan['stage'] = 'applying_schema_migration'
                 # Use the migrated, validated copy only while stopped and locked.
                 # A durable original snapshot already exists in the backup.
                 upgraded_bytes = read_bounded(plan['migration_db'], 1 << 30)
@@ -995,12 +1050,14 @@ def update_component(args, plan, bundle):
                 replace_file(plan['state'] / 'argus.db', upgraded_bytes, 0o600)
                 os.chown(plan['state'] / 'argus.db', account.pw_uid, account.pw_gid)
         if plan['active']:
+            plan['stage'] = 'starting_and_verifying_service'
             candidate_started = True
             run(['systemctl', 'start', unit])
             verify_updated_service(plan)
         metadata['phase'] = 'complete'
         replace_file(backup / 'update.json', (json.dumps(metadata, indent=2) + '\n').encode(), 0o600)
     except (Exception, KeyboardInterrupt) as error:
+        metadata['failure'] = record_failure(backup, plan, error)
         if migrated:
             # Do not rewind a schema-changing update after traffic may have
             # been accepted, or start an old binary against schema 104.
@@ -1020,6 +1077,8 @@ def update_component(args, plan, bundle):
             metadata['phase'] = 'rolled_back'
             replace_file(backup / 'update.json', (json.dumps(metadata, indent=2) + '\n').encode(), 0o600)
         except (Exception, KeyboardInterrupt) as recovery_error:
+            plan['stage'] = 'restoring_previous_service'
+            record_failure(backup, plan, recovery_error, 'recovery-failure.json')
             raise InstallError(f'Update failed and automatic recovery could not complete. Preserve state and inspect {backup}/update.json and journalctl -u {unit}.') from recovery_error
         raise InstallError(f'Update failed; previous programs and service state restored. Database and identity were not reset. Backup: {backup}') from error
     print(text(f'{component} update complete. Configuration and identity preserved; backup: {backup}', f'{component} 更新完成。配置和身份已保留；备份：{backup}'))
@@ -1072,22 +1131,228 @@ def deploy_certificate(require_hook=True):
             raise
 
 
+def uninstall_paths(component):
+    unit = f'argus-c2-{component}.service'
+    programs = [f'/usr/local/libexec/argus-c2/{component}',
+                f'/etc/systemd/system/{unit}', f'/etc/systemd/system/{unit}.d',
+                f'/etc/sysusers.d/argus-c2-{component}.conf']
+    data = [f'/etc/argus-c2/{component}.json', f'/var/lib/argus-c2-{component}']
+    units = [unit]
+    if component == 'server':
+        programs += ['/usr/local/libexec/argus-c2/argus', '/usr/local/share/argus-c2/agents',
+                     '/etc/systemd/system/argus-console-renew.timer', '/etc/systemd/system/argus-console-renew.service']
+        data += ['/etc/argus-c2/server-local.json', '/etc/argus-c2/server', '/etc/argus-c2/console',
+                 '/etc/argus-c2/console-install.json', '/etc/argus-c2/setup',
+                 '/etc/argus-c2/acme', '/var/lib/argus-certbot']
+        units = ['argus-console-renew.timer', 'argus-console-renew.service', *units]
+    else:
+        data += ['/etc/argus-c2/policy.json', '/etc/argus-c2/ca.pem']
+    return [path(p) for p in programs], [path(p) for p in data], units
+
+
+def removal_path(target, *, allow_links=False):
+    """Never traverse redirected parents, mount points or special files."""
+    trusted_parents(target.parent)
+    if not os.path.lexists(target):
+        return
+    top = target.lstat()
+    if stat.S_ISLNK(top.st_mode) or not (stat.S_ISDIR(top.st_mode) or stat.S_ISREG(top.st_mode)):
+        raise InstallError(f'Unexpected uninstall target; use manual removal: {target}')
+    entries = [target]
+    if target.is_dir():
+        for current, directories, files in os.walk(target, followlinks=False):
+            entries.extend(Path(current) / name for name in directories + files)
+    for entry in entries:
+        info = entry.lstat()
+        if stat.S_ISLNK(info.st_mode) and allow_links:
+            continue  # rmtree unlinks nested ACME links; never follows them.
+        if info.st_dev != top.st_dev or os.path.ismount(entry) or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+            raise InstallError(f'Unexpected file or mount in uninstall target: {entry}')
+
+
+def uninstall_component(args, interactive):
+    component, purge = args.uninstall, args.purge
+    if not path('/run/systemd/system').is_dir() or not shutil.which('systemctl'):
+        raise InstallError('Uninstall requires a running Linux/systemd host.')
+    programs, data, units = uninstall_paths(component)
+    targets = programs + (data if purge else [])
+    for target in targets:
+        removal_path(target, allow_links=target in data)
+    config_file = path(f'/etc/argus-c2/{component}.json')
+    state = path(f'/var/lib/argus-c2-{component}')
+    if os.path.lexists(config_file):
+        config = json.loads(managed_file(config_file, 8192))
+        if config.get('state_dir') != str(state):
+            raise InstallError('Custom state directories require manual uninstall; no service was changed.')
+    if os.path.lexists(state):
+        removal_path(state, allow_links=True)
+    name = 'argus-' + component
+    try:
+        account = pwd.getpwnam(name)
+    except KeyError:
+        account = None
+    try:
+        group = grp.getgrnam(name)
+    except KeyError:
+        group = None
+    if purge:
+        if account and (account.pw_uid == 0 or account.pw_dir != str(state) or
+                        Path(account.pw_shell).name not in ('nologin', 'false')):
+            raise InstallError('The account is not a standard ARGUS service account; use manual uninstall.')
+        if group and (group.gr_gid == 0 or group.gr_mem or
+                      any(u.pw_gid == group.gr_gid and u.pw_name != name for u in pwd.getpwall())):
+            raise InstallError('The component group is shared; use manual uninstall.')
+        for tool, needed in (('userdel', account), ('groupdel', group)):
+            if needed and not shutil.which(tool):
+                raise InstallError(f'Required command missing: {tool}')
+    shared = path('/etc/sysusers.d/argus-c2.conf')
+    shared_after = None
+    if os.path.lexists(shared):
+        original = managed_file(shared, 16384)
+        lines = original.decode().splitlines(keepends=True)
+        kept = [line for line in lines if not (len(parts := shlex.split(line, comments=True)) >= 2
+                                               and parts[0] in ('u', 'g') and parts[1] == name)]
+        if kept != lines:
+            shared_after = ''.join(kept).encode()
+            targets.append(shared)
+    loaded = []
+    for unit in units:
+        status = run(['systemctl', 'show', unit, '--property=LoadState', '--value'], check=False).stdout.strip()
+        if status == b'loaded':
+            loaded.append(unit)
+        elif status != b'not-found':
+            raise InstallError(f'Cannot determine service state: {unit}. Inspect it before uninstalling.')
+    existing = [p for p in targets if os.path.lexists(p)]
+    print(text(f'Uninstall {component}:', f'卸载 {component}：'))
+    for unit in loaded:
+        print(text('  Stop and disable: ', '  停止并禁用：') + unit)
+    for target in existing:
+        print(text('  Remove: ', '  删除：') + str(target) if target != shared else
+              text('  Remove only this component from: ', '  仅删除此组件的账户定义：') + str(shared))
+    if purge:
+        print(text('Deletes current configuration, database, certificates, tokens and dedicated account. This cannot be undone by restoring programs.',
+                   '将删除当前配置、数据库、证书、Token 和专用账户。恢复程序不能撤销数据删除。'))
+    else:
+        print(text('Configuration, database, certificates, tokens and service account will be kept.',
+                   '保留配置、数据库、证书、Token 和服务账户。'))
+    print(text('Historical update/uninstall backups, the maintenance script and Certbot installation are kept.',
+               '历史更新/卸载备份、维护脚本和 Certbot 安装环境保留。'))
+    if component == 'agent':
+        print(text('This does not revoke the Agent identity on the Server; disable it in Management when retiring the host.',
+                   '本机卸载不会撤销 Server 上的 Agent 身份；退役主机时请在管理页禁用该 Agent。'))
+    if args.dry_run:
+        print(text('Dry run: no changes made.', '预览结束，未作任何更改。'))
+        return
+    if not existing and not loaded and not (purge and (account or group)):
+        print(text('No component files or services remain to remove.', '没有需要卸载的组件文件或服务。'))
+        return
+    if not args.yes:
+        if not interactive:
+            raise InstallError('Uninstall requires confirmation; use --dry-run to review, then --yes to confirm.')
+        expected = f'purge {component}' if purge else 'yes'
+        answer = input(text(f'Type "{expected}" to continue: ', f'输入“{expected}”确认：')).strip()
+        if answer != expected:
+            print(text('Cancelled; no changes made.', '已取消，未作任何更改。'))
+            return
+    backups = path('/var/lib/argus-c2-uninstall')
+    mkdir(backups, 0o700)
+    backup = Path(tempfile.mkdtemp(prefix=component + '-', dir=backups))
+    record = {'component': component, 'purge': purge, 'phase': 'prepared', 'stage': 'stopping_services', 'targets': [str(p) for p in existing]}
+    write_new(backup / 'uninstall.json', json.dumps(record, indent=2) + '\n')
+    print(text('Private uninstall record: ', '私有卸载记录：') + str(backup))
+    # Only programs/service definitions are archived. Preserved data stays in
+    # place. Purge deliberately does not make a new copy of the removed secrets.
+    write_new(backup / 'programs.tar', b'')
+    with tarfile.open(backup / 'programs.tar', 'w') as archive:
+        for target in [*programs, *([shared] if shared_after is not None else [])]:
+            if os.path.lexists(target):
+                archive.add(target, arcname=str(target.relative_to(ROOT)), recursive=True)
+    with (backup / 'programs.tar').open('rb') as saved:
+        os.fsync(saved.fileno())
+    try:
+        for unit in loaded:
+            run(['systemctl', 'disable', '--now', unit])
+            status = run(['systemctl', 'show', unit, '--property=ActiveState', '--value']).stdout.strip()
+            if status not in (b'inactive', b'failed'):
+                raise InstallError(f'Service has not stopped: {unit}; files were not removed.')
+        with contextlib.ExitStack() as stack:
+            record['stage'] = 'locking_component_state'
+            if state.exists():
+                lockpath = state / ('server.lock' if component == 'server' else 'probe.lock')
+                fd = os.open(lockpath, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+                lock = stack.enter_context(os.fdopen(fd, 'w'))
+                if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
+                    raise InstallError('Unexpected state lock; no files were removed.')
+                if account:
+                    os.fchown(lock.fileno(), account.pw_uid, account.pw_gid)
+                try:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as error:
+                    raise InstallError('Another process holds the state lock; no files were removed.') from error
+            # userdel refuses a still-running account. Do not kill unrelated
+            # processes or recursively delete arbitrary account home directories.
+            record['stage'] = 'removing_dedicated_account'
+            if purge and account:
+                run(['userdel', name])
+            if purge and group:
+                try:
+                    grp.getgrnam(name)  # Some userdel implementations remove it.
+                except KeyError:
+                    pass
+                else:
+                    run(['groupdel', name])
+            record['stage'] = 'removing_component_files'
+            for target in existing:
+                removal_path(target, allow_links=target in data)
+                if target == shared and shared_after:
+                    replace_file(shared, shared_after, 0o644)
+                elif target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink(missing_ok=True)
+        record['stage'] = 'reloading_systemd'
+        run(['systemctl', 'daemon-reload'])
+        record['phase'] = 'complete'
+    except (Exception, KeyboardInterrupt) as error:
+        record['failure'] = record_failure(backup, record, error)
+        record['phase'] = 'incomplete'
+        raise InstallError(f'Uninstall incomplete. Services may be stopped; inspect {backup}/uninstall.json before retrying.')
+    finally:
+        replace_file(backup / 'uninstall.json', (json.dumps(record, indent=2) + '\n').encode(), 0o600)
+    print(text(f'{component} uninstalled. Record: {backup}', f'{component} 卸载完成。记录：{backup}'))
+    if not purge:
+        print(text('Data remains in place. Restore programs.tar using the uninstall documentation to resume, or use --uninstall ' + component + ' --purge for a fresh installation.',
+                   '数据仍保留在原处。按卸载文档恢复 programs.tar 可继续使用；如需全新安装，请执行 --uninstall ' + component + ' --purge。'))
+
+
 def main(argv=None):
     os.umask(0o077)
     # Root subprocesses use only system paths, not caller-controlled PATH entries.
     os.environ['PATH'] = '/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin'
     args = parser().parse_args(argv)
     choose_language(args, sys.stdin.isatty() and not (args.deploy_certificate or args.sync_certificate))
+    if (args.purge or args.dry_run or args.yes) and not args.uninstall:
+        raise InstallError('--purge, --dry-run and --yes require --uninstall server|agent.')
+    if args.uninstall and any((args.update, args.deploy_certificate, args.sync_certificate, args.bundle,
+                               args.bundle_url, args.release, args.release_base, args.sha256, args.host, args.tls,
+                               args.email, args.agree_tos, args.console_cert, args.console_key, args.certbot)):
+        raise InstallError('Uninstall cannot be combined with installation, update or certificate options.')
     if os.geteuid() != 0:
         raise InstallError('Run with sudo or as root.')
-    arch = architecture()
-    lockpath = path('/run/argus-c2-install.lock' if args.update == 'agent' else '/run/argus-c2-server-install.lock')
+    if args.uninstall and args.dry_run:
+        uninstall_component(args, sys.stdin.isatty())
+        return
+    lockpath = path('/run/argus-c2-install.lock' if (args.update or args.uninstall) == 'agent' else '/run/argus-c2-server-install.lock')
     fd = os.open(lockpath, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'w'):
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise InstallError('Another Server install or certificate deployment is running.') from exc
+        if args.uninstall:
+            uninstall_component(args, sys.stdin.isatty())
+            return
+        arch = architecture()
         if args.deploy_certificate or args.sync_certificate:
             if args.update:
                 raise InstallError('Update and certificate maintenance cannot be combined.')
@@ -1119,5 +1384,8 @@ if __name__ == '__main__':
     try:
         main()
     except (InstallError, OSError, ValueError, EOFError, KeyboardInterrupt, tarfile.TarError, subprocess.SubprocessError, sqlite3.Error) as error:
-        report_failure(error, updating=any(arg == '--update' or arg.startswith('--update=') for arg in sys.argv[1:]))
+        if any(arg == '--uninstall' or arg.startswith('--uninstall=') for arg in sys.argv[1:]):
+            print(str(error) if isinstance(error, InstallError) else f'Uninstall failed ({type(error).__name__}); preserve files and inspect the uninstall record, if created.', file=sys.stderr)
+        else:
+            report_failure(error, updating=any(arg == '--update' or arg.startswith('--update=') for arg in sys.argv[1:]))
         sys.exit(1)
