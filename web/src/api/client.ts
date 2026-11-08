@@ -10,7 +10,34 @@ import {
   summarySchema,
 } from './contracts'
 
+export const githubAuthReasons = [
+  'github_access_denied',
+  'github_client_invalid',
+  'github_redirect_mismatch',
+  'github_code_rejected',
+  'github_email_unverified',
+  'github_exchange_failed',
+  'github_profile_failed',
+  'github_unavailable',
+] as const
+
 const messages: Record<string, string> = {
+  github_access_denied:
+    'GitHub authorization was cancelled. Start linking again and approve access.',
+  github_client_invalid:
+    'GitHub rejected the OAuth app credentials. Check that Client ID and Client Secret belong to the same OAuth App, then save the app settings again.',
+  github_redirect_mismatch:
+    'GitHub rejected the callback URL. Copy the complete GitHub callback URL from app settings into the GitHub OAuth App.',
+  github_code_rejected:
+    'GitHub rejected the authorization code. Start a fresh linking attempt; do not reuse or refresh the callback page.',
+  github_email_unverified: 'Verify your email address in GitHub, then start linking again.',
+  github_exchange_failed:
+    'ARGUS could not exchange the GitHub authorization code. The server log records the token_exchange failure stage.',
+  github_profile_failed:
+    'ARGUS could not verify your GitHub user profile. The server log records the user_info failure stage.',
+  github_unavailable:
+    'The ARGUS server could not reach GitHub or GitHub is temporarily unavailable. Try again; the server log records the failed stage.',
+
   token_invalid:
     'The login token is invalid or has been replaced. Read the current token on your server.',
   identity_conflict:

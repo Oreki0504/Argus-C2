@@ -61,6 +61,12 @@ func (s *Store) CreateTask(ctx context.Context, actor string, r protocol.TaskReq
 	return t, e
 }
 func (s *Store) Poll(ctx context.Context, c *x509.Certificate) (*protocol.Task, error) {
+	return s.PollWithMonitoring(ctx, c, false)
+}
+
+// PollWithMonitoring only creates bounded, fixed read-only monitoring work
+// when the operator's queue is empty. Agent local policy remains authoritative.
+func (s *Store) PollWithMonitoring(ctx context.Context, c *x509.Certificate, monitoring bool) (*protocol.Task, error) {
 	var task *protocol.Task
 	e := s.Write(ctx, func(tx *sql.Tx) error {
 		id, e := Authorize(ctx, tx, c)
@@ -72,6 +78,9 @@ func (s *Store) Poll(ctx context.Context, c *x509.Certificate) (*protocol.Task, 
 		}
 		// One task in flight per node. Repeated delivery is intentionally idempotent.
 		t, e := scanTask(tx.QueryRowContext(ctx, "SELECT "+taskColumns+" FROM tasks WHERE node_id=? AND status IN ('PENDING','ACCEPTED','RUNNING') ORDER BY CASE WHEN status='PENDING' THEN 1 ELSE 0 END,created_at,id LIMIT 1", id))
+		if errors.Is(e, sql.ErrNoRows) && monitoring {
+			t, e = monitoringTask(ctx, tx, id, s.now().Unix())
+		}
 		if errors.Is(e, sql.ErrNoRows) {
 			return nil
 		}
@@ -91,6 +100,30 @@ func (s *Store) Poll(ctx context.Context, c *x509.Certificate) (*protocol.Task, 
 		return nil
 	})
 	return task, e
+}
+
+func monitoringTask(ctx context.Context, tx *sql.Tx, node string, now int64) (protocol.Task, error) {
+	for _, item := range []struct {
+		kind     protocol.TaskType
+		interval int64
+	}{
+		{protocol.SystemInfo, 3600}, {protocol.SystemMetrics, 60},
+	} {
+		var last sql.NullInt64
+		if err := tx.QueryRowContext(ctx, "SELECT max(created_at) FROM tasks WHERE node_id=? AND task_type=?", node, item.kind).Scan(&last); err != nil {
+			return protocol.Task{}, err
+		}
+		if last.Valid && now-last.Int64 < item.interval {
+			continue
+		}
+		t := protocol.Task{ID: identity.RandomID(), NodeID: node, Type: item.kind, Params: json.RawMessage(`{}`),
+			Status: protocol.Pending, CreatedAt: now, DispatchExpiresAt: now + 60, ExecutionTimeoutMS: 10000, ResultDueAt: now + 60 + protocol.ResultGraceSeconds}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO tasks("+taskColumns+") VALUES(?,?,?,?,?,?,?,?,?)", t.ID, t.NodeID, t.Type, string(t.Params), t.Status, t.CreatedAt, t.DispatchExpiresAt, t.ExecutionTimeoutMS, t.ResultDueAt); err != nil {
+			return protocol.Task{}, err
+		}
+		return t, Audit(ctx, tx, "console-monitor", "task.create", node, t.ID, "accepted")
+	}
+	return protocol.Task{}, sql.ErrNoRows
 }
 func (s *Store) Running(ctx context.Context, c *x509.Certificate, id string) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {

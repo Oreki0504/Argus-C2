@@ -3,12 +3,13 @@ import { AppearanceControls } from '../../components/AppearanceControls'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ShieldCheck } from 'lucide-react'
-import { api, ApiError } from '../../api/client'
+import { api, ApiError, githubAuthReasons } from '../../api/client'
 import { Brand, ErrorState, Loading, Notice } from '../../components/ui'
 import { OIDCForm } from './OIDCForm'
 import { TokenSignIn } from './TokenSignIn'
 
 const reasons = new Set([
+  ...githubAuthReasons,
   'session_expired',
   'forbidden',
   'oidc_callback_invalid',

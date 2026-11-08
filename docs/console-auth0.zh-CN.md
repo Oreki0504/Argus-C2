@@ -39,7 +39,7 @@ ARGUS 请求 `openid profile`。GitHub／Google 身份通过 Auth0 验证后，A
 
 ## 登录 ARGUS 后按需绑定
 
-安装完成后，打开 `https://HOST:9443/login`，用安装器生成的管理员 Token 直接进入后台。首次使用不需要 Auth0。在服务器上读取 Token：
+安装完成后，打开安装器打印的 `/login` 地址（新安装为 `https://HOST/login`，旧版可能仍带 `:9443`），用安装器生成的管理员 Token 直接进入后台。首次使用不需要 Auth0。在服务器上读取 Token：
 
 ```sh
 sudo cat /etc/argus-c2/setup/console.token

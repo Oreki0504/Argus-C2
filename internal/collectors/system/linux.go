@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -92,6 +93,53 @@ func network(s, name string) protocol.NetworkStats {
 	return n
 }
 
+// Empty interface configuration means the host's default-route interfaces.
+// Avoid summing bridges/veth/tunnels with their underlying physical interface.
+func defaultInterfaces(ipv4, ipv6 string) []string {
+	selected := map[string]bool{}
+	for _, table := range []struct {
+		raw  string
+		ipv6 bool
+	}{{ipv4, false}, {ipv6, true}} {
+		best, metric := "", uint64(math.MaxUint64)
+		for _, line := range strings.Split(table.raw, "\n") {
+			f := strings.Fields(line)
+			var name string
+			var cost uint64
+			var err error
+			if !table.ipv6 && len(f) >= 8 && f[1] == "00000000" && f[7] == "00000000" {
+				flags, _ := strconv.ParseUint(f[3], 16, 64)
+				if flags&1 == 0 || flags&0x200 != 0 {
+					continue
+				}
+				name = f[0]
+				cost, err = strconv.ParseUint(f[6], 10, 64)
+			} else if table.ipv6 && len(f) == 10 && f[0] == strings.Repeat("0", 32) && f[1] == "00" {
+				flags, _ := strconv.ParseUint(f[8], 16, 64)
+				if flags&1 == 0 || flags&0x200 != 0 {
+					continue
+				}
+				name = f[9]
+				cost, err = strconv.ParseUint(f[5], 16, 64)
+			} else {
+				continue
+			}
+			if err == nil && name != "lo" && name != "" && protocol.CleanText(name, 15) && !strings.ContainsAny(name, "/: ") && cost < metric {
+				best, metric = name, cost
+			}
+		}
+		if best != "" {
+			selected[best] = true
+		}
+	}
+	out := make([]string, 0, len(selected))
+	for name := range selected {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func information(ctx context.Context) (protocol.SystemInformation, error) {
 	i := protocol.SystemInformation{OS: runtime.GOOS, Architecture: runtime.GOARCH}
 	if err := ctx.Err(); err != nil {
@@ -150,7 +198,11 @@ func measurements(ctx context.Context, c Config) (protocol.SystemMeasurements, e
 		m.Disks = append(m.Disks, d)
 	}
 	dev := readFixed("/proc/net/dev", 128*1024)
-	for _, name := range c.NetworkInterfaces {
+	interfaces := c.NetworkInterfaces
+	if len(interfaces) == 0 {
+		interfaces = defaultInterfaces(readFixed("/proc/net/route", 128*1024), readFixed("/proc/net/ipv6_route", 128*1024))
+	}
+	for _, name := range interfaces {
 		m.Networks = append(m.Networks, network(dev, name))
 	}
 	return m, ctx.Err()

@@ -224,7 +224,7 @@ func TestDirectSocialSetupAndStableIdentity(t *testing.T) {
 }
 
 func TestGitHubFailuresCannotBindOrReplay(t *testing.T) {
-	for _, mode := range []string{"exchange-error", "profile-error", "profile-redirect", "missing-id", "organization", "callback-mixup", "state", "pkce", "replay"} {
+	for _, mode := range []string{"bad-client", "exchange-error", "profile-error", "profile-redirect", "missing-id", "organization", "callback-mixup", "state", "pkce", "replay"} {
 		t.Run(mode, func(t *testing.T) {
 			s, _, gh, b, csrf, settings := socialConsole(t)
 			settings.Providers = settings.Providers[1:]
@@ -250,7 +250,11 @@ func TestGitHubFailuresCannotBindOrReplay(t *testing.T) {
 					t.Fatal(dest)
 				}
 			}
-			if dest := b.request("GET", callback, nil, "", nil).Header().Get("Location"); dest != "/login?reason=oidc_callback_invalid" {
+			reason := map[string]string{"bad-client": "github_client_invalid", "exchange-error": "github_exchange_failed", "pkce": "github_exchange_failed", "profile-error": "github_unavailable", "profile-redirect": "github_unavailable", "missing-id": "github_profile_failed", "organization": "github_profile_failed"}[mode]
+			if reason == "" {
+				reason = "oidc_callback_invalid"
+			}
+			if dest := b.request("GET", callback, nil, "", nil).Header().Get("Location"); dest != "/login?reason="+reason {
 				t.Fatal(dest)
 			}
 			if mode != "replay" {
@@ -302,6 +306,10 @@ func newGitHubFixture(t *testing.T) *githubFixture {
 			callback.RawQuery = url.Values{"code": {code}, "state": {q.Get("state")}}.Encode()
 			http.Redirect(w, r, callback.String(), 303)
 		case "/login/oauth/access_token":
+			if r.Header.Get("Accept") != "application/json" || r.UserAgent() != "ARGUS-Console" {
+				http.Error(w, "missing negotiated format or user agent", 400)
+				return
+			}
 			_ = r.ParseForm()
 			g.exchanges++
 			grant, ok := g.grants[r.Form.Get("code")]
@@ -315,12 +323,17 @@ func newGitHubFixture(t *testing.T) *githubFixture {
 				http.Error(w, "private provider failure", 401)
 				return
 			}
+			if grant.mode == "bad-client" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"error":"incorrect_client_credentials","error_description":"private provider details"}`))
+				return
+			}
 			token := rand.Text()
 			g.tokens[token] = grant.mode
 			_ = json.NewEncoder(w).Encode(map[string]string{"access_token": token, "token_type": "bearer", "scope": "read:user"})
 		case "/user":
 			mode, ok := g.tokens[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
-			if !ok || r.Header.Get("Accept") != "application/vnd.github+json" {
+			if !ok || r.Header.Get("Accept") != "application/vnd.github+json" || r.UserAgent() != "ARGUS-Console" {
 				http.Error(w, "not authorized", 401)
 				return
 			}

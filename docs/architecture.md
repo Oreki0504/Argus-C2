@@ -40,6 +40,8 @@ There is no computed online field or universal stale-heartbeat threshold. Choose
 
 The registry, policy, and HTTP layer are separate. Collectors do not know the server address and have no interface for changing policy or executing arbitrary commands.
 
+When Console is enabled, an empty poll queue can atomically create fixed read-only monitoring work: `system.info` every hour and `system.metrics` every minute, with actor `console-monitor`. Existing queued/in-flight work takes precedence. Creation time throttles retries even after policy rejection or failure; no tasks accumulate while a node is offline. Fleet-only mode retains manual dispatch. These tasks use the same grants, local policy, audit, durable results and retention as operator-created work; they do not change local policy or add a separate upload protocol.
+
 ## Task states
 
 | State | Server meaning | Possible subsequent changes |

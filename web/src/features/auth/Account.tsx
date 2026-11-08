@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useSearchParams } from 'react-router-dom'
-import { api, ApiError } from '../../api/client'
+import { api, ApiError, githubAuthReasons } from '../../api/client'
 import { consoleKey } from '../../api/query'
 import { ErrorState, Loading, Notice } from '../../components/ui'
 import { usePreferences } from '../../preferences/context'
@@ -19,6 +19,7 @@ function AccountSettings() {
   const [params] = useSearchParams()
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [configure, setConfigure] = useState(false)
   const client = useQueryClient()
   const key = [...consoleKey(viewer), 'account']
@@ -34,6 +35,7 @@ function AccountSettings() {
     return <ErrorState error={account.error} retry={() => void account.refetch()} />
   const reason = params.get('reason')
   const allowed = [
+    ...githubAuthReasons,
     'session_expired',
     'identity_conflict',
     'oidc_callback_invalid',
@@ -51,6 +53,43 @@ function AccountSettings() {
         <Notice kind="warning">{t(new ApiError(400, reason).message)}</Notice>
       )}
       {params.get('bound') === '1' && <Notice>{t('Account linked successfully.')}</Notice>}
+      {viewer.role === 'Admin' && (
+        <details
+          className="account-configuration"
+          onToggle={(event) => setConfigure(event.currentTarget.open)}
+        >
+          <summary>{t('1. Configure this Console’s OAuth apps (Admin)')}</summary>
+          {configure &&
+            (providers.isPending ? (
+              <Loading label="Loading providers" />
+            ) : providers.isError ? (
+              <ErrorState error={providers.error} retry={() => void providers.refetch()} />
+            ) : (
+              <ProviderSettings
+                setup={providers.data}
+                save={(data) => {
+                  client.setQueryData(providersKey, data)
+                  void client.invalidateQueries({ queryKey: key })
+                  void client.invalidateQueries({ queryKey: ['auth-status'] })
+                  setSaved(true)
+                }}
+              />
+            ))}
+        </details>
+      )}
+      {saved && (
+        <Notice>
+          {t(
+            'App settings saved. Now link your account below to finish enabling sign-in for yourself.',
+          )}
+        </Notice>
+      )}
+      <h2>{t(viewer.role === 'Admin' ? '2. Link your own account' : 'Link your own account')}</h2>
+      <p className="muted">
+        {t(
+          'App settings let this Console contact Google or GitHub. Linking proves which provider account belongs to you. Saving app settings alone does not link your account.',
+        )}
+      </p>
       <div className="account-providers">
         {account.data.providers.map((p) => {
           const linked = account.data.identities.filter((i) => i.issuer === p.issuer)
@@ -58,7 +97,9 @@ function AccountSettings() {
             <div className="account-provider" key={p.kind}>
               <ProviderIcon kind={p.kind} />
               <strong>{p.name}</strong>
-              <span className="muted">{linked.length ? t('Linked') : t('Not linked')}</span>
+              <span className="muted">
+                {linked.length ? t('Linked') : t('App configured · account not linked')}
+              </span>
               <button
                 className="button"
                 disabled={busy || linked.length > 0}
@@ -93,29 +134,6 @@ function AccountSettings() {
         )}
       </div>
       {error !== null && <ErrorState error={error} />}
-      {viewer.role === 'Admin' && (
-        <details
-          className="account-configuration"
-          onToggle={(event) => setConfigure(event.currentTarget.open)}
-        >
-          <summary>{t('Configure sign-in providers (optional)')}</summary>
-          {configure &&
-            (providers.isPending ? (
-              <Loading label="Loading providers" />
-            ) : providers.isError ? (
-              <ErrorState error={providers.error} retry={() => void providers.refetch()} />
-            ) : (
-              <ProviderSettings
-                setup={providers.data}
-                save={(data) => {
-                  client.setQueryData(providersKey, data)
-                  void client.invalidateQueries({ queryKey: key })
-                  void client.invalidateQueries({ queryKey: ['auth-status'] })
-                }}
-              />
-            ))}
-        </details>
-      )}
     </section>
   )
 }

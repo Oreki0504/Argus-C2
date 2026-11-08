@@ -4,7 +4,7 @@
 
 ## 首次进入后台
 
-1. 打开安装器打印的 `https://HOST:9443/login`（`/setup` 也提供 Token 登录）。
+1. 打开安装器打印的 `https://HOST/login`（`/setup` 也提供 Token 登录）。
 2. 输入安装终端显示的管理员 Token，即可进入管理页。重定向安装输出时不会打印 Token，需在服务器本机读取：
 
 ```sh
@@ -32,10 +32,10 @@ sudo cat /etc/argus-c2/setup/console-new.token
 
 点击顶栏账号图标或名称，进入 **账号与登录**：
 
-1. 尚未配置平台时，可以继续使用 Token。管理员需要 OAuth 时，展开 **配置第三方登录（可选）**。
+1. 尚未配置平台时，可以继续使用 Token。管理员需要 OAuth 时，展开 **1. 配置本控制台的 OAuth 应用（管理员）**。
    每个平台的输入框旁提供 **如何创建 Google / GitHub OAuth 应用** 折叠教程，按当前界面语言显示。里面的主页与回调地址来自本机 Console 配置，可以直接照填；无需使用文档示例域名。
 2. 配置 Google、GitHub 或两者，保存登录方式。Auth0 / 自定义 OIDC 也可选。
-3. 在上方平台卡片点击 **绑定 Google / GitHub 账号**，跳转平台授权后返回，显示“已绑定”。
+3. 在下方 **2. 关联你自己的账号** 中点击 **绑定 Google / GitHub 账号**，跳转平台授权后返回，显示“已绑定”。
 4. 退出后可使用已绑定平台登录。Token 和 OAuth 对应同一本地管理员账号，共用权限，不会另建一位管理员。
 
 配置与绑定要求最近 10 分钟内登录；超过时用 Token 或已绑定平台重新登录即可。已归属其他本地账号的第三方身份不能直接转移；系统不根据邮箱或昵称合并账号。未绑定的第三方身份直接登录时仍进入待批准状态。绑定 OAuth 不会自动禁用管理员 Token。
@@ -49,10 +49,10 @@ sudo cat /etc/argus-c2/setup/console-new.token
 | 项目 | 示例 |
 | --- | --- |
 | Application name | `ARGUS` |
-| Homepage URL | `https://argus.example.com:9443` |
-| Authorization callback URL | `https://argus.example.com:9443/v1/console/auth/callback/github` |
+| Homepage URL | `https://argus.example.com` |
+| Authorization callback URL | `https://argus.example.com/v1/console/auth/callback/github` |
 
-以页面提供的回调地址为准，保留协议、端口和路径。点击 **Register application** 后复制 **Client ID**，再点击 **Generate a new client secret** 生成密钥。两项分别填到当前 Console 的对应输入框；不需要启用 Device Flow。请求范围为 `read:user`，不需要仓库权限。保存登录方式后，还需点击上方账号卡片的“绑定 GitHub 账号”完成本人授权。
+以页面提供的回调地址为准，保留协议、端口和路径。点击 **Register application** 后复制 **Client ID**，再点击 **Generate a new client secret** 生成密钥。两项分别填到当前 Console 的对应输入框；不需要启用 Device Flow。请求范围为 `read:user`，不需要仓库权限。保存登录方式后，还需点击第二步账号卡片的“绑定 GitHub 账号”完成本人授权。
 
 ### Google 应用
 
@@ -64,13 +64,27 @@ sudo cat /etc/argus-c2/setup/console-new.token
 4. 将 Console 页面提供的回调 URL 加入 **Authorized redirect URIs**，例如：
 
 ```text
-https://argus.example.com:9443/v1/console/auth/callback/google
+https://argus.example.com/v1/console/auth/callback/google
 ```
 
 5. 创建后将 **Client ID** 和 **Client Secret** 分别填到 ARGUS 对应输入框。当前为服务端登录流程，不必填写 Authorized JavaScript origins。
-6. 保存登录方式，再点击上方“绑定 Google 账号”完成授权，确认显示“已绑定”。
+6. 保存登录方式，再点击第二步的“绑定 Google 账号”完成授权，确认显示“已绑定”。
 
-使用 Google 接受的 HTTPS 域名；部署时不能直接使用公网 IP 作为回调主机。遇到 `redirect_uri_mismatch`，核对协议、域名、端口和路径是否与页面完整一致，特别不要漏掉默认 Console 端口 `:9443`。ARGUS 使用 Authorization Code + PKCE 和 `openid profile`。参阅 [Google 官方配置说明](https://developers.google.com/identity/protocols/oauth2/web-server#creatingcred)。
+使用 Google 接受的 HTTPS 域名；部署时不能直接使用公网 IP 作为回调主机。遇到 `redirect_uri_mismatch`，核对协议、域名、端口和路径是否与页面完整一致，新安装默认 443 不写端口，旧部署若仍用 9443 必须保留 `:9443`。ARGUS 使用 Authorization Code + PKCE 和 `openid profile`。参阅 [Google 官方配置说明](https://developers.google.com/identity/protocols/oauth2/web-server#creatingcred)。
+
+### 绑定与应用配置的区别
+
+第一步是给**这台 Console** 配置访问 Google/GitHub 的应用凭据；第二步是将**你本人的第三方身份**关联到当前 ARGUS 账号。只保存应用配置并不会完成绑定。先在当前账号完成关联，再退出尝试对应平台登录；不要用退出后首次登录来代替关联，这可能生成待批准的新身份。
+
+### GitHub 授权后失败
+
+preview.10 起会区分应用凭据错误、回调不匹配、授权码被拒绝、用户资料失败与网络/上游不可用。服务端仅记录固定分类与 HTTP 状态码，不记录授权码、Token、Secret、响应正文或完整回调 URL。失败后在服务器本机检查：
+
+```sh
+sudo journalctl -u argus-c2-server -n 80 --no-pager
+```
+
+找到 `Console OAuth failed`，核对 `stage`（`token_exchange` 或 `user_info`）、`category` 与 `upstream_status`。若仍显示“无法验证登录”，可能在更早的会话/state 检查失败：保持同一浏览器和 Console 域名，重新发起关联，避免授权中途重启服务、编辑平台配置或并行发起多个登录。不要分享完整日志、回调 URL 或密钥；排查时只提供上述分类字段与页面提示。仅凭原来的通用提示无法确定 GitHub 失败根因。
 
 ## 本地恢复
 

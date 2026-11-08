@@ -97,11 +97,11 @@ stdout 中的完整对象包含 `name`、`role` 和 `token_sha256`，将它加�
 | `max_result_bytes` | 1024–65536 字节；完整序列化结果的本地上限 |
 | `telemetry.sample_milliseconds` | 100–5000 毫秒；CPU 两次采样之间的等待时间，应小于任务执行预算 |
 | `telemetry.disk_paths` | 0–8 个唯一、规范的 Linux 绝对路径，每个最多 256 字节 |
-| `telemetry.network_interfaces` | 0–16 个唯一网卡名，每个 1–15 字节；不能含 `/`、`:` 或空格 |
+| `telemetry.network_interfaces` | 0–16 个唯一网卡名，每个 1–15 字节；不能含 `/`、`:` 或空格；空列表自动选择默认路由网卡 |
 | `services` | 0–16 个服务映射，ID 不可重复 |
 | `ssh_profiles` | 0–4 个 SSH profile，ID 不可重复；每个 1–4 个文件 |
 
-策略整体最多 32 KiB。`telemetry` 只供 `system.metrics` 使用，系统不使用 `interval_seconds`，也不周期推送指标。
+策略整体最多 32 KiB。`telemetry` 只供 `system.metrics` 使用，没有 `interval_seconds` 字段。启用 Console 的 Server 在 Agent 空闲轮询时每分钟下发指标任务；Agent 仍按本机策略执行并提交普通任务结果。
 
 ### 启用其他采集器
 

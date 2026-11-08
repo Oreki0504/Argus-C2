@@ -177,7 +177,7 @@ test('token opens management first, then optional OAuth binds to the account', a
   await expect(
     page.getByText('No OAuth providers configured. You can keep using your administrator token.'),
   ).toBeVisible()
-  await page.getByText('Configure sign-in providers (optional)', { exact: true }).click()
+  await page.getByText('1. Configure this Console’s OAuth apps (Admin)', { exact: true }).click()
   await page.getByRole('checkbox', { name: 'Enable Google', exact: true }).check()
   for (const provider of ['GitHub', 'Google']) {
     await page.getByText(`How to create a ${provider} OAuth app`, { exact: true }).click()
@@ -196,6 +196,15 @@ test('token opens management first, then optional OAuth binds to the account', a
     await page.getByLabel(`${provider} Client Secret`, { exact: true }).fill('preview-secret')
   }
   await page.getByRole('button', { name: 'Save sign-in methods', exact: true }).click()
+  await expect(page.getByText('App configured · account not linked', { exact: true })).toHaveCount(
+    2,
+  )
+  await expect(
+    page.getByText(
+      'App settings saved. Now link your account below to finish enabling sign-in for yourself.',
+      { exact: true },
+    ),
+  ).toBeVisible()
   for (const provider of ['GitHub', 'Google'])
     await page.getByRole('button', { name: `Bind with ${provider}`, exact: true }).click()
   await expect(page.getByRole('button', { name: 'Linked', exact: true })).toHaveCount(2)
@@ -211,6 +220,17 @@ test('token opens management first, then optional OAuth binds to the account', a
   await expect(page.getByRole('link', { name: 'Management', exact: true })).toBeVisible()
 })
 
+test('GitHub failures explain the failed stage on login and account pages', async ({ page }) => {
+  await page.goto('/login?reason=github_client_invalid')
+  await expect(page.getByText(/GitHub rejected the OAuth app credentials/)).toBeVisible()
+  await page.goto('/account?scenario=admin&reason=github_unavailable')
+  await expect(page.getByText(/The ARGUS server could not reach GitHub/)).toBeVisible()
+  await page.getByRole('button', { name: '切换为中文' }).click()
+  await expect(page.getByText(/ARGUS 服务端无法连接 GitHub/)).toBeVisible()
+  await page.goto('/account?scenario=admin&reason=untrusted-provider-details')
+  await expect(page.getByText('untrusted-provider-details')).toHaveCount(0)
+})
+
 test('token login is reusable without OAuth and mobile account settings fit', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/setup?scenario=setup')
@@ -224,7 +244,7 @@ test('token login is reusable without OAuth and mobile account settings fit', as
   await page.getByLabel('Administrator token', { exact: true }).fill('b'.repeat(64))
   await page.getByRole('button', { name: 'Enter console', exact: true }).click()
   await page.getByRole('link', { name: /Account & sign-in/ }).click()
-  await page.getByText('Configure sign-in providers (optional)', { exact: true }).click()
+  await page.getByText('1. Configure this Console’s OAuth apps (Admin)', { exact: true }).click()
   await page.getByRole('checkbox', { name: 'Enable GitHub', exact: true }).uncheck()
   await page.getByRole('checkbox', { name: 'Enable Google', exact: true }).check()
   await page.getByLabel('Google Client ID', { exact: true }).fill('google-preview')

@@ -56,7 +56,7 @@ export function ProviderGuide({ kind, callback }: { kind: 'google' | 'github'; c
         )}
         <li>
           {t(
-            'Click Save sign-in methods here, then Bind with Google or GitHub in the account card above. Complete authorization until the card shows Linked.',
+            'Click Save sign-in methods here, then Bind with Google or GitHub in the account card in step 2. Complete authorization until the card shows Linked.',
           )}
         </li>
       </ol>

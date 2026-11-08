@@ -4,6 +4,31 @@ export type Language = 'en' | 'zh-CN'
 
 const chinese: Record<string, string> = {
   ...managementChinese,
+  '1. Configure this Console’s OAuth apps (Admin)': '1. 配置本控制台的 OAuth 应用（管理员）',
+  'Link your own account': '关联你自己的账号',
+  '2. Link your own account': '2. 关联你自己的账号',
+  'App configured · account not linked': '应用已配置 · 账号未关联',
+  'App settings let this Console contact Google or GitHub. Linking proves which provider account belongs to you. Saving app settings alone does not link your account.':
+    '应用配置让本控制台能与 Google / GitHub 通信；关联账号用于确认哪个第三方身份属于你。仅保存应用配置，还没有完成账号关联。',
+  'App settings saved. Now link your account below to finish enabling sign-in for yourself.':
+    '应用配置已保存。请在下面关联自己的账号，完成后才能使用该方式登录原账号。',
+  'GitHub authorization was cancelled. Start linking again and approve access.':
+    'GitHub 授权已取消，请重新关联并同意授权。',
+  'GitHub rejected the OAuth app credentials. Check that Client ID and Client Secret belong to the same OAuth App, then save the app settings again.':
+    'GitHub 拒绝了应用凭据。请确认 Client ID 和 Client Secret 来自同一个 OAuth App，然后重新保存应用配置。',
+  'GitHub rejected the callback URL. Copy the complete GitHub callback URL from app settings into the GitHub OAuth App.':
+    'GitHub 拒绝了回调地址。请将应用设置中的完整 GitHub 回调地址复制到 GitHub OAuth App。',
+  'GitHub rejected the authorization code. Start a fresh linking attempt; do not reuse or refresh the callback page.':
+    'GitHub 拒绝了授权码。请重新发起关联，不要重复使用或刷新回调页面。',
+  'Verify your email address in GitHub, then start linking again.':
+    '请先在 GitHub 验证邮箱，再重新关联。',
+  'ARGUS could not exchange the GitHub authorization code. The server log records the token_exchange failure stage.':
+    'ARGUS 无法交换 GitHub 授权码。服务日志记录了 token_exchange 阶段的错误分类。',
+  'ARGUS could not verify your GitHub user profile. The server log records the user_info failure stage.':
+    'ARGUS 无法验证 GitHub 用户资料。服务日志记录了 user_info 阶段的错误分类。',
+  'The ARGUS server could not reach GitHub or GitHub is temporarily unavailable. Try again; the server log records the failed stage.':
+    'ARGUS 服务端无法连接 GitHub，或 GitHub 暂时不可用。请稍后重试，服务日志会记录失败阶段。',
+
   'Enter your administrator token': '输入管理员 Token',
   'Use the random token from your installation terminal to enter the console. OAuth can be linked later.':
     '使用安装终端生成的随机 Token 直接进入后台，OAuth 可以稍后绑定。',
@@ -27,8 +52,8 @@ const chinese: Record<string, string> = {
   'No OAuth providers configured. You can keep using your administrator token.':
     '尚未配置 OAuth，你可以继续使用管理员 Token。',
   'Configure sign-in providers (optional)': '配置第三方登录（可选）',
-  'OAuth is optional. Configure providers here, then bind your account above.':
-    'OAuth 为可选功能。在此配置平台后，即可在上方绑定当前账号。',
+  'OAuth is optional. Configure providers here, then link your own account in step 2.':
+    'OAuth 为可选功能。在此配置平台后，即可在第 2 步关联自己的账号。',
   'Save sign-in methods': '保存登录方式',
   'How to create a {provider} OAuth app': '如何创建 {provider} OAuth 应用',
   'Open GitHub Settings → Developer settings → OAuth Apps → New OAuth App.':
@@ -47,8 +72,8 @@ const chinese: Record<string, string> = {
     '进入 Clients → Create client，类型选择 Web application，名称填 ARGUS。在 Authorized redirect URIs 中添加以下地址：',
   'Create the client and copy its Client ID and Client Secret into the fields below. Authorized JavaScript origins are not required for this server login flow.':
     '创建后复制 Client ID 和 Client Secret，填入下方对应输入框。当前登录由服务端处理，不需要填写 Authorized JavaScript origins。',
-  'Click Save sign-in methods here, then Bind with Google or GitHub in the account card above. Complete authorization until the card shows Linked.':
-    '在此点击“保存登录方式”，再到上方账号卡片点击“绑定 Google / GitHub 账号”，完成跳转授权，直到卡片显示“已绑定”。',
+  'Click Save sign-in methods here, then Bind with Google or GitHub in the account card in step 2. Complete authorization until the card shows Linked.':
+    '在此点击“保存登录方式”，再到第 2 步账号卡片点击“绑定 Google / GitHub 账号”，完成跳转授权，直到卡片显示“已绑定”。',
   'Keep the HTTPS scheme, hostname, port and callback path exactly as shown. If you see redirect_uri_mismatch, compare the full address in both places.':
     'HTTPS 协议、域名、端口和回调路径必须与这里完全一致。遇到 redirect_uri_mismatch 时，请核对两处的完整地址。',
   'Google requires an accepted HTTPS domain for a deployed app; a public IP address is not a valid redirect host. Use a domain for your Console before configuring Google.':

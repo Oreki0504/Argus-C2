@@ -20,7 +20,7 @@ test('real HTTPS Console logs in with token, binds OIDC and performs authenticat
     await page.getByRole('button', { name: 'Enter console', exact: true }).click()
     await expect(page.getByRole('link', { name: 'Management', exact: true })).toBeVisible()
     await page.getByRole('link', { name: /Account & sign-in/ }).click()
-    await page.getByText('Configure sign-in providers (optional)', { exact: true }).click()
+    await page.getByText('1. Configure this Console’s OAuth apps (Admin)', { exact: true }).click()
     await page.getByRole('checkbox', { name: 'Enable GitHub', exact: true }).uncheck()
     await page.getByText('Other identity provider (Auth0 / OIDC)', { exact: true }).click()
     await page.getByRole('checkbox', { name: 'Enable custom SSO', exact: true }).check()

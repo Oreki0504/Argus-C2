@@ -63,7 +63,7 @@ export function ProviderSettings({
       }}
     >
       <p className="muted">
-        {t('OAuth is optional. Configure providers here, then bind your account above.')}
+        {t('OAuth is optional. Configure providers here, then link your own account in step 2.')}
       </p>
       <div className="provider-choices">
         {(['github', 'google'] as const).map((kind) => (

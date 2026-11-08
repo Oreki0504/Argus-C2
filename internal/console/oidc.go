@@ -127,6 +127,13 @@ func (t boundedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if r.URL.Scheme != "https" {
 		return nil, errors.New("OIDC requires HTTPS")
 	}
+	if r.URL.Host == "github.com" && r.URL.Path == "/login/oauth/access_token" || r.URL.Host == "api.github.com" && r.URL.Path == "/user" {
+		r = r.Clone(r.Context())
+		r.Header.Set("User-Agent", "ARGUS-Console")
+		if r.URL.Host == "github.com" {
+			r.Header.Set("Accept", "application/json")
+		}
+	}
 	resp, err := t.base.RoundTrip(r)
 	if err != nil {
 		return nil, err
@@ -550,6 +557,10 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(q["code"]) != 1 || q.Get("code") == "" || q.Get("error") != "" {
+		if v.ProviderKind == "github" && q.Get("error") == "access_denied" {
+			fail("github_access_denied")
+			return
+		}
 		fail("oidc_callback_invalid")
 		return
 	}
@@ -568,12 +579,20 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := p.OAuth.Exchange(oidc.ClientContext(r.Context(), s.httpClient), q.Get("code"), oauth2.VerifierOption(v.Verifier))
 	if err != nil {
-		fail("oidc_callback_invalid")
+		if v.ProviderKind == "github" {
+			fail(reportGitHubFailure("token_exchange", err))
+		} else {
+			fail("oidc_callback_invalid")
+		}
 		return
 	}
 	issuer, subject, name, err := s.loginIdentity(r.Context(), p, token, v)
 	if err != nil {
-		fail("oidc_callback_invalid")
+		if v.ProviderKind == "github" {
+			fail(reportGitHubFailure("user_info", err))
+		} else {
+			fail("oidc_callback_invalid")
+		}
 		return
 	}
 	if v.BindingUser != "" {
@@ -651,13 +670,16 @@ func (s *Server) loginIdentity(ctx context.Context, p *provider, token *oauth2.T
 			return "", "", "", err
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return "", "", "", githubHTTPError{status: resp.StatusCode}
+		}
 		var user struct {
 			ID    int64  `json:"id"`
 			Login string `json:"login"`
 			Name  string `json:"name"`
 			Type  string `json:"type"`
 		}
-		if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&user) != nil || user.ID <= 0 || user.Type != "User" || user.Login == "" || !protocol.CleanText(user.Login, 128) {
+		if json.NewDecoder(resp.Body).Decode(&user) != nil || user.ID <= 0 || user.Type != "User" || user.Login == "" || !protocol.CleanText(user.Login, 128) {
 			return "", "", "", invalid
 		}
 		if user.Name == "" || !protocol.CleanText(user.Name, 128) {

@@ -393,7 +393,7 @@ class InstallerTests(unittest.TestCase):
         for host in ('0.0.0.0', '::', 'bad;cmd', 'bad%host', 'foo\nbar', '-x.example', 'https://x.example', 'a..b', '224.0.0.1'):
             with self.subTest(host=host), self.assertRaises(installer.InstallError):
                 installer.host_value(host)
-        for flags in [('--fleet-port', '9443'), ('--fleet-port', '0'), ('--console-port', '65536'),
+        for flags in [('--fleet-port', '443'), ('--fleet-port', '0'), ('--console-port', '65536'),
                       ('--console-cert', '/tmp/cert'), ('--tls', 'existing')]:
             with self.subTest(flags=flags), self.assertRaises(installer.InstallError):
                 options('--host', 'localhost', '--tls', 'local-ca', *flags)
@@ -835,7 +835,7 @@ class InstallerTests(unittest.TestCase):
         account = SimpleNamespace(pw_uid=os.geteuid(), pw_gid=os.getegid())
         with patch.object(installer, 'run', side_effect=isolated_run), patch.object(installer.pwd, 'getpwnam', return_value=account), contextlib.redirect_stdout(io.StringIO()) as output:
             installer.install(args, stage, bundle, certdir, '/usr/bin/certbot')
-        self.assertIn('https://127.0.0.1:9443/login', output.getvalue())
+        self.assertIn('https://127.0.0.1/login', output.getvalue())
         config = json.loads(installer.path('/etc/argus-c2/server.json').read_text())
         self.assertEqual(config['listen'], '0.0.0.0:8443')
         self.assertEqual(config['private_key'], str(installer.path('/run/credentials/argus-c2-server.service/server-key')))
@@ -845,8 +845,9 @@ class InstallerTests(unittest.TestCase):
         self.assertIn(['systemctl', 'enable', '--now', 'argus-console-renew.timer'], calls)
         self.assertFalse(installer.path('/var/lib/argus-c2-agent').exists())
         dropin = installer.path('/etc/systemd/system/argus-c2-server.service.d/console.conf').read_text()
-        self.assertIn('-console-listen 0.0.0.0:9443', dropin)
+        self.assertIn('-console-listen 0.0.0.0:443', dropin)
         self.assertIn('LoadCredential=console-key:', dropin)
+        self.assertIn('AmbientCapabilities=CAP_NET_BIND_SERVICE', dropin)
         renewal = installer.path('/etc/systemd/system/argus-console-renew.service').read_text()
         self.assertIn('ExecStopPost=', renewal)
         self.assertIn('--sync-certificate', renewal)
@@ -887,7 +888,7 @@ class InstallerTests(unittest.TestCase):
             plan = installer.update_plan('server', installer.architecture())
             installer.update_component(args, plan, bundle)
         self.assertEqual(installer.database_stamp(state.parent, 'server'), (0x41524753, 104))
-        self.assertIn('https://127.0.0.1:9443/login', output.getvalue())
+        self.assertIn('https://127.0.0.1/login', output.getvalue())
         self.assertEqual(installer.path('/etc/argus-c2/server.json').read_text(), json.dumps(config, indent=2) + '\n')
         replacement = next(installer.path('/etc/argus-c2/setup').glob('console-*.token'))
         token = replacement.read_text().strip()

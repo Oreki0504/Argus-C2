@@ -22,6 +22,7 @@ type Server struct {
 	Store      *database.Store
 	Enrollment enrollment.Service
 	Admins     auth.Config
+	Monitoring bool // Console's fixed read-only periodic collection.
 }
 
 func (s *Server) Handler() http.Handler {
@@ -119,7 +120,7 @@ func (s *Server) Handler() http.Handler {
 		if !decode(w, r, &struct{}{}, 256) {
 			return
 		}
-		out, e := s.Store.Poll(r.Context(), c)
+		out, e := s.Store.PollWithMonitoring(r.Context(), c, s.Monitoring)
 		if e == nil && out == nil {
 			w.WriteHeader(http.StatusNoContent)
 			return

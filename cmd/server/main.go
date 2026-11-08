@@ -58,7 +58,7 @@ func run() error {
 	check := f.Bool("check", false, "validate configuration and exit")
 	out := f.String("out", "", "new backup file in a private directory")
 	var browser consoleFlags
-	f.StringVar(&browser.listen, "console-listen", "", "optional Console HTTPS listen address, e.g. 0.0.0.0:9443")
+	f.StringVar(&browser.listen, "console-listen", "", "optional Console HTTPS listen address, e.g. 0.0.0.0:443")
 	f.StringVar(&browser.origin, "console-origin", "", "exact browser HTTPS origin")
 	f.StringVar(&browser.cert, "console-cert", "", "browser TLS certificate, independent of Fleet CA")
 	f.StringVar(&browser.key, "console-key", "", "private browser TLS key")
@@ -172,7 +172,7 @@ func run() error {
 		fmt.Println("server configuration valid")
 		return nil
 	}
-	handler := (&api.Server{Store: store, Enrollment: enrollment.Service{Store: store, Issuer: issuer}, Admins: admins}).Handler()
+	handler := (&api.Server{Store: store, Enrollment: enrollment.Service{Store: store, Issuer: issuer}, Admins: admins, Monitoring: consoleServer != nil}).Handler()
 	server := &http.Server{Addr: c.Listen, Handler: handler, TLSConfig: tlsConfig, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 40 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

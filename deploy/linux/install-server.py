@@ -178,7 +178,7 @@ def host_value(raw):
 
 
 def origin(host, port):
-    return f'https://{"[" + host + "]" if ":" in host else host}:{port}'
+    return f'https://{"[" + host + "]" if ":" in host else host}' + (f':{port}' if port != 443 else '')
 
 
 def parser():
@@ -197,7 +197,7 @@ def parser():
     p.add_argument('--console-cert', type=Path)
     p.add_argument('--console-key', type=Path)
     p.add_argument('--fleet-port', type=int, default=8443)
-    p.add_argument('--console-port', type=int, default=9443)
+    p.add_argument('--console-port', type=int, default=443, help='Console HTTPS port (default: 443)')
     action = p.add_mutually_exclusive_group()
     action.add_argument('--update', choices=('server', 'agent'), help='update an installed component while preserving configuration and identity')
     action.add_argument('--uninstall', choices=('server', 'agent'), help='stop and remove a component; preserve configuration, data and identity by default')
@@ -677,6 +677,8 @@ def install(args, stage, bundle, certdir, certbot):
     # All generated arguments are canonical paths or validated DNS/IP/ports;
     # never interpolate caller-provided shell text into a systemd directive.
     dropin = '[Service]\nLoadCredential=console-key:' + str(console / 'browser-key.pem') + '\nExecStart=\nExecStart=' + ' '.join(command) + '\n'
+    if min(args.console_port, args.fleet_port) < 1024:
+        dropin += 'CapabilityBoundingSet=CAP_NET_BIND_SERVICE\nAmbientCapabilities=CAP_NET_BIND_SERVICE\n'
     write_new(path('/etc/systemd/system/' + SERVICE + '.d/console.conf'), dropin, 0o644)
     if certbot:
         renew = ' '.join('"' + arg.replace('\\', '\\\\').replace('"', '\\"') + '"' for arg in acme_arguments(args, certbot, True))

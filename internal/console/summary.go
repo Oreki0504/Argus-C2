@@ -79,7 +79,7 @@ func projectSystem(raw string, completed int64) publicSystem {
 		return out
 	}
 	// Return a small vocabulary, never arbitrary Agent-supplied system text.
-	for _, family := range []string{"Ubuntu", "Debian", "Fedora", "Alpine", "Arch", "Rocky", "AlmaLinux", "CentOS", "Red Hat", "openSUSE", "SUSE", "Amazon Linux", "Oracle Linux", "NixOS"} {
+	for _, family := range []string{"linux", "Ubuntu", "Debian", "Fedora", "Alpine", "Arch", "Rocky", "AlmaLinux", "CentOS", "Red Hat", "openSUSE", "SUSE", "Amazon Linux", "Oracle Linux", "NixOS"} {
 		if i.OS == family || strings.HasPrefix(i.OS, family+" ") {
 			name := family
 			for _, word := range strings.Fields(strings.TrimPrefix(i.OS, family)) {
@@ -137,6 +137,11 @@ func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now().Unix()
+	traffic, err := s.latestTraffic(r.Context(), now)
+	if err != nil {
+		storeProblem(w, err)
+		return
+	}
 	out := publicSummary{now, now - 3600, now, 60, []publicNode{}}
 	rows, err := s.store.DB.QueryContext(r.Context(), `SELECT p.public_id,p.display_name,n.last_seen_at,
  COALESCE(i.payload,''),COALESCE(i.completed_at,0),COALESCE(m.payload,''),COALESCE(m.received_at,0)
@@ -166,8 +171,7 @@ func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
 		if metrics != "" {
 			n.Resources = projectResources(metrics, received)
 		}
-		// Cumulative counters from sporadic diagnostic tasks cannot establish
-		// periodic bandwidth/coverage. Network values remain explicitly missing.
+		n.Traffic = traffic[n.PublicID]
 		out.Nodes = append(out.Nodes, n)
 	}
 	if err = rows.Err(); err != nil {

@@ -75,6 +75,14 @@ jobs:
           {command}
           ```
 
+          New installations now serve Console HTTPS on port 443 as the dedicated non-root service user; existing updates/restores retain their configured ports and OAuth callbacks. Fleet remains on 8443.
+
+          Console now collects system information hourly and resource metrics each minute through idle Agent polls, respecting local policy and existing queued work. Updated Agents automatically select default-route network interfaces when the local list is empty. Two recent samples provide average network rates; bandwidth capacity/percentages and traffic totals remain unavailable. Monitoring history uses ordinary task retention.
+
+          Account settings now put OAuth app configuration before personal identity linking. GitHub requests explicitly negotiate JSON and include a User-Agent; failures distinguish credentials, callback, code, profile and upstream problems, with secret-free stage diagnostics. A live GitHub retry is still needed to diagnose any deployment-specific failure.
+
+          Agent install output includes a downloadable uninstall/purge command. `--uninstall agent --purge` removes current programs, service, configuration, identity, database and the dedicated account; disable the registered Agent in Console when retiring it. Historical backups remain.
+
           The installer first asks for Chinese or English, downloads and verifies the matching bundle, and configures HTTPS. On success, it prints `/login` and the private administrator token path. An interactive terminal displays the token; redirected output does not. Read it locally with `sudo cat /etc/argus-c2/setup/console.token`.
 
           Enter this random token to open administrator management immediately. It remains usable after logout or restart. Google, GitHub and custom OIDC are optional in Account & sign-in: configure providers later and explicitly bind identities to the same local account. Token login never requires an OAuth application. OAuth itself still requires the operator's app credentials once, in the optional settings page.

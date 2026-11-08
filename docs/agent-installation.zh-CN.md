@@ -6,7 +6,7 @@
 
 ## 管理服务器准备
 
-先完成真实 Console 的 HTTPS、OIDC 登录和首位管理员配置。局域网 HTTP 开发预览只展示交互，生成的是 `.invalid` 域名示例，不能安装 Agent。
+先完成真实 Console 的 HTTPS，并使用安装器生成的管理员 Token 登录；OAuth 可选。局域网 HTTP 开发预览只展示交互，生成的是 `.invalid` 域名示例，不能安装 Agent。
 
 在仓库根目录构建安装包，输出目录必须尚不存在：
 
@@ -43,7 +43,9 @@ bin/server run -config /private/argus/server.json \
 - 以 `argus-agent` 执行配置检查及注册，然后启用并启动 `argus-c2-agent.service`。服务使用与手动部署一致的加固配置，以普通用户运行。
 - 默认本地策略仅允许 `system.info` 和 `system.metrics`；不会开放任意命令执行或远程修改本地策略。
 
-脚本不更改防火墙，不执行 SSH，不自动安装系统软件包。存在 Agent 配置、身份目录、用户或 unit 时会中止，避免覆盖已有安装。两个安装脚本不能并发写同一主机。首次安装后，在 Console 刷新 Agent 列表确认注册及心跳；CPU 等观测仍需已有诊断任务，不会因安装而新增后台采样循环。
+脚本不更改防火墙，不执行 SSH，不自动安装系统软件包。存在 Agent 配置、身份目录、用户或 unit 时会中止，避免覆盖已有安装。两个安装脚本不能并发写同一主机。首次安装后，在 Console 刷新 Agent 列表确认注册及心跳。preview.10 起，启用 Console 的 Server 在 Agent 空闲轮询时自动下发 `system.info`（每小时）与 `system.metrics`（每分钟），不需要手工创建任务，仍受本机策略限制。首批资源指标通常约一分钟出现；上下行速率需要连续两次采样，约两分钟。历史图表逐次积累，不补造安装前数据。
+
+更新到 preview.10 的 Agent 在 `network_interfaces: []` 时自动选择默认路由网卡；显式网卡名单仍优先。Server 更新不会自动升级远端 Agent。带宽上限尚未配置，因此网络速率显示 bit/s，使用率百分比和总流量仍为不可用，不会伪造为 0%。采集任务与结果按现有保留机制存储，每台每天约 1,464 个任务，请按[历史清理流程](operations.md#server-history-retention)维护存储。
 
 ## 凭据与故障处理
 
@@ -67,6 +69,16 @@ sudo journalctl -u argus-c2-agent.service -n 50 --no-pager
 使用新版发布脚本的 `--update agent`，在 Agent 主机本地执行，完整命令见 [Server／Agent 更新](server-installation.zh-CN.md#更新-server-或-agent)。它下载并校验当前架构包、停止 Agent、备份身份与待发送结果、检查数据库副本后替换程序，再恢复原服务状态；失败时恢复旧程序。注册证书、节点 ID、策略和现有数据库保留，不需要新的注册 Token。
 
 ## 卸载
+
+在**需要移除的 Agent 主机**执行下列完整命令，可清除当前 Agent 程序、systemd 服务、配置、策略、注册证书、数据库和 `argus-agent` 系统账户：
+
+```sh
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.10/install-server.py -o "$f" && sudo python3 "$f" --uninstall agent --purge )
+```
+
+选择语言后，核对清理清单，输入 `purge agent` 确认。想先查看范围，在 `--purge` 后、右括号前加 `--dry-run`；想保留身份供恢复，去掉 `--purge`。只有 wget 时，将下载部分换为 `wget --https-only --max-redirect=5 -O "$f" 同一个下载地址`。
+
+历史更新/卸载备份不会被删除，可能仍含旧身份凭据；维护脚本也保留。完成后在 **管理 → Agents → 对应 Agent → 禁用** 撤销服务器注册身份，避免旧证书或备份继续使用。服务器保留审计记录，目前没有删除节点历史记录的接口。
 
 同一个发布脚本支持 `--uninstall agent`，默认保留配置、注册身份、数据库和策略；`--purge` 才清除当前 Agent 数据及专用账户，便于重新安装。完整下载命令、预览和恢复步骤见 [Server／Agent 卸载](server-installation.zh-CN.md#卸载-server-或-agent)。卸载只影响本机 Agent，不修改同机 Server，也不会自动撤销服务器上的注册身份；退役主机时还需在管理页禁用该 Agent。
 

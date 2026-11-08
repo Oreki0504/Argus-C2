@@ -97,11 +97,11 @@ These are example values, not implicit defaults for omitted fields.
 | `max_result_bytes` | 1024–65536 bytes for the complete serialized result |
 | `telemetry.sample_milliseconds` | 100–5000 milliseconds between CPU samples; leave enough execution budget |
 | `telemetry.disk_paths` | 0–8 unique canonical absolute Linux paths, up to 256 bytes each |
-| `telemetry.network_interfaces` | 0–16 unique interface names, 1–15 bytes each; no `/`, `:`, or spaces |
+| `telemetry.network_interfaces` | 0–16 unique interface names, 1–15 bytes each; no `/`, `:`, or spaces; empty selects default-route interfaces |
 | `services` | 0–16 service mappings with unique IDs |
 | `ssh_profiles` | 0–4 profiles with unique IDs; 1–4 files per profile |
 
-The policy is limited to 32 KiB. `telemetry` is used by `system.metrics`; there is no `interval_seconds` field or periodic metrics upload.
+The policy is limited to 32 KiB. `telemetry` is used by `system.metrics`; there is no `interval_seconds` field. A Console-enabled Server schedules metrics tasks every 60 seconds on idle Agent polls; the Agent still applies its local policy and uploads ordinary task results.
 
 ### Enable additional collectors
 

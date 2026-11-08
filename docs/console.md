@@ -39,7 +39,7 @@ bin/server run -config /private/argus/server.json \
   -console-key /private/console/browser-key.pem
 ```
 
-The example listens on all LAN interfaces. Resolve the origin's hostname to this machine from the client. Origin is exact, without a trailing slash, and must match the registered OIDC callback. TLS is 1.3 or newer. There is no insecure HTTP mode, wildcard CORS or trusted forwarded-header shortcut. Both listener ports are bound before serving; a failure on either shuts down both. `-check` validates configuration and credentials without opening listeners. No changes to the strict Fleet `server.json` format are required.
+The manual example uses unprivileged port 9443. The Server installer defaults to 443 for new installations and grants only `CAP_NET_BIND_SERVICE` through systemd; updates preserve existing ports. The example listens on all LAN interfaces. Resolve the origin's hostname to this machine from the client. Origin is exact, without a trailing slash, and must match the registered OIDC callback. TLS is 1.3 or newer. There is no insecure HTTP mode, wildcard CORS or trusted forwarded-header shortcut. Both listener ports are bound before serving; a failure on either shuts down both. `-check` validates configuration and credentials without opening listeners. No changes to the strict Fleet `server.json` format are required.
 
 A build without `-tags ui` still provides APIs when enabled, but the static UI responds 503.
 
@@ -99,4 +99,8 @@ Recovery immediately invalidates all browser sessions, previous login tokens and
 
 ## Observations
 
-Live management is functional. Dashboard system/resource data comes from existing successful diagnostic tasks; dispatch `system.info` and `system.metrics` to obtain observations. There is no background collection loop in this change. Bandwidth/traffic values remain missing until a separate periodic telemetry implementation exists. Anonymous responses contain only the safe projection, never raw task data.
+With Console enabled, idle Agent polls receive `system.info` at most once per hour and `system.metrics` at most once per minute. Existing queued/in-flight work takes precedence. Failed or policy-denied collection is also rate limited; offline Agents do not accumulate monitoring work. Fleet-only servers retain manual dispatch. No policy is changed remotely.
+
+First resource observations usually arrive within a minute; network rates require two successful samples within 120 seconds, from unchanged interfaces with nondecreasing counters. These are interval-average bit rates, not instantaneous utilization. Stale samples and observed counter resets yield null. These counter payloads have no boot identifier, so an interface reset that already exceeds the previous counters cannot be distinguished; rates are diagnostic estimates and are not billing data. Directional capacity, bandwidth percentages, traffic totals and coverage remain unavailable. Agent updates enable default-route interface selection when the local interface list is empty.
+
+Monitoring uses normal durable tasks/results and emits audit under `console-monitor`, roughly 1,464 tasks per Agent per day. Apply [history retention](operations.md#server-history-retention) as needed. Anonymous responses contain only the safe projection, never raw task data.

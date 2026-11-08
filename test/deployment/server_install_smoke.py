@@ -85,7 +85,7 @@ def main():
         secret_file = max((root / 'setup').glob('console-*.token'), key=lambda p: p.stat().st_mtime_ns)
         secret = secret_file.read_text().strip()
         run('systemctl', 'start', unit)
-        origin = 'https://127.0.0.1:9443'
+        origin = 'https://127.0.0.1'
         context = ssl.create_default_context(cafile=str(root / 'console/ca.pem'))
         context.minimum_version = ssl.TLSVersion.TLSv1_3
         browser = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context),
@@ -185,6 +185,19 @@ def main():
         after_nodes = json.loads(run(*cli, 'nodes'))
         require(len(after_nodes) == 1 and after_nodes[0]['id'] == before_nodes[0]['id'], 'Agent update reenrolled the node.')
         run('systemctl', 'is-active', '--quiet', 'argus-c2-agent.service')
+        # No operator-created tasks: a new Console deployment must populate
+        # the dashboard from the real Agent's local read-only collectors.
+        deadline = time.monotonic() + 120
+        while True:
+            nodes = request('/v1/console/summary')['nodes']
+            if nodes and nodes[0]['resources']['cpu_percent'] is not None and nodes[0]['traffic']['inbound_bps'] is not None:
+                require(nodes[0]['resources']['memory_percent'] is not None, 'Missing memory observation.')
+                require(nodes[0]['resources']['disk_percent'] is not None, 'Missing disk observation.')
+                require(nodes[0]['system']['os'] == 'linux', 'Missing system information.')
+                require(nodes[0]['traffic']['inbound_capacity_bps'] is None, 'Invented link capacity.')
+                break
+            require(time.monotonic() < deadline, 'Automatic metrics and two network samples did not reach Console.')
+            time.sleep(2)
         # A valid archive containing a failing candidate must leave old programs
         # and the live service available. Unit tests also cover failures after replacement.
         with tempfile.TemporaryDirectory(prefix='argus-bad-update-') as temporary:
@@ -228,6 +241,14 @@ def main():
         # Purge and reinstall: no leftover service account may block a new install.
         run(sys.executable, installer, '--uninstall', 'agent', '--purge', '--yes', '--language', 'en')
         require(not agent_state.exists() and not agent_binary.exists(), 'Agent purge retained active installation files.')
+        for p in (root / 'agent.json', root / 'policy.json', root / 'ca.pem', agent_unit, sysusers):
+            require(not p.exists(), 'Agent purge retained configuration or service files.')
+        try:
+            pwd.getpwnam('argus-agent')
+        except KeyError:
+            pass
+        else:
+            raise RuntimeError('Agent purge retained its dedicated system account.')
         run('systemctl', 'is-active', '--quiet', unit)
         run(sys.executable, installer, '--uninstall', 'server', '--purge', '--yes', '--language', 'en')
         require(not state.exists(), 'Server purge retained its database.')

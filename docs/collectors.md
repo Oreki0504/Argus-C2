@@ -32,7 +32,7 @@ Parameters are `{}`. Reads fixed `/proc` data and the hostname, returning:
 
 ## system.metrics
 
-Parameters are `{}`; local `telemetry` configuration selects the resources. There is no automatic metrics upload with heartbeats or background sampling schedule.
+Parameters are `{}`; local `telemetry` configuration selects the resources. Metrics are returned as task results, not heartbeat payloads. When Console is enabled, the Server schedules fixed read-only collection tasks on idle Agent polls (metrics every 60 seconds, information every hour), subject to local policy.
 
 | Field | Contents |
 | --- | --- |
@@ -41,7 +41,7 @@ Parameters are `{}`; local `telemetry` configuration selects the resources. Ther
 | `disks` | `path`, `available`, total and available bytes for each configured path |
 | `networks` | `interface`, `available`, `rx_bytes`, `tx_bytes` for each configured interface |
 
-Network counters are cumulative byte counts, not per-second rates. Disk collection uses `statfs` only for configured paths; it does not enumerate all mounts. Regressing CPU counters or an invalid sample window produce unavailable data. An empty `network_interfaces` list produces an empty array.
+Network counters are cumulative byte counts, not per-second rates. Disk collection uses `statfs` only for configured paths; it does not enumerate all mounts. Regressing CPU counters or an invalid sample window produce unavailable data. An empty `network_interfaces` list selects the lowest-metric default-route interface per address family, excluding loopback and deduplicating the selection. No usable route means no network counters. Explicit names override this selection.
 
 ## service.status
 
