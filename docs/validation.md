@@ -190,3 +190,8 @@ The deployment subsequently returned `oauth_issuer_mismatch`. GitHub's public [a
 The corrected implementation validates the authorization issuer separately without changing stored identities or credentials. The same linking test now passes. Regressions cover setup/login/binding, restart and stable identity after callbacks without `iss`, plus rejection of wrong, empty, duplicate and trailing-slash issuer values before code exchange. The full Go suite, vet and focused Console race tests passed locally. Schema versions and protocol are unchanged. A real user retry remains the final deployment check; simulated OAuth tests do not authorize a live GitHub account.
 
 The separately reported browser security warning was not reproduced on the public Console: verified curl TLS and a clean Chromium 158 session accepted the certificate, and all loaded page/API resources reported `secure` over HTTPS. This confirms the inspected connection only; the affected browser's exact warning remains necessary to explain its displayed state.
+
+## Console UI redesign — 2026-11-09 (Asia/Tokyo)
+
+Local preview.13 checks passed frontend typecheck, ESLint, Prettier, Vitest unit and contract tests, and production bundle compilation. Overview, Server Detail, Traffic, Management (Tasks, Agents, Audit, Users & access), Account & sign-in, and Setup now share a monochrome Geist palette, four-card Bento summary row, compact strip/card view toggle, multi-metric sorting, severity-based utilization meters, equal-height offline cards, and interactive SVG history charts without native range sliders. Backend APIs, database schemas (Server 104, Agent 101) and wire protocol 1 are unchanged.
+

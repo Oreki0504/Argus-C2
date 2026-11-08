@@ -39,6 +39,34 @@ export function NodeDetail() {
   const stale =
     (node.resources.as_of !== null && now - node.resources.as_of > 90) ||
     (node.traffic.as_of !== null && now - node.traffic.as_of > 90)
+
+  const uptimeText =
+    node.system.uptime_seconds === null
+      ? t('Unavailable')
+      : t('{days}d {hours}h', {
+          days: Math.floor(node.system.uptime_seconds / 86400),
+          hours: Math.floor((node.system.uptime_seconds % 86400) / 3600),
+        })
+
+  const specs = [
+    { label: 'Operating system', value: node.system.os ?? t('Unavailable') },
+    { label: 'Architecture', value: node.system.architecture ?? t('Unavailable') },
+    {
+      label: 'Kernel',
+      value: node.system.kernel ? 'Linux ' + node.system.kernel : t('Unavailable'),
+    },
+    { label: 'Uptime', value: uptimeText },
+    {
+      label: 'Last heartbeat',
+      value: relativeTime(node.last_seen_at, now),
+      title: timestampLabel(node.last_seen_at),
+    },
+    {
+      label: 'Sampled traffic',
+      value: `↑ ${quantity(node.traffic.sampled_outbound_bytes, 'bytes')} · ↓ ${quantity(node.traffic.sampled_inbound_bytes, 'bytes')}`,
+    },
+  ]
+
   return (
     <section className="agent-detail">
       <div className="detail-titlebar">
@@ -62,6 +90,19 @@ export function NodeDetail() {
           <ArrowUpRight size={14} />
         </Link>
       </div>
+
+      {/* Top Spec Matrix inspired by qio.ng/server/:id */}
+      <div className="detail-spec-strip" aria-label={t('Host specifications')}>
+        {specs.map((spec) => (
+          <div className="detail-spec-item" key={spec.label}>
+            <span className="detail-spec-label">{t(spec.label)}</span>
+            <strong className="detail-spec-val" title={spec.title}>
+              {spec.value}
+            </strong>
+          </div>
+        ))}
+      </div>
+
       <section className="panel node-current">
         <div className="node-current-heading">
           <h2>{t('Current utilization')}</h2>
@@ -77,17 +118,20 @@ export function NodeDetail() {
         </div>
         <UtilizationStrip node={node} />
       </section>
+
       {stale && (
         <Notice kind="warning">
           {t('These observations are stale. The charts retain their original sample times.')}
         </Notice>
       )}
+
       <div className="history-heading">
         <h2>{t('Utilization history')}</h2>
         <div className="range-control" role="group" aria-label={t('History time range')}>
           {(['1h', '24h', '7d'] as const).map((value) => (
             <button
               key={value}
+              type="button"
               aria-pressed={range === value}
               onClick={() =>
                 setParams(
@@ -100,11 +144,13 @@ export function NodeDetail() {
                 )
               }
             >
+              <span className="range-dot" aria-hidden="true" />
               {t(value === '1h' ? '1 hour' : value === '24h' ? '24 hours' : '7 days')}
             </button>
           ))}
         </div>
       </div>
+
       <NodeHistory publicId={node.public_id} range={range}>
         <section className="node-facts panel" aria-label={t('System information')}>
           <h3>{t('System information')}</h3>
@@ -113,15 +159,7 @@ export function NodeDetail() {
               ['Operating system', node.system.os],
               ['Architecture', node.system.architecture],
               ['Kernel', node.system.kernel],
-              [
-                'Uptime',
-                node.system.uptime_seconds === null
-                  ? null
-                  : t('{days}d {hours}h', {
-                      days: Math.floor(node.system.uptime_seconds / 86400),
-                      hours: Math.floor((node.system.uptime_seconds % 86400) / 3600),
-                    }),
-              ],
+              ['Uptime', uptimeText],
               ['Last heartbeat', relativeTime(node.last_seen_at, now)],
               ['Inbound capacity', quantity(node.traffic.inbound_capacity_bps, 'rate')],
               ['Outbound capacity', quantity(node.traffic.outbound_capacity_bps, 'rate')],

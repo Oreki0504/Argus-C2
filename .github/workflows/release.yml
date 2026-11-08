@@ -75,6 +75,8 @@ jobs:
           {command}
           ```
 
+          Console UI now uses a monochrome Geist aesthetic with a four-card Bento summary row (including fleet-wide network totals and live throughput rates), compact strip/card view switching, multi-metric sorting, severity-based utilization meters, equal-height offline cards, interactive SVG history charts without native range sliders, and segmented pill navigation across Management, Traffic, Account & sign-in, and Setup.
+
           Fix GitHub OAuth linking/sign-in rejected with `oauth_issuer_mismatch`: validate the authorization-response issuer against GitHub's published `https://github.com/login/oauth`, separately from ARGUS's stable `https://github.com` account namespace. Existing accounts, app credentials and callback URLs are preserved. No OAuth app recreation or database migration is needed; update Server and start a fresh binding attempt.
 
           Regression fixtures now include GitHub's actual issuer. Tests reproduce the old failure, verify linking and sign-in, preserve older identities, and reject duplicate, empty or incorrect issuer values before code exchange. State, callback binding and PKCE checks remain enforced.
@@ -122,3 +124,5 @@ jobs:
             --title "ARGUS $RELEASE_TAG" --notes-file "$RUNNER_TEMP/argus-release-notes.md" \
             install-server.py SHA256SUMS argus-server-linux-amd64.tar.gz argus-server-linux-arm64.tar.gz
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false "${flags[@]}"
+
+

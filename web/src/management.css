@@ -1,8 +1,10 @@
 @layer management {
   .management-page {
-    max-width: 1440px;
-    margin: auto;
+    width: 100%;
+    max-width: 1360px;
+    margin: 0 auto;
   }
+
   .management-heading,
   .management-section-heading {
     display: flex;
@@ -10,298 +12,454 @@
     align-items: center;
     gap: 16px;
   }
+
   .management-heading h1 {
-    font-size: 25px;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
   }
+
   .management-heading p,
   .management-section-heading p {
     color: var(--muted);
-    font-size: 12px;
-    margin-top: 5px;
+    font-size: 13px;
+    margin-top: 4px;
   }
+
   .management-badge {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
     color: var(--accent);
-    font-size: 11px;
+    font-size: 12px;
+    font-weight: 600;
   }
+
+  /* Modern Segmented Pill Tabs for Management Sections */
   .management-tabs {
-    display: flex;
-    gap: 8px;
-    margin: 18px 0 20px;
-    border-bottom: 1px solid var(--border);
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 18px 0 24px;
+    padding: 4px;
+    border-radius: 999px;
+    background: var(--subtle);
+    border: 1px solid var(--border);
   }
+
   .management-tabs a {
-    padding: 10px 18px;
-    min-height: 44px;
-    border-bottom: 2px solid transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 7px 18px;
+    min-height: 34px;
+    border-radius: 999px;
+    border-bottom: 0;
     color: var(--muted);
     font-size: 13px;
-  }
-  .management-tabs a[aria-current='page'] {
-    border-color: var(--accent);
-    color: var(--accent);
     font-weight: 500;
+    transition: all 0.15s ease;
   }
+
   .management-tabs a:hover {
-    background: var(--subtle);
     color: var(--text);
   }
-  .management-section-heading {
-    margin-bottom: 14px;
+
+  .management-tabs a[aria-current='page'] {
+    background: var(--surface);
+    color: var(--text);
+    font-weight: 600;
+    box-shadow: var(--card-shadow);
   }
+
+  .management-section-heading {
+    margin-bottom: 16px;
+  }
+
   .management-section-heading h2 {
     font-size: 18px;
+    font-weight: 700;
   }
+
   .management-actions {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     align-items: center;
+    flex-wrap: wrap;
   }
+
   .management-actions .button {
     font-size: 12px;
-    padding: 8px 14px;
+    min-height: 38px;
+    padding: 8px 16px;
+    border-radius: 999px;
   }
+
+  /* Modern Pill Filter Bar */
   .management-filters {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
-    margin-bottom: 14px;
+    margin-bottom: 16px;
   }
-  .management-filters input {
-    max-width: 320px;
-    min-width: 0;
-    font-size: 12px;
-  }
+
+  .management-filters input,
   .management-filters select {
+    min-height: 38px;
+    height: 38px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--card-shadow);
     font-size: 12px;
-    min-width: 150px;
   }
+
+  .management-filters input {
+    max-width: 280px;
+    min-width: 180px;
+  }
+
+  .management-filters select {
+    padding-right: 30px;
+    min-width: 155px;
+    font-weight: 500;
+  }
+
+  /* Clean Table Panel without cramped vertical clipping */
+  .management-table-panel {
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: var(--card-shadow);
+  }
+
   .management-table-panel .table-scroll {
-    max-height: max(230px, calc(100dvh - 510px));
+    max-height: none;
+    overflow-x: auto;
   }
+
   .management-table-panel thead {
-    position: sticky;
-    top: 0;
-    z-index: 1;
+    background: var(--subtle);
   }
+
   .management-table-panel th,
   .management-table-panel td {
-    padding-top: 8px;
-    padding-bottom: 8px;
+    padding: 13px 20px;
+    vertical-align: middle;
   }
+
   .management-table-panel .text-link {
     min-height: 24px;
+    font-weight: 600;
   }
+
   .management-table-panel th {
-    font-size: 12px;
+    font-size: 13px;
+    font-weight: 600;
   }
+
   .management-table-panel thead th {
     font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    padding-top: 11px;
+    padding-bottom: 11px;
   }
+
   .management-table-panel th:first-child {
     max-width: 350px;
   }
+
   .management-time {
-    font-size: 11px;
-    max-width: 200px;
+    font-size: 12px;
+    max-width: 220px;
+    font-variant-numeric: tabular-nums;
   }
+
+  .audit-action-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 6px;
+    background: var(--subtle);
+    border: 1px solid var(--border);
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .mono-chip {
+    display: block;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+
   .management-pagination {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 10px 20px;
-    font-size: 11px;
+    padding: 12px 20px;
+    font-size: 12px;
     color: var(--muted);
+    background: color-mix(in srgb, var(--subtle) 45%, var(--surface));
     border-top: 1px solid var(--border);
   }
+
+  .management-pagination .button {
+    border-radius: 999px;
+    min-height: 32px;
+    padding: 4px 12px;
+  }
+
   .management-note {
     color: var(--muted);
-    font-size: 11px;
-    margin-top: 10px;
+    font-size: 12px;
+    margin-top: 14px;
   }
+
   .management-success {
     color: var(--accent);
     background: var(--accent-soft);
-    padding: 10px 14px;
-    border-radius: 6px;
-    font-size: 12px;
-    margin-bottom: 14px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+    font-size: 13px;
+    margin-bottom: 16px;
   }
+
   .record-id {
     font-family: ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 11px;
+    color: var(--muted);
     overflow-wrap: anywhere;
   }
+
   .stacked-status {
     display: grid;
     justify-items: start;
-    gap: 5px;
+    gap: 4px;
   }
+
   .stacked-status > span:last-child {
     color: var(--muted);
-    font-size: 10px;
+    font-size: 11px;
   }
+
   .certificate-warning {
     color: var(--warning);
+    font-weight: 600;
   }
+
   .text-action {
-    min-height: 36px;
+    min-height: 32px;
     background: transparent;
     border: 0;
     padding: 4px 0;
     color: var(--accent);
     font-size: 12px;
+    font-weight: 600;
     text-align: left;
   }
+
   .text-action:hover {
     text-decoration: underline;
   }
+
   .text-action:disabled {
     color: var(--muted);
   }
+
+  /* Refined Modal Dialogs */
   .management-dialog {
     width: min(560px, calc(100% - 32px));
     max-height: 90dvh;
     margin: auto;
     padding: 0;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 18px;
     color: var(--text);
     background: var(--surface);
-    box-shadow: 0 20px 80px #0004;
+    box-shadow: 0 24px 64px -12px rgb(15 23 42 / 28%);
   }
+
   .management-dialog::backdrop {
-    background: #09151bb3;
+    background: rgb(15 23 42 / 55%);
+    backdrop-filter: blur(4px);
   }
+
   .dialog-wide {
     width: min(820px, calc(100% - 32px));
   }
+
   .management-dialog-heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 14px 20px;
+    padding: 16px 24px;
     border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
     z-index: 2;
     background: var(--surface);
   }
+
   .management-dialog-heading h2 {
     font-size: 18px;
+    font-weight: 700;
   }
+
   .management-dialog-body {
-    padding: 18px 24px;
+    padding: 20px 24px 24px;
   }
+
   .form-intro {
     color: var(--muted);
     font-size: 13px;
-    line-height: 1.7;
+    line-height: 1.65;
     overflow-wrap: anywhere;
   }
+
   .management-form label {
     margin: 14px 0 6px;
     font-size: 12px;
+    font-weight: 600;
   }
+
   .management-form input,
   .management-form select {
     width: 100%;
+    min-height: 40px;
+    border-radius: 10px;
     font-size: 13px;
   }
+
   .management-form input:disabled,
   .management-form select:disabled {
     opacity: 0.6;
   }
+
   .form-two-columns {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 14px;
   }
+
   .dialog-actions {
     display: flex;
     justify-content: flex-end;
     gap: 10px;
-    margin-top: 20px;
+    margin-top: 22px;
   }
+
   .dialog-actions .button {
     margin-top: 0;
+    min-height: 38px;
+    border-radius: 999px;
+    padding: 8px 18px;
   }
+
   .button.danger {
-    background: #b2373d;
+    background: #dc2626;
     color: #fff;
   }
+
   .button.danger:hover {
-    background: #952c32;
+    background: #b91c1c;
   }
+
   .button.danger:disabled {
     opacity: 0.5;
   }
+
   .form-error {
-    color: #a8313c;
+    color: #dc2626;
     font-size: 12px;
     margin-top: 12px;
   }
+
   .agent-action-list {
     display: grid;
     gap: 12px;
     margin-top: 18px;
   }
+
   .agent-action-list > .text-link {
     justify-content: center;
   }
+
   .enrollment-result > label {
     display: block;
     font-size: 12px;
     margin-bottom: 8px;
   }
+
   .enrollment-modes {
     display: flex;
     gap: 4px;
     padding: 4px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 999px;
     background: var(--subtle);
-    margin: 0 0 16px;
+    margin: 0 0 18px;
   }
+
   .enrollment-modes button {
     flex: 1;
-    padding: 9px 12px;
+    padding: 8px 14px;
     border: 0;
-    border-radius: 5px;
+    border-radius: 999px;
     background: transparent;
     color: var(--muted);
     font-size: 12px;
+    font-weight: 500;
+    transition: all 0.15s;
   }
+
   .enrollment-modes button[aria-pressed='true'] {
     background: var(--surface);
     color: var(--text);
-    box-shadow: 0 1px 3px #0002;
+    font-weight: 600;
+    box-shadow: var(--card-shadow);
   }
+
   .installer-target {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 12px;
-    margin: 12px 0 8px;
+    padding: 14px 16px;
+    margin: 12px 0 10px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 12px;
+    background: var(--subtle);
   }
+
   .installer-target div {
     display: grid;
-    gap: 4px;
+    gap: 3px;
     min-width: 0;
   }
+
   .installer-target strong {
     font-size: 13px;
   }
+
   .installer-target span {
     font-size: 11px;
     color: var(--muted);
     overflow-wrap: anywhere;
   }
+
   .install-command-toolbar {
     display: flex;
     justify-content: space-between;
@@ -310,28 +468,33 @@
     margin: 12px 0 8px;
     font-size: 12px;
   }
+
   .install-command-toolbar select {
     padding: 6px 10px;
   }
+
   .enrollment-result .install-command {
     font-size: 11px;
     line-height: 1.65;
   }
+
   .enrollment-result textarea {
     width: 100%;
     resize: none;
     color: var(--text);
     background: var(--subtle);
     border: 1px solid var(--control-border);
-    border-radius: 6px;
+    border-radius: 10px;
     padding: 12px;
     font:
       12px/1.8 ui-monospace,
       monospace;
   }
+
   .enrollment-result > .notice:first-child {
     margin-top: 0;
   }
+
   .token-actions {
     display: flex;
     align-items: center;
@@ -340,39 +503,47 @@
     font-size: 12px;
     color: var(--muted);
   }
+
   .enrollment-result h3 {
     font-size: 14px;
     margin-top: 20px;
   }
+
   .enrollment-steps {
     padding-left: 20px;
     font-size: 12px;
     line-height: 1.8;
   }
+
   .enrollment-steps li {
     margin: 8px 0;
   }
+
   .enrollment-steps pre {
     background: var(--subtle);
     padding: 12px;
-    border-radius: 6px;
+    border-radius: 10px;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     font-size: 11px;
   }
+
   .user-identity {
     display: grid;
     gap: 4px;
-    padding: 12px 14px;
-    border-radius: 6px;
+    padding: 14px 16px;
+    border-radius: 12px;
     background: var(--subtle);
+    border: 1px solid var(--border);
     overflow-wrap: anywhere;
   }
+
   .user-identity span,
   .user-identity code {
     font-size: 11px;
     color: var(--muted);
   }
+
   .user-access-links {
     display: flex;
     justify-content: space-between;
@@ -380,13 +551,15 @@
     flex-wrap: wrap;
     margin-top: 16px;
     border-top: 1px solid var(--border);
-    padding-top: 10px;
+    padding-top: 12px;
   }
+
   .management-form .checkbox-label {
     display: flex;
     gap: 10px;
     align-items: center;
   }
+
   .checkbox-label input {
     width: 18px;
     height: 18px;
@@ -394,143 +567,183 @@
     flex-shrink: 0;
     accent-color: var(--accent);
   }
+
   .task-detail-columns {
     display: grid;
     grid-template-columns: 1fr 1.25fr;
-    gap: 16px;
+    gap: 18px;
   }
+
   .management-facts,
   .management-result {
-    padding: 18px 20px;
+    padding: 20px 22px;
     min-width: 0;
+    border-radius: 16px;
   }
+
   .management-facts h3,
   .management-result h3 {
-    font-size: 14px;
+    font-size: 15px;
+    font-weight: 700;
   }
+
   .management-facts dl {
-    margin: 12px 0;
+    margin: 14px 0;
   }
+
   .management-facts dl > div {
     display: grid;
-    grid-template-columns: minmax(100px, 0.7fr) 1fr;
+    grid-template-columns: minmax(110px, 0.7fr) 1fr;
     gap: 12px;
     border-bottom: 1px solid var(--border);
-    padding: 8px 0;
-    font-size: 11px;
+    padding: 9px 0;
+    font-size: 12px;
   }
+
   .management-facts dt {
     color: var(--muted);
   }
+
   .management-facts dd {
     margin: 0;
     text-align: right;
+    font-weight: 500;
     overflow-wrap: anywhere;
   }
+
   .result-heading {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 12px;
     min-height: 36px;
-    margin-top: -10px;
+    margin-top: -6px;
   }
+
   .management-result > .muted {
-    font-size: 11px;
+    font-size: 12px;
     margin-top: 6px;
   }
+
   .result-fields {
     margin: 16px 0;
     font-size: 12px;
-    max-height: 300px;
+    max-height: 340px;
     overflow: auto;
+    display: grid;
+    gap: 10px;
   }
+
   .result-fields > div {
-    margin-bottom: 12px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: var(--subtle);
+    border: 1px solid var(--border);
   }
+
   .result-fields dt {
     color: var(--muted);
+    font-size: 11px;
     margin-bottom: 4px;
   }
+
   .result-fields dd {
     margin: 0;
+    font-weight: 600;
     overflow-wrap: anywhere;
   }
+
   .result-fields pre {
     white-space: pre-wrap;
     font-size: 11px;
   }
+
   .json-result {
-    max-height: 320px;
+    max-height: 340px;
     overflow: auto;
-    padding: 14px;
+    padding: 16px;
     background: var(--subtle);
-    border-radius: 6px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
     font-size: 11px;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
+
   .empty-result {
     color: var(--muted);
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.8;
     padding: 28px 0;
   }
+
   .audit-task-link {
-    display: block;
-    font-size: 10px;
+    display: inline-block;
+    font-size: 11px;
+    font-family: ui-monospace, monospace;
     max-width: 240px;
     overflow-wrap: anywhere;
   }
+
   .status-succeeded,
   .status-active {
     background: #edf7f2;
-    color: #24654e;
-    border-color: #c3e2d2;
+    color: #15803d;
+    border-color: #bbf7d0;
   }
+
   .status-running,
   .status-accepted {
-    background: #eef4fc;
-    color: #355b92;
-    border-color: #cbdcf4;
+    background: #eff6ff;
+    color: #1d4ed8;
+    border-color: #bfdbfe;
   }
+
   .status-failed,
   .status-disabled {
-    background: #fff1f2;
-    color: #9d3945;
-    border-color: #ecced2;
+    background: #fef2f2;
+    color: #b91c1c;
+    border-color: #fecaca;
   }
+
   .status-unknown,
   .status-pending {
     background: var(--warning-bg);
     color: var(--warning);
   }
+
   :root[data-theme='dark'] .status-succeeded,
   :root[data-theme='dark'] .status-active {
-    background: #20382e;
-    color: #8dd8b7;
+    background: #064e3b66;
+    color: #34d399;
     border-color: var(--border);
   }
+
   :root[data-theme='dark'] .status-running,
   :root[data-theme='dark'] .status-accepted {
-    background: #233548;
-    color: #9fc5f2;
+    background: #1e3a8a66;
+    color: #60a5fa;
     border-color: var(--border);
   }
+
   :root[data-theme='dark'] .status-failed,
   :root[data-theme='dark'] .status-disabled {
-    background: #402b30;
-    color: #f5acb6;
+    background: #7f1d1d66;
+    color: #f87171;
     border-color: var(--border);
   }
+
   :root[data-theme='dark'] .form-error {
-    color: #f5acb6;
+    color: #f87171;
   }
+
   .detail-dispatch {
-    font-size: 11px;
-    padding: 6px 12px;
+    font-size: 12px;
+    padding: 6px 14px;
     min-height: 36px;
+    border-radius: 999px;
   }
+
   @media (max-width: 800px) {
     .management-heading,
     .management-section-heading {
@@ -556,16 +769,13 @@
     .task-detail-columns {
       grid-template-columns: 1fr;
     }
-    .management-table-panel .table-scroll {
-      max-height: none;
-    }
     .management-tabs {
-      gap: 0;
+      width: 100%;
     }
     .management-tabs a {
       flex: 1;
       text-align: center;
-      padding: 10px 6px;
+      padding: 8px 6px;
       font-size: 12px;
     }
     .management-badge {

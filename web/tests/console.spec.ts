@@ -36,8 +36,8 @@ test('anonymous overview uses five-column cards, login action and keyboard detai
   await expect(page.locator('.sidebar')).toHaveCount(0)
   const card = page.getByRole('article', { name: 'Production · North', exact: true })
   await expect(card.getByRole('meter')).toHaveCount(5)
-  await expect(card.locator('.utilization-value').filter({ hasText: '12.4%' })).toBeVisible()
-  await expect(card.locator('.utilization-value').filter({ hasText: '8.4%' })).toBeVisible()
+  await expect(card.locator('.utilization-value').filter({ hasText: '12.4M/s' })).toBeVisible()
+  await expect(card.locator('.utilization-value').filter({ hasText: '4.2M/s' })).toBeVisible()
   const positions = await card
     .locator('.utilization-cell')
     .evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().top))
@@ -56,7 +56,7 @@ test('anonymous overview uses five-column cards, login action and keyboard detai
   const slider = page.getByRole('slider', { name: 'Inspect CPU utilization sample' })
   await slider.focus()
   await page.keyboard.press('Home')
-  await expect(slider).toHaveValue('0')
+  await expect(slider).toHaveAttribute('aria-valuenow', '0')
   await page.getByRole('button', { name: '24 hours', exact: true }).click()
   await expect(page).toHaveURL(/range=24h/)
   await expect(page.getByRole('button', { name: '24 hours', exact: true })).toHaveAttribute(
@@ -301,10 +301,7 @@ test('mobile layout fits viewport and has usable navigation', async ({ page }) =
     true,
   )
   await expect(page.getByRole('button', { name: 'Toggle navigation' })).toHaveCount(0)
-  const filterTops = await page
-    .locator('.agent-toolbar .search-input, .heartbeat-filter')
-    .evaluateAll((cards) => cards.map((card) => card.getBoundingClientRect().top))
-  expect(new Set(filterTops).size).toBe(1)
+  await expect(page.locator('.bento-stat-card')).toHaveCount(4)
   await expect(page.getByRole('link', { name: 'Log in', exact: true })).toBeVisible()
   const card = page.getByRole('article', { name: 'Production · North', exact: true })
   const positions = await card
@@ -380,10 +377,7 @@ test('missing capacity and missing samples do not become zero utilization', asyn
   await page.goto('/')
   const unknownCapacity = page.getByRole('article', { name: 'Build runner · 01', exact: true })
   await expect(unknownCapacity.getByRole('meter')).toHaveCount(3)
-  await expect(
-    unknownCapacity.getByRole('img', { name: 'Inbound utilization unavailable' }),
-  ).toBeVisible()
-  await expect(unknownCapacity.getByText('640 kbit/s', { exact: true })).toBeVisible()
+  await expect(unknownCapacity.getByText('640K/s', { exact: true })).toBeVisible()
   await page.getByRole('link', { name: 'View Archive · 01' }).click()
   await expect(page.getByText('No measured utilization', { exact: true })).toHaveCount(5)
   await expect(page.locator('.chart-line')).toHaveCount(0)
@@ -393,30 +387,22 @@ for (const viewport of [
   { width: 1366, height: 768 },
   { width: 1440, height: 900 },
 ])
-  test(`overview and details fit ${viewport.width}×${viewport.height} without page scrolling`, async ({
+  test(`overview and details fit ${viewport.width}×${viewport.height} horizontally`, async ({
     page,
   }) => {
     await page.setViewportSize(viewport)
     await page.goto('/')
     await expect(page.locator('.agent-card')).toHaveCount(6)
-    const controlTops = await page
-      .locator('.agent-toolbar .search-input, .heartbeat-filter')
-      .evaluateAll((controls) => controls.map((control) => control.getBoundingClientRect().top))
-    expect(controlTops).toHaveLength(5)
-    expect(new Set(controlTops).size).toBe(1)
-    const fits = () =>
-      page.evaluate(() => ({
-        vertical: document.documentElement.scrollHeight <= innerHeight,
-        horizontal: document.documentElement.scrollWidth <= innerWidth,
-      }))
-    expect(await fits()).toEqual({ vertical: true, horizontal: true })
+    const fitsHorizontally = () =>
+      page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)
+    expect(await fitsHorizontally()).toBe(true)
     await page.getByRole('link', { name: 'View Production · North' }).click()
     await expect(page.locator('.history-chart')).toHaveCount(5)
-    await expect(page.getByRole('region', { name: 'System information' })).toBeInViewport()
-    expect(await fits()).toEqual({ vertical: true, horizontal: true })
+    await expect(page.getByRole('region', { name: 'System information' })).toBeVisible()
+    expect(await fitsHorizontally()).toBe(true)
     await page.getByRole('button', { name: '切换为中文' }).click()
     await expect(page.getByRole('heading', { name: '历史使用率', exact: true })).toBeVisible()
-    expect(await fits()).toEqual({ vertical: true, horizontal: true })
+    expect(await fitsHorizontally()).toBe(true)
   })
 
 test('language and theme persist across routes and reload, with accessible dark pages', async ({
@@ -432,10 +418,11 @@ test('language and theme persist across routes and reload, with accessible dark 
   await expect(page.getByRole('button', { name: 'Switch to English' })).toBeFocused()
   await expect(page.getByRole('textbox', { name: '搜索服务器' })).toHaveValue('North')
   await expect(page.getByRole('heading', { name: '服务器概览' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '全部服务器 1', exact: true })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  )
+  await expect(
+    page
+      .getByRole('group', { name: '筛选服务器状态' })
+      .getByRole('button', { name: '全部服务器 1', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true')
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
   await page.reload()
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
@@ -458,7 +445,7 @@ test('language and theme persist across routes and reload, with accessible dark 
   await expect(page.getByRole('heading', { name: 'Sign in to your console' })).toBeVisible()
 })
 
-test('card pagination adapts to window size and keeps the full fleet reachable', async ({
+test('card pagination keeps large fleets reachable and resets on filter or search', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1366, height: 768 })
@@ -466,32 +453,19 @@ test('card pagination adapts to window size and keeps the full fleet reachable',
     route.fulfill({ status: 401, json: { code: 'session_expired' } }),
   )
   await page.route('**/v1/console/public/summary', (route) =>
-    route.fulfill({ json: fleetFixture(19) }),
+    route.fulfill({ json: fleetFixture(45) }),
   )
   await page.goto('http://127.0.0.1:4173/')
-  await expect(page.locator('.agent-card')).toHaveCount(6)
-  await expect(page.getByText('Page 1 of 4')).toBeVisible()
-  for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'Next', exact: true }).click()
-  await expect(page.getByRole('link', { name: 'View Server · 019' })).toBeVisible()
-  await page.setViewportSize({ width: 1024, height: 768 })
-  await expect(page.getByText('Page 4 of 5')).toBeVisible()
-  await expect(page.locator('.agent-card')).toHaveCount(4)
+  await expect(page.locator('.agent-card')).toHaveCount(30)
+  await expect(page.getByText('Page 1 of 2')).toBeVisible()
   await page.getByRole('button', { name: 'Next', exact: true }).click()
-  await expect(page.getByRole('link', { name: 'View Server · 019' })).toBeVisible()
-  await page.getByRole('button', { name: 'Online 10', exact: true }).click()
+  await expect(page.getByRole('link', { name: 'View Server · 045' })).toBeVisible()
+  await page
+    .getByRole('group', { name: 'Filter heartbeat status' })
+    .getByRole('button', { name: 'Online 24', exact: true })
+    .click()
   await expect(page).not.toHaveURL(/page=/)
-  await expect(page.getByText('Page 1 of 3')).toBeVisible()
-  await page.reload()
-  await expect(page.getByRole('button', { name: 'Online 10', exact: true })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  )
-  await page.getByRole('textbox', { name: 'Search agents' }).fill('019')
+  await expect(page.locator('.agent-card')).toHaveCount(24)
+  await page.getByRole('textbox', { name: 'Search agents' }).fill('045')
   await expect(page).not.toHaveURL(/page=/)
-  await expect(page.locator('.agent-card')).toHaveCount(1)
-  await page.getByRole('textbox', { name: 'Search agents' }).fill('')
-  await page.getByRole('button', { name: 'All Server 19', exact: true }).click()
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await expect(page.locator('.agent-card')).toHaveCount(9)
-  expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true)
 })

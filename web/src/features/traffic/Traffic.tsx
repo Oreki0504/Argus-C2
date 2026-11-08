@@ -1,6 +1,6 @@
 import { usePreferences } from '../../preferences/context'
 import { useFormat } from '../../lib/useFormat'
-import { ArrowDownLeft, ArrowUpRight } from 'lucide-react'
+import { Activity, ArrowDownLeft, ArrowUpRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Direction, EmptyState, ErrorState, Loading, Notice, PageHeader } from '../../components/ui'
 import { useViewer } from '../auth/context'
@@ -30,26 +30,37 @@ export function TrafficPage() {
   const totalOut = outgoing.length
     ? outgoing.reduce((sum, node) => sum + node.traffic.sampled_outbound_bytes!, 0)
     : null
+  const totalInRate = data.nodes.reduce((sum, node) => sum + (node.traffic.inbound_bps ?? 0), 0)
+  const totalOutRate = data.nodes.reduce((sum, node) => sum + (node.traffic.outbound_bps ?? 0), 0)
   return (
-    <>
+    <section className="traffic-page">
       <PageHeader
         eyebrow="OBSERVE THE FLOW"
         title="Network traffic"
         description="Aggregate inbound and outbound observations. Every gap accounted for."
       />
       <div className="window-label">
-        {t('Sample window')}{' '}
-        <strong>
-          {timestampLabel(data.window_start)} — {timestampLabel(data.window_end)}
-        </strong>
-        <span>{t('Sampling interval {seconds}s', { seconds: data.sample_interval_seconds })}</span>
+        <span>
+          {t('Sample window')}{' '}
+          <strong>
+            {timestampLabel(data.window_start)} — {timestampLabel(data.window_end)}
+          </strong>
+        </span>
+        <span className="window-interval-badge">
+          {t('Sampling interval {seconds}s', { seconds: data.sample_interval_seconds })}
+        </span>
       </div>
       <div className="traffic-totals">
         <section className="panel traffic-total">
-          <ArrowDownLeft size={24} />
-          <div>
+          <span className="traffic-icon-box inbound-box">
+            <ArrowDownLeft size={20} />
+          </span>
+          <div className="traffic-total-body">
             <Direction inbound />
-            <strong>{quantity(totalIn, 'bytes')}</strong>
+            <div className="traffic-val-row">
+              <strong>{quantity(totalIn, 'bytes')}</strong>
+              <span className="traffic-rate-pill">↓ {quantity(totalInRate, 'rate')}</span>
+            </div>
             <p>
               {t('Sampled inbound · {count}/{total} servers reporting', {
                 count: incoming.length,
@@ -59,10 +70,15 @@ export function TrafficPage() {
           </div>
         </section>
         <section className="panel traffic-total">
-          <ArrowUpRight size={24} />
-          <div>
+          <span className="traffic-icon-box outbound-box">
+            <ArrowUpRight size={20} />
+          </span>
+          <div className="traffic-total-body">
             <Direction inbound={false} />
-            <strong>{quantity(totalOut, 'bytes')}</strong>
+            <div className="traffic-val-row">
+              <strong>{quantity(totalOut, 'bytes')}</strong>
+              <span className="traffic-rate-pill">↑ {quantity(totalOutRate, 'rate')}</span>
+            </div>
             <p>
               {t('Sampled outbound · {count}/{total} servers reporting', {
                 count: outgoing.length,
@@ -77,10 +93,13 @@ export function TrafficPage() {
           'Totals include measured intervals only. Missing samples and counter resets are unmeasured; these totals are not provider billing figures.',
         )}
       </Notice>
-      <section className="panel">
+      <section className="panel traffic-table-panel">
         <div className="panel-heading">
           <div>
-            <h2>{t('Traffic by server')}</h2>
+            <h2>
+              <Activity size={17} />
+              {t('Traffic by server')}
+            </h2>
             <p>{t('Rates use bits per second. Sampled totals use bytes.')}</p>
           </div>
         </div>
@@ -153,6 +172,6 @@ export function TrafficPage() {
       <p className="traffic-note">
         {t('Open an agent’s details to explore its sampled resource and bandwidth utilization.')}
       </p>
-    </>
+    </section>
   )
 }

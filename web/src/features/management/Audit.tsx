@@ -61,38 +61,45 @@ export function AuditPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {query.data.items.map((event) => (
-                    <tr key={event.id}>
-                      <th scope="row" className="management-time">
-                        {timestampLabel(event.timestamp)}
-                        <small>#{event.id}</small>
-                      </th>
-                      <td>{event.actor}</td>
-                      <td>
-                        {t(event.action)}
-                        <small>{event.action}</small>
-                      </td>
-                      <td>
-                        {event.node_id && <span>{event.node_id}</span>}
-                        {event.task_id &&
-                          (canManage(identity, 'tasks:read') ? (
-                            <Link
-                              className="text-link audit-task-link"
-                              to={`/manage/tasks/${event.task_id}`}
-                            >
-                              {event.task_id}
-                            </Link>
-                          ) : (
-                            <small>{event.task_id}</small>
-                          ))}
-                        {event.subject_id && <span>{event.subject_id}</span>}
-                        {!event.node_id && !event.task_id && !event.subject_id && '—'}
-                      </td>
-                      <td>
-                        <Status>{event.status}</Status>
-                      </td>
-                    </tr>
-                  ))}
+                  {query.data.items.map((event) => {
+                    const localizedAction = t(event.action)
+                    return (
+                      <tr key={event.id}>
+                        <th scope="row" className="management-time">
+                          {timestampLabel(event.timestamp)}
+                          <small>#{event.id}</small>
+                        </th>
+                        <td>
+                          <strong>{event.actor}</strong>
+                        </td>
+                        <td>
+                          <span className="audit-action-pill">{localizedAction}</span>
+                          {localizedAction !== event.action && <small>{event.action}</small>}
+                        </td>
+                        <td>
+                          {event.node_id && <span className="mono-chip">{event.node_id}</span>}
+                          {event.task_id &&
+                            (canManage(identity, 'tasks:read') ? (
+                              <Link
+                                className="text-link audit-task-link"
+                                to={`/manage/tasks/${event.task_id}`}
+                              >
+                                {event.task_id}
+                              </Link>
+                            ) : (
+                              <small>{event.task_id}</small>
+                            ))}
+                          {event.subject_id && (
+                            <span className="mono-chip">{event.subject_id}</span>
+                          )}
+                          {!event.node_id && !event.task_id && !event.subject_id && '—'}
+                        </td>
+                        <td>
+                          <Status>{event.status}</Status>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

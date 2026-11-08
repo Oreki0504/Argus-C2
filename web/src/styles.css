@@ -1,4 +1,4 @@
-@layer reset, tokens, base, components, responsive;
+@layer reset, tokens, base, components, responsive, management, refinement;
 
 @layer reset {
   *,
@@ -48,9 +48,9 @@
     --text: #172b38;
     --muted: #637480;
     --border: #e2e8ed;
-    --accent: #087d86;
-    --accent-hover: #06656d;
-    --accent-soft: #eaf6f4;
+    --accent: #0f172a;
+    --accent-hover: #1e293b;
+    --accent-soft: #f1f5f9;
     --sidebar: #101e27;
     --sidebar-muted: #9eafb9;
     --focus: #0f62fe;
