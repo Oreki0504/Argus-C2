@@ -2,6 +2,7 @@ import type { z } from 'zod'
 import { nodeHistorySchema, type HistoryRange } from './contracts'
 import {
   authStatusSchema,
+  accountSchema,
   emptySchema,
   identitySchema,
   oidcStartSchema,
@@ -10,6 +11,10 @@ import {
 } from './contracts'
 
 const messages: Record<string, string> = {
+  token_invalid:
+    'The login token is invalid or has been replaced. Read the current token on your server.',
+  identity_conflict:
+    'This identity is already linked to another account. It cannot be transferred here.',
   installer_unavailable:
     'Automatic installation is not configured. Use manual enrollment or contact the server operator.',
   invalid_request: 'Check the form values and try again.',
@@ -114,6 +119,17 @@ export async function request<T>(
 }
 
 export const api = {
+  tokenLogin: (token: string, csrf: string) =>
+    request('/v1/console/auth/token', identitySchema, { body: { token }, csrf }),
+  account: (signal?: AbortSignal) => request('/v1/console/account', accountSchema, { signal }),
+  accountProviders: (signal?: AbortSignal) =>
+    request('/v1/console/account/providers', setupSchema, { signal }),
+  accountProvider: (
+    body: { providers: import('./contracts').ProviderCredentials[] },
+    csrf: string,
+  ) => request('/v1/console/account/providers', setupSchema, { body, csrf }),
+  bindAccount: (provider: import('./contracts').ProviderKind, csrf: string) =>
+    request('/v1/console/account/bind', oidcStartSchema, { body: { provider }, csrf }),
   me: (signal?: AbortSignal) => request('/v1/me', identitySchema, { signal }),
   authStatus: (signal?: AbortSignal) =>
     request('/v1/console/auth/status', authStatusSchema, { signal }),

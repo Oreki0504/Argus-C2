@@ -165,64 +165,64 @@ test('large fleet pages and URL filters reset pagination', async ({ page }) => {
   )
 })
 
-test('first-run preview proves ownership, configures provider, binds and closes setup', async ({
-  page,
-}) => {
+test('token opens management first, then optional OAuth binds to the account', async ({ page }) => {
   await page.goto('/setup?scenario=setup')
-  await expect(page.getByRole('heading', { name: 'Verify console ownership' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Enter your administrator token' })).toBeVisible()
+  await expect(page.getByLabel('GitHub Client ID', { exact: true })).toHaveCount(0)
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
-  await page.getByLabel('Bootstrap secret', { exact: true }).fill('a'.repeat(64))
-  await page.getByRole('button', { name: 'Verify & continue' }).click()
-  await expect(page.getByRole('heading', { name: 'Choose your sign-in methods' })).toBeVisible()
+  await page.getByLabel('Administrator token', { exact: true }).fill('a'.repeat(64))
+  await page.getByRole('button', { name: 'Enter console', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Management', exact: true })).toBeVisible()
+  await page.getByRole('link', { name: /Account & sign-in/ }).click()
+  await expect(
+    page.getByText('No OAuth providers configured. You can keep using your administrator token.'),
+  ).toBeVisible()
+  await page.getByText('Configure sign-in providers (optional)', { exact: true }).click()
   await page.getByRole('checkbox', { name: 'Enable Google', exact: true }).check()
   for (const provider of ['GitHub', 'Google']) {
     await page.getByLabel(`${provider} Client ID`, { exact: true }).fill('argus-preview')
     await page.getByLabel(`${provider} Client Secret`, { exact: true }).fill('preview-secret')
   }
+  await page.getByRole('button', { name: 'Save sign-in methods', exact: true }).click()
+  for (const provider of ['GitHub', 'Google'])
+    await page.getByRole('button', { name: `Bind with ${provider}`, exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Linked', exact: true })).toHaveCount(2)
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
-  await page.getByRole('button', { name: 'Bind with GitHub' }).click()
-  await expect(page.getByRole('heading', { name: 'Fleet overview' })).toBeVisible()
-  await page.getByRole('button', { name: 'Sign out' }).click()
-  await expect(page.getByRole('heading', { name: 'Fleet overview' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Log in', exact: true })).toBeVisible()
-  await expect(page.getByText('Alex Morgan', { exact: true })).toHaveCount(0)
-  await expect(page.locator('.sidebar')).toHaveCount(0)
   const storage = await page.evaluate(() =>
     JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }),
   )
   expect(storage).not.toContain('preview-secret')
   expect(storage).not.toContain('a'.repeat(64))
-  await expect(page.getByRole('link', { name: 'Set up your console' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Sign out' }).click()
   await page.getByRole('link', { name: 'Log in', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Continue with GitHub' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible()
-  await page.getByRole('button', { name: 'Continue with Google' }).click()
+  await page.getByRole('button', { name: 'Continue with Google', exact: true }).click()
   await expect(page.getByRole('link', { name: 'Management', exact: true })).toBeVisible()
 })
 
-test('first-run setup can enable Google alone and keeps the mobile layout usable', async ({
-  page,
-}) => {
+test('token login is reusable without OAuth and mobile account settings fit', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/setup?scenario=setup')
-  await page.getByLabel('Bootstrap secret', { exact: true }).fill('b'.repeat(64))
-  await page.getByRole('button', { name: 'Verify & continue' }).click()
+  await page.getByLabel('Administrator token', { exact: true }).fill('b'.repeat(64))
+  await page.getByRole('button', { name: 'Enter console', exact: true }).click()
+  await page.getByRole('button', { name: 'Sign out' }).click()
+  await page.getByRole('link', { name: 'Log in', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Continue with Google', exact: true })).toHaveCount(
+    0,
+  )
+  await page.getByLabel('Administrator token', { exact: true }).fill('b'.repeat(64))
+  await page.getByRole('button', { name: 'Enter console', exact: true }).click()
+  await page.getByRole('link', { name: /Account & sign-in/ }).click()
+  await page.getByText('Configure sign-in providers (optional)', { exact: true }).click()
   await page.getByRole('checkbox', { name: 'Enable GitHub', exact: true }).uncheck()
   await page.getByRole('checkbox', { name: 'Enable Google', exact: true }).check()
-  await expect(page.getByLabel('Callback URL', { exact: true })).toHaveValue(
-    'https://console.example.test/v1/console/auth/callback/google',
-  )
-  await expect(page.getByLabel('Issuer URL')).toHaveCount(0)
   await page.getByLabel('Google Client ID', { exact: true }).fill('google-preview')
   await page.getByLabel('Google Client Secret', { exact: true }).fill('only-this-app-secret')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
-  await page.getByRole('button', { name: 'Bind with Google' }).click()
-  await page.getByRole('button', { name: 'Sign out' }).click()
-  await page.getByRole('link', { name: 'Log in', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Continue with GitHub' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Save sign-in methods', exact: true }).click()
+  await page.getByRole('button', { name: 'Bind with Google', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Linked', exact: true })).toHaveCount(1)
 })
 
 for (const [scenario, message] of [

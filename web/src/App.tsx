@@ -3,6 +3,7 @@ import { Link, Route, Routes, useLocation } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { EmptyState } from './components/ui'
 import { Login } from './features/auth/Login'
+import { AccountPage } from './features/auth/Account'
 import { SessionGate } from './features/auth/SessionGate'
 import { FleetPage } from './features/fleet/Fleet'
 import { AgentOverview } from './features/fleet/AgentOverview'
@@ -55,6 +56,7 @@ export function App() {
             <Route path="/fleet" element={<FleetRoute />} />
             <Route path="/fleet/:publicId" element={<NodeDetail />} />
             <Route path="/traffic" element={<TrafficPage />} />
+            <Route path="/account" element={<AccountPage />} />
             <Route path="/manage" element={<ManagementLayout />}>
               <Route path="tasks" element={<TasksPage />} />
               <Route path="tasks/:taskId" element={<TaskDetailPage />} />

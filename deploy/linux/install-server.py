@@ -589,7 +589,7 @@ def install(args, stage, bundle, certdir, certbot):
     run([server, 'run', '-config', init / 'server.json', '-check', *console_flags(args, certdir, bundle)])
     setup = stage / 'setup'
     setup.mkdir(mode=0o700)
-    run([server, 'console-bootstrap', 'issue', '-config', init / 'server.json', '-out', setup / 'bootstrap.token'])
+    run([server, 'console-token', 'issue', '-config', init / 'server.json', '-out', setup / 'console.token'])
     # Only after archive, certificates and complete Go configuration validate do
     # we create persistent Server state. Partial failures retain that identity.
     fleet, console, state = path('/etc/argus-c2/server'), path('/etc/argus-c2/console'), path('/var/lib/argus-c2-server')
@@ -615,7 +615,7 @@ def install(args, stage, bundle, certdir, certbot):
     write_new(state / 'argus.db', (init / 'state/argus.db').read_bytes())
     os.chown(state / 'argus.db', account.pw_uid, account.pw_gid)
     os.chown(state, account.pw_uid, account.pw_gid)
-    write_new(path('/etc/argus-c2/setup/bootstrap.token'), (setup / 'bootstrap.token').read_bytes())
+    write_new(path('/etc/argus-c2/setup/console.token'), (setup / 'console.token').read_bytes())
     write_config(path('/etc/argus-c2/server.json'), args, state, True)
     write_config(path('/etc/argus-c2/server-local.json'), args, state)
     write_new(path('/etc/argus-c2/console-install.json'), json.dumps({'host': args.host, 'tls': args.tls}) + '\n')
@@ -639,26 +639,23 @@ def install(args, stage, bundle, certdir, certbot):
     if certbot:
         run(['systemctl', 'enable', '--now', 'argus-console-renew.timer'])
         run(['systemctl', 'is-active', '--quiet', 'argus-console-renew.timer'])
-    print(text('ARGUS Server installed', 'ARGUS Server 安装完成') + f'\nConsole: {origin(args.host, args.console_port)}/setup\nFleet: {origin(args.host, args.fleet_port)}')
+    print(text('ARGUS Server installed', 'ARGUS Server 安装完成') + f'\nConsole: {origin(args.host, args.console_port)}/login\nFleet: {origin(args.host, args.fleet_port)}')
     print_setup_instructions()
     if args.tls == 'local-ca':
         print(text('Install this Console CA into browser and Agent-host trust stores: ', '请在浏览器和 Agent 主机的信任库中安装此 Console CA：') + str(console / 'ca.pem'))
         print(text('Local certificates are not publicly trusted and are not ACME-renewed; replace the leaf before 90 days.', '本地证书不受公开信任，也不通过 ACME 续期；请在 90 天到期前更换叶证书。'))
 
 
-def print_setup_instructions():
-    secret_file = path('/etc/argus-c2/setup/bootstrap.token')
-    print(text('Console first administrator setup:', 'Console 首次管理员认证：'))
-    print(text('1. Enter the bootstrap code at the /setup URL above (valid for 15 minutes).', '1. 打开上方 /setup 地址，输入一次性初始化码（有效期 15 分钟）。'))
+def print_setup_instructions(secret_file=None):
+    secret_file = secret_file or path('/etc/argus-c2/setup/console.token')
+    print(text('Console administrator login:', 'Console 管理员登录：'))
+    print(text('1. Open /login and enter the random administrator token to enter the console.', '1. 打开 /login，输入随机管理员 Token 即可进入后台。'))
     print(text('   Read locally: ', '   在服务器本机读取：') + f'sudo cat {secret_file}')
-    # The operator asked to see the first-login code. Show it only during an
-    # interactive terminal installation; redirected output must not carry secrets.
     if sys.stdin.isatty() and sys.stdout.isatty():
         secret = read_bounded(secret_file, 256).decode('ascii').strip()
-        print(text('   Bootstrap code: ', '   一次性初始化码：') + secret)
-    print(text('2. Choose Google/GitHub, enter your OAuth application credentials, then sign in to bind the first Admin.', '2. 选择 Google/GitHub，填写 OAuth 应用凭据后直接登录，绑定首位管理员。'))
-    print(text('   The bootstrap code is for /setup only, not a login password or CLI admin.token.', '   初始化码只用于 /setup；它不是日常登录密码，也不是 CLI admin.token。'))
-    print(text('   Register your Google/GitHub OAuth application once; Auth0/OIDC is optional. Expired codes can be reissued locally.', '   Google/GitHub OAuth 应用只需登记一次；Auth0/OIDC 为可选方式。初始化码过期可以在本机重新签发。'))
+        print(text('   Administrator token: ', '   管理员 Token：') + secret)
+    print(text('2. Optional: open Account & sign-in in the header to configure and bind Google/GitHub.', '2. 可选：点击顶栏账号名称，在“账号与登录”中配置并绑定 Google/GitHub。'))
+    print(text('   Keep this reusable token private. Logout and restart do not invalidate it. This is separate from the CLI admin.token.', '   请妥善保管此可重复登录的 Token。退出或重启不会使其失效；它与 CLI admin.token 不同。'))
     print(text('Agent installers are already published.', 'Agent 安装程序已就绪。'))
 
 
@@ -672,12 +669,12 @@ def report_failure(error, updating=False):
         print(text('Update did not complete. Preserve the existing state and inspect the private update records under /var/lib/argus-c2-updates.', '更新未完成。请保留现有状态，并检查 /var/lib/argus-c2-updates 中的私有更新记录。'), file=sys.stderr)
         return
     if not path('/etc/argus-c2/server').exists() and not path('/var/lib/argus-c2-server').exists():
-        print(text('Server initialization has not completed; no Console bootstrap code was created. Fix the cause and retry; Certbot/ACME state is preserved.', 'Server 尚未初始化，本次没有生成 Console 初始化码。修复原因后可重试；已有 Certbot 环境及 ACME 状态会保留。'), file=sys.stderr)
+        print(text('Server initialization has not completed; no Console login token was created. Fix the cause and retry; Certbot/ACME state is preserved.', 'Server 尚未初始化，本次没有生成 Console 登录 Token。修复原因后可重试；已有 Certbot 环境及 ACME 状态会保留。'), file=sys.stderr)
     else:
         print(text('Existing Server data was preserved. Inspect: ', '已保留 Server 数据。检查服务：') + 'sudo journalctl -u argus-c2-server -n 50 --no-pager', file=sys.stderr)
-        secret_file = path('/etc/argus-c2/setup/bootstrap.token')
+        secret_file = path('/etc/argus-c2/setup/console.token')
         if secret_file.is_file():
-            print(text('Bootstrap file (may have expired): ', '初始化码文件（可能已过期）：') + str(secret_file), file=sys.stderr)
+            print(text('Console token file: ', 'Console Token 文件：') + str(secret_file), file=sys.stderr)
     logfile = path(ACME_DIRECTORIES[2]) / 'letsencrypt.log'
     print(text('ACME log file (if created): ', '证书申请日志文件（若已创建）：') + str(logfile), file=sys.stderr)
     print('sudo tail -n 80 ' + shlex.quote(str(logfile)), file=sys.stderr)
@@ -858,6 +855,11 @@ def validate_update(plan, bundle, snapshot):
             os.chown(current, account.pw_uid, account.pw_gid)
             for name in files:
                 os.chown(Path(current) / name, account.pw_uid, account.pw_gid)
+        migrate = component == 'server' and expected[1] in (102, 103)
+        if migrate:
+            run(['runuser', '-u', account.pw_name, '--', validation / 'candidate', 'console-migrate',
+                 '-config', validation / 'config.json', '-backup', validation / 'before-migration.db'])
+            expected = (expected_id, 104)
         run(['runuser', '-u', account.pw_name, '--', validation / 'candidate', 'storage',
              '-config', validation / 'config.json'])
         if database_stamp(validation / 'state', component) != expected:
@@ -878,10 +880,20 @@ def validate_update(plan, bundle, snapshot):
             if len(flags) != 12 or set(flags[::2]) != allowed:
                 raise InstallError('Custom Console options require the manual update procedure.')
             values = dict(zip(flags[::2], flags[1::2]))
+            plan['console_origin'] = values['-console-origin']
             values['-console-key'] = str(path('/etc/argus-c2/console/browser-key.pem'))
             values['-console-installer-dir'] = str(bundle)
             run([validation / 'candidate', 'run', '-check', '-config', validation / 'local.json',
                  *[item for pair in values.items() for item in pair]])
+            if migrate:
+                upgraded = snapshot.parent / 'upgraded.db'
+                with contextlib.closing(sqlite3.connect((validation / 'state/argus.db').as_uri() + '?mode=ro', uri=True)) as source:
+                    with contextlib.closing(sqlite3.connect(upgraded)) as dest:
+                        source.backup(dest)
+                os.chmod(upgraded, 0o600)
+                with upgraded.open('rb') as saved:
+                    os.fsync(saved.fileno())
+                plan['migration_db'] = upgraded
         else:
             run(['runuser', '-u', account.pw_name, '--', validation / 'candidate', 'run', '-check',
                  '-config', validation / 'config.json'])
@@ -932,7 +944,7 @@ def update_component(args, plan, bundle):
                 'was_active': plan['active'], 'files': records, 'phase': 'prepared'}
     write_new(backup / 'update.json', json.dumps(metadata, indent=2) + '\n')
     print(text(f'Updating {component}; private backup: {backup}', f'正在更新 {component}；私有更新备份：{backup}'))
-    stopped, replaced = False, False
+    stopped, replaced, migrated, candidate_started = False, False, False, False
     try:
         stopped = True
         run(['systemctl', 'stop', unit])
@@ -963,12 +975,40 @@ def update_component(args, plan, bundle):
             for name, dest, mode in plan['files']:
                 data = Path(__file__).read_bytes() if name == 'install-server.py' else (bundle / name).read_bytes()
                 replace_file(dest, data, mode)
+            if plan.get('migration_db'):
+                # Use the migrated, validated copy only while stopped and locked.
+                # A durable original snapshot already exists in the backup.
+                upgraded_bytes = read_bounded(plan['migration_db'], 1 << 30)
+                metadata['phase'] = 'migrating'
+                metadata['target_schema'] = 104
+                replace_file(backup / 'update.json', (json.dumps(metadata, indent=2) + '\n').encode(), 0o600)
+                with contextlib.closing(sqlite3.connect(plan['state'] / 'argus.db', timeout=5)) as db:
+                    if db.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()[0] != 0:
+                        raise InstallError('Database checkpoint is busy; schema was not replaced.')
+                for suffix in ('-wal', '-shm'):
+                    sidecar = plan['state'] / ('argus.db' + suffix)
+                    if os.path.lexists(sidecar):
+                        if sidecar.is_symlink() or not sidecar.is_file():
+                            raise InstallError('Unexpected database sidecar; preserve state for manual recovery.')
+                        sidecar.unlink()
+                migrated = True
+                replace_file(plan['state'] / 'argus.db', upgraded_bytes, 0o600)
+                os.chown(plan['state'] / 'argus.db', account.pw_uid, account.pw_gid)
         if plan['active']:
+            candidate_started = True
             run(['systemctl', 'start', unit])
             verify_updated_service(plan)
         metadata['phase'] = 'complete'
         replace_file(backup / 'update.json', (json.dumps(metadata, indent=2) + '\n').encode(), 0o600)
     except (Exception, KeyboardInterrupt) as error:
+        if migrated:
+            # Do not rewind a schema-changing update after traffic may have
+            # been accepted, or start an old binary against schema 104.
+            run(['systemctl', 'stop', unit], check=False)
+            metadata['phase'] = 'migration_needs_recovery'
+            metadata['candidate_started'] = candidate_started
+            replace_file(backup / 'update.json', (json.dumps(metadata, indent=2) + '\n').encode(), 0o600)
+            raise InstallError(f'Schema replacement or service verification failed. New programs and current database were preserved, service stopped. Inspect journalctl -u {unit}; backup: {backup}. Do not restart an older binary or rewind state after traffic was accepted.') from error
         try:
             if replaced:
                 run(['systemctl', 'stop', unit])
@@ -982,9 +1022,26 @@ def update_component(args, plan, bundle):
         except (Exception, KeyboardInterrupt) as recovery_error:
             raise InstallError(f'Update failed and automatic recovery could not complete. Preserve state and inspect {backup}/update.json and journalctl -u {unit}.') from recovery_error
         raise InstallError(f'Update failed; previous programs and service state restored. Database and identity were not reset. Backup: {backup}') from error
-    print(text(f'{component} update complete. Configuration, identity and database preserved; backup: {backup}', f'{component} 更新完成。配置、身份和数据库均已保留；备份：{backup}'))
+    print(text(f'{component} update complete. Configuration and identity preserved; backup: {backup}', f'{component} 更新完成。配置和身份已保留；备份：{backup}'))
+    if component == 'server':
+        resume_token_setup(plan)
     if not plan['active']:
         print(text('The service was stopped before the update and remains stopped.', '服务更新前已停止，现仍保持停止。'))
+
+
+def resume_token_setup(plan):
+    with contextlib.closing(sqlite3.connect((plan['state'] / 'argus.db').as_uri() + '?mode=ro', uri=True)) as db:
+        initialized, recovery = db.execute('SELECT initialized,recovery FROM console_state WHERE id=1').fetchone()
+    if initialized or recovery:
+        return
+    secret_file = path('/etc/argus-c2/setup/console.token')
+    if os.path.lexists(secret_file):
+        secret_file = secret_file.with_name(f'console-{time.time_ns()}.token')
+    run([path('/usr/local/libexec/argus-c2/server'), 'console-token', 'issue',
+         '-config', path('/etc/argus-c2/server-local.json'), '-out', secret_file])
+    if plan.get('console_origin'):
+        print('Console: ' + plan['console_origin'] + '/login')
+    print_setup_instructions(secret_file)
 
 
 def deploy_certificate(require_hook=True):

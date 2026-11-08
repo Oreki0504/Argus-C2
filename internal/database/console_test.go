@@ -72,7 +72,7 @@ func TestConsoleMigrationBackupRollbackAndLock(t *testing.T) {
 			}
 			want := 102
 			if mode == "success" {
-				want = 103
+				want = SchemaVersion
 			}
 			if version != want {
 				t.Fatalf("version %d != %d", version, want)

@@ -41,6 +41,8 @@ type flow struct {
 	Generation                                                 int64
 	Setup, Started                                             bool
 	Created, Expires                                           time.Time
+	BindingSession, BindingUser                                string
+	BindingVersion                                             int64
 }
 type rate struct {
 	Count int
@@ -93,6 +95,11 @@ func New(store *database.Store, c Config) (*Server, error) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/console/auth/status", s.authStatus)
+	mux.HandleFunc("POST /v1/console/auth/token", s.tokenLogin)
+	mux.HandleFunc("GET /v1/console/account", s.authorized(false, s.account))
+	mux.HandleFunc("GET /v1/console/account/providers", s.authorized(true, s.accountProviders))
+	mux.HandleFunc("POST /v1/console/account/providers", s.authorized(true, s.configureAccountProviders))
+	mux.HandleFunc("POST /v1/console/account/bind", s.authorized(false, s.bindAccount))
 	mux.HandleFunc("GET /v1/console/setup", s.setupStatus)
 	mux.HandleFunc("POST /v1/console/setup/prove", s.prove)
 	mux.HandleFunc("POST /v1/console/setup/provider", s.configureProvider)

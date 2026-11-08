@@ -14,7 +14,7 @@ Auth0 是可选接入方式。若只需要 Google / GitHub 登录，可以直接
 | 匹配域名的独立浏览器 TLS 证书／私钥 | Console HTTPS；不能复用 Fleet CA 签发的证书 |
 | Auth0 Domain，例如 `YOUR-TENANT.auth0.com` | OIDC Issuer 为 `https://YOUR-TENANT.auth0.com/` |
 | Auth0 Client ID | 标识 ARGUS Web Application |
-| Auth0 Client Secret | 只在真实 Console 初始化页面填写，保存为服务器私有文件 |
+| Auth0 Client Secret | 只在真实 Console 的账号设置中填写，保存为服务器私有文件 |
 
 局域网客户端应能把 Console 域名解析到服务器地址。浏览器和 Argus 服务端都需要能访问 Auth0；用户浏览器还需要访问所选的 GitHub／Google 登录页。
 
@@ -37,19 +37,19 @@ ARGUS 请求 `openid profile`。GitHub／Google 身份通过 Auth0 验证后，A
 
 参考：[Auth0 Application Settings](https://auth0.com/docs/get-started/applications/application-settings) · [Auth0 Social Identity Providers](https://auth0.com/docs/authenticate/identity-providers/social-identity-providers)。
 
-## 启动 ARGUS 并绑定首位管理员
+## 登录 ARGUS 后按需绑定
 
-如果使用[一键 Server 安装器](server-installation.zh-CN.md)，服务已启动。打开安装完成时打印的 `https://HOST:9443/setup`，输入终端显示的一次性初始化码（15 分钟有效），也可在服务器本机读取：
+安装完成后，打开 `https://HOST:9443/login`，用安装器生成的管理员 Token 直接进入后台。首次使用不需要 Auth0。在服务器上读取 Token：
 
 ```sh
-sudo cat /etc/argus-c2/setup/bootstrap.token
+sudo cat /etc/argus-c2/setup/console.token
 ```
 
-初始化码只用于证明服务器管理权限；接下来仍需配置 Auth0 并绑定 GitHub/Google 身份。它不是 CLI 的 `admin.token`，也不是 TLS 私钥。若安装在证书准备阶段中止，初始化码尚未生成，应先完成安装。过期后的重新签发命令见[Server 安装说明](server-installation.zh-CN.md#安装完成后的配置)。
+点击顶栏账号名称 → “账号与登录” → “配置第三方登录（可选）”，展开“其他登录服务（Auth0 / OIDC）”，填写凭据并保存。然后点击上方 SSO 绑定按钮，在 Auth0 授权后返回；它绑定到当前本地账号，不创建新的管理员。详见 [Token 与绑定说明](console-login.zh-CN.md)。
 
 以下是从源码手动启动的步骤：
 
-按 [Console 配置](console.md) 构建 UI 与 Go Binary；已有 Schema 102 先停服并执行有备份的显式升级。
+按 [Console 配置](console.md) 构建 UI 与 Go Binary；已有 Schema 102/103 先停服并执行有备份的显式升级。
 
 ```sh
 bin/server run -config /private/argus/server.json \
@@ -59,14 +59,14 @@ bin/server run -config /private/argus/server.json \
   -console-key /private/console/browser-key.pem
 ```
 
-另一个终端在服务器本机签发初始化证明：
+另一个终端在服务器本机签发登录 Token：
 
 ```sh
-bin/server console-bootstrap issue -config /private/argus/server.json \
-  -out /private/argus/console-bootstrap.txt
+bin/server console-token issue -config /private/argus/server.json \
+  -out /private/argus/console.token
 ```
 
-打开真实 Console 的 `/setup`，输入初始化码，展开“其他登录服务（Auth0 / OIDC）”并启用自定义 SSO。配置 Auth0 Issuer（保留精确的尾部斜线）、Client ID 和 Client Secret，点击“使用 SSO 绑定管理员”，在 Auth0 选择 GitHub 或 Google；成功回调后成为首位 Admin。
+打开真实 Console 的 `/login`，输入 Token 后即可进入后台。随后按上述“账号与登录”流程配置并绑定 Auth0。
 
 之后的新身份会进入“管理 → 用户与权限”的待批准列表。Admin 明确批准后才获得 User 或 Admin 权限。匿名监控入口仍按当前产品要求可访问，但不授予任何管理权限。
 

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 
 const infoFile = process.env.ARGUS_CONSOLE_BROWSER_INFO
-test('real HTTPS Console completes OIDC setup and performs authenticated management', async ({
+test('real HTTPS Console logs in with token, binds OIDC and performs authenticated management', async ({
   browser,
 }) => {
   test.skip(!infoFile, 'Requires the isolated Go Console browser harness')
@@ -16,15 +16,20 @@ test('real HTTPS Console completes OIDC setup and performs authenticated managem
   page.on('pageerror', (error) => errors.push(error.message))
   try {
     await page.goto(`${info.origin}/setup`)
-    await page.getByLabel('Bootstrap secret').fill(info.bootstrap)
-    await page.getByRole('button', { name: 'Verify & continue' }).click()
+    await page.getByLabel('Administrator token').fill(info.bootstrap)
+    await page.getByRole('button', { name: 'Enter console', exact: true }).click()
+    await expect(page.getByRole('link', { name: 'Management', exact: true })).toBeVisible()
+    await page.getByRole('link', { name: /Account & sign-in/ }).click()
+    await page.getByText('Configure sign-in providers (optional)', { exact: true }).click()
     await page.getByRole('checkbox', { name: 'Enable GitHub', exact: true }).uncheck()
     await page.getByText('Other identity provider (Auth0 / OIDC)', { exact: true }).click()
     await page.getByRole('checkbox', { name: 'Enable custom SSO', exact: true }).check()
     await page.getByLabel('Issuer URL').fill(info.issuer)
     await page.getByLabel('SSO Client ID', { exact: true }).fill(info.client_id)
     await page.getByLabel('SSO Client Secret', { exact: true }).fill(info.client_secret)
-    await page.getByRole('button', { name: 'Bind with SSO' }).click()
+    await page.getByRole('button', { name: 'Save sign-in methods', exact: true }).click()
+    await page.getByRole('button', { name: /^Bind with / }).click()
+    await expect(page.getByText('Account linked successfully.')).toBeVisible()
     await expect(page.getByRole('link', { name: 'Management', exact: true })).toBeVisible()
     await expect(page.getByText('Design preview', { exact: true })).toHaveCount(0)
     await page.getByRole('link', { name: 'Management', exact: true }).click()
@@ -65,7 +70,7 @@ test('real HTTPS Console completes OIDC setup and performs authenticated managem
     await page.getByRole('textbox', { name: 'Action', exact: true }).fill('enrollment.create')
     await expect(page.getByRole('table')).toContainText('enrollment.create')
     await tabs.getByRole('link', { name: 'Users & access' }).click()
-    await expect(page.getByRole('table')).toContainText('Account owner')
+    await expect(page.getByRole('table')).toContainText('Administrator')
     await page.getByRole('button', { name: 'Sign out' }).click()
     await expect(page.getByRole('link', { name: 'Log in', exact: true })).toBeVisible()
     await page.getByRole('link', { name: 'Log in', exact: true }).click()
@@ -73,7 +78,10 @@ test('real HTTPS Console completes OIDC setup and performs authenticated managem
     await expect(page.getByRole('link', { name: 'Management', exact: true })).toBeVisible()
     expect(errors).toEqual([])
   } finally {
-    await context.close()
-    writeFileSync(`${infoFile}.done`, 'done')
+    try {
+      await context.close()
+    } finally {
+      writeFileSync(`${infoFile}.done`, 'done')
+    }
   }
 })

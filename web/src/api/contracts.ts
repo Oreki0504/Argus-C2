@@ -37,6 +37,7 @@ export type ProviderCredentials = {
 }
 const callbackURI = z.url().refine((value) => new URL(value).protocol === 'https:')
 export const authStatusSchema = z.strictObject({
+  token_enabled: z.boolean().default(false),
   state: z.enum(['UNINITIALIZED', 'SETUP_PENDING', 'ACTIVE']),
   provider_name: z.string().nullable(),
   providers: z.array(providerSummarySchema).max(3).default([]),
@@ -54,6 +55,14 @@ export const setupSchema = z.strictObject({
   client_id: z.string(),
 })
 export type Setup = z.infer<typeof setupSchema>
+
+export const accountSchema = z.strictObject({
+  csrf_token: z.string().min(1),
+  providers: z.array(providerSummarySchema.extend({ issuer: z.string() })),
+  identities: z.array(
+    z.strictObject({ issuer: z.string(), subject: z.string(), created_at: timestamp }),
+  ),
+})
 
 export const publicNodeSchema = z.strictObject({
   public_id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),

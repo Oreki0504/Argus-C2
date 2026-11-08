@@ -1,27 +1,49 @@
-# Google / GitHub 直连登录
+# Token 登录与可选 OAuth 绑定
 
-Console 首次设置可直接选择 **GitHub、Google，或同时启用两者**，不需要 Auth0。已有 Auth0 / 标准 OIDC 配置仍可使用，在页面的“其他登录服务”中设置。
+安装 ARGUS 后，使用安装器生成的随机 **管理员 Token** 即可进入后台。首次登录不需要 Google/GitHub、不需要 Client ID 或 Client Secret，也没有 15 分钟内完成 OAuth 配置的要求。
 
-自托管服务需要服务器所有者在所选平台登记一次 OAuth 应用。平台不会为任意新部署自动提供 Client ID / Secret；ARGUS 不内置共享应用密钥，也不把登录交给项目维护者的中转服务器。普通用户以后只需点击登录按钮。
+## 首次进入后台
 
-## 首次绑定
-
-1. 打开安装器打印的 `https://HOST:9443/setup`，输入安装终端显示的初始化码。
-2. 选择 GitHub 和／或 Google。页面给出各自的**回调地址**，可以直接复制，并提供创建应用的入口。
-3. 将应用的 Client ID、Client Secret 填入对应表单，点击“使用 GitHub / Google 绑定管理员”。页面保存配置并直接跳转到平台登录；验证成功后回到 ARGUS，完成首位 Admin 绑定。
-
-初始化码用于证明你控制这台服务器。若过期，在服务器上签发一个新码，无需重装：
+1. 打开安装器打印的 `https://HOST:9443/login`（`/setup` 也提供 Token 登录）。
+2. 输入安装终端显示的管理员 Token，即可进入管理页。重定向安装输出时不会打印 Token，需在服务器本机读取：
 
 ```sh
-sudo /usr/local/libexec/argus-c2/server console-bootstrap issue -config /etc/argus-c2/server-local.json -out /etc/argus-c2/setup/bootstrap-new.token
-sudo cat /etc/argus-c2/setup/bootstrap-new.token
+sudo cat /etc/argus-c2/setup/console.token
 ```
 
-输出文件必须尚不存在。再次签发时更换文件名。签发会使旧码和先前的初始化会话失效。
+Token 是 32 字节安全随机数，以 64 位十六进制文本表示。文件仅允许 root 读取，数据库只保存摘要。它可以重复登录，退出登录或重启不会使 Token 过期；浏览器会话仍有 30 分钟空闲 / 8 小时绝对有效期。Token 不进入 URL、浏览器存储或审计日志。请把它作为管理员密码保管，它与 Fleet CLI 的 `server/admin.token` 不通用。
 
-## GitHub 应用
+## 已安装的旧版本
 
-打开 [GitHub → Settings → Developer settings → OAuth Apps → New OAuth App](https://github.com/settings/applications/new)。创建 **OAuth App**，填写：
+新版 `install-server.py --update server` 会停服、备份状态和配置，在副本上完成 schema 102/103 → 104 迁移和检查后应用更新。已存在的用户、角色、OAuth 身份、Agent 和任务保留；已经激活的部署不会被自动改绑管理员。
+
+尚未完成管理员初始化的部署，更新结束会签发新的登录 Token 并打印读取路径。若之前存在 Token 文件，新码写到新的文件中，以终端输出为准。旧初始化会话和旧码会失效。读取新 Token 后在 `/login` 登录即可。
+
+手动签发（仅限尚未激活的 Console）：
+
+```sh
+sudo /usr/local/libexec/argus-c2/server console-token issue -config /etc/argus-c2/server-local.json -out /etc/argus-c2/setup/console-new.token
+sudo cat /etc/argus-c2/setup/console-new.token
+```
+
+输出文件必须尚不存在。旧版本未使用且尚在有效期内的初始化码也可直接换取管理员登录，并成为该管理员的可重复登录 Token；过期或已消耗的旧码必须重新签发。
+
+## 稍后绑定 Google / GitHub
+
+点击顶栏账号图标或名称，进入 **账号与登录**：
+
+1. 尚未配置平台时，可以继续使用 Token。管理员需要 OAuth 时，展开 **配置第三方登录（可选）**。
+2. 配置 Google、GitHub 或两者，保存登录方式。Auth0 / 自定义 OIDC 也可选。
+3. 在上方平台卡片点击 **绑定 Google / GitHub 账号**，跳转平台授权后返回，显示“已绑定”。
+4. 退出后可使用已绑定平台登录。Token 和 OAuth 对应同一本地管理员账号，共用权限，不会另建一位管理员。
+
+配置与绑定要求最近 10 分钟内登录；超过时用 Token 或已绑定平台重新登录即可。已归属其他本地账号的第三方身份不能直接转移；系统不根据邮箱或昵称合并账号。未绑定的第三方身份直接登录时仍进入待批准状态。绑定 OAuth 不会自动禁用管理员 Token。
+
+自托管的 OAuth 平台配置仍需管理员登记一次应用，但它是后台可选功能，不再阻塞安装和首次使用。
+
+### GitHub 应用
+
+打开 [GitHub → OAuth Apps → New OAuth App](https://github.com/settings/applications/new)，创建 OAuth App：
 
 | 项目 | 示例 |
 | --- | --- |
@@ -29,26 +51,27 @@ sudo cat /etc/argus-c2/setup/bootstrap-new.token
 | Homepage URL | `https://argus.example.com:9443` |
 | Authorization callback URL | `https://argus.example.com:9443/v1/console/auth/callback/github` |
 
-使用页面实际提供的地址，保留协议、端口和路径。生成 Client Secret，和 Client ID 一起填写到 ARGUS。此流程请求 `read:user` 读取账号资料，不需要仓库权限。
+以页面提供的回调地址为准，保留协议、端口和路径。Client ID / Secret 只填入当前 Console 的后台。请求范围为 `read:user`，不需要仓库权限。
 
-## Google 应用
+### Google 应用
 
-打开 [Google Auth Platform → Clients](https://console.cloud.google.com/auth/clients)，选择自己的项目，完成应用名称和受众设置，然后创建类型为 **Web application** 的 OAuth Client。
-
-将 ARGUS 页面提供的 Google 回调地址加入 **Authorized redirect URIs**：
+打开 [Google Auth Platform → Clients](https://console.cloud.google.com/auth/clients)，完成应用受众配置，创建 **Web application**。将页面提供的回调 URL 加入 **Authorized redirect URIs**：
 
 ```text
 https://argus.example.com:9443/v1/console/auth/callback/google
 ```
 
-填写 Client ID 和 Client Secret。使用 Google 接受的 HTTPS 域名；生产应用的回调不应使用裸公网 IP。若应用处于 Testing 状态，按 Google 的受众设置添加需要登录的测试用户。ARGUS 使用 Authorization Code + PKCE 和 `openid profile`。
+使用 Google 接受的 HTTPS 域名；Testing 状态按平台要求加入测试用户。ARGUS 使用 Authorization Code + PKCE 和 `openid profile`。
 
-## 登录和权限
+## 本地恢复
 
-配置两种方式后，登录页同时显示 Google 和 GitHub 按钮。只配置一种时只显示对应按钮。首次设置中已保存的同平台、同 Issuer、同 Client ID 凭据可以留空 Secret 继续使用；修改 Client ID 后需提供匹配的新 Secret。
+如果已经激活，但 Token 遗失或需要撤销原管理员访问，在服务器本机执行显式恢复：
 
-两个平台的账号分别识别：Google 使用已验证 ID Token 的 `sub`；GitHub 使用服务器通过 `https://api.github.com/user` 获取的不可变数字 `id`。不会按邮箱或昵称自动合并，也不会将 GitHub 用户名变更视为新账号。用一种方式绑定首位 Admin 后，另一身份首次登录仍会进入待批准状态，可由现有 Admin 在“管理 → 用户权限”中批准并分配角色。
+```sh
+sudo /usr/local/libexec/argus-c2/server console-token recover -confirm-recovery -config /etc/argus-c2/server-local.json -out /etc/argus-c2/setup/console-recovery.token
+sudo cat /etc/argus-c2/setup/console-recovery.token
+```
 
-应用凭据只保存在服务器私有文件中，不回传 Secret，也不写入浏览器存储。登录令牌不传给前端。初始化成功后设置页关闭；已有部署更换认证配置需按 [本地恢复流程](console.md#local-recovery)进行，该流程会撤销会话并重新确定管理员，不能当作无影响的普通设置编辑。
+恢复会立即使旧 Token、浏览器会话和未完成的绑定失效；用新 Token 登录后，旧 Admin 账号被禁用，创建新的本地管理员。它不是无影响的普通 Token 轮换。其他用户和 Fleet 身份保留，新管理员可重新绑定尚未归属其他账号的第三方身份。
 
-旧的单 OIDC 凭据文件无需迁移即可读取。新多平台配置不需要数据库升级，但旧版本程序无法读取这种新配置格式；不要在采用新配置后直接降级程序。
+schema 104 不能直接运行旧二进制。迁移失败时原始备份仍保留；若已替换数据库但启动验收失败，安装器保留新程序和当前状态并停止服务，打印备份路径供恢复，不会自动回退数据库而丢掉可能已接收的任务。见 [安装和更新说明](server-installation.zh-CN.md)。

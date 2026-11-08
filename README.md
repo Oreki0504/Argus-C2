@@ -80,7 +80,7 @@ Server history cleanup is manual: `server prune` previews a bounded batch with a
 
 `argus health` checks the server's database connection. Node `active` means authorized, and `last_seen_at` records the latest heartbeat. Task `SUCCEEDED` means a valid report, whose availability and coverage must be inspected separately. None is a host-health verdict. See [Status dimensions](docs/architecture.md#status-dimensions).
 
-Server requires Schema 103; agent remains on Schema 101, with separate component IDs. Schema 102 has an explicit, backed-up `server console-migrate` path; startup never converts state automatically. Other unsupported versions are rejected. Follow the [upgrade and recovery procedure](docs/operations.md#database-compatibility-and-upgrades). An offline root with an online intermediate remains a [PKI plan](docs/security.md#offline-root-and-online-intermediate-plan).
+Server requires Schema 104; agent remains on Schema 101, with separate component IDs. Schema 102/103 has an explicit, backed-up `server console-migrate` path; startup never converts state automatically. Other unsupported versions are rejected. Follow the [upgrade and recovery procedure](docs/operations.md#database-compatibility-and-upgrades). An offline root with an online intermediate remains a [PKI plan](docs/security.md#offline-root-and-online-intermediate-plan).
 
 ## Validation status
 

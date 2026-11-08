@@ -42,7 +42,7 @@ func (s *Store) now() time.Time {
 	return time.Now()
 }
 
-const SchemaVersion = 103
+const SchemaVersion = 104
 const applicationID = 0x41524753 // ARGS
 
 const schema = `
@@ -81,7 +81,7 @@ func Open(dir string, create bool) (*Store, error) {
 		if e != nil {
 			return fail(e)
 		}
-		if _, e = tx.Exec(schema + consoleSchema); e != nil {
+		if _, e = tx.Exec(schema + consoleSchema + consoleAccountSchema); e != nil {
 			tx.Rollback()
 			return fail(e)
 		}

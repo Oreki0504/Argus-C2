@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [Console setup](console.md) · [Console API](console-api.md) · [Frontend development](../web/README.md)
 
-ARGUS now includes the React console, an optional independent HTTPS Console listener, one-time owner bootstrap, Google/GitHub and custom OIDC login, server-side sessions, Web Admin/User authorization, and real management APIs. Console defaults to disabled. Existing CLI Bearer and Agent mTLS routes remain on the Fleet listener and keep their original authorization.
+ARGUS now includes the React console, an optional independent HTTPS Console listener, reusable local administrator token login, Google/GitHub and custom OIDC login, server-side sessions, Web Admin/User authorization, and real management APIs. Console defaults to disabled. Existing CLI Bearer and Agent mTLS routes remain on the Fleet listener and keep their original authorization.
 
 ## Navigation and design
 
@@ -14,7 +14,7 @@ Anonymous visitors enter the public User overview. Neither User nor Admin has a 
 
 | Page | Implemented behavior |
 | --- | --- |
-| Setup / sign-in | Ownership proof, selectable Google/GitHub or custom OIDC, direct owner binding, normal login and local logout |
+| Setup / sign-in | Token login opens management immediately; optional Google/GitHub or custom OIDC configuration and binding in account settings |
 | Overview / details | Safe public names, heartbeat, allowlisted system/resource observations and sampled history |
 | Tasks | Six fixed diagnostic collectors, typed parameter forms, TTL/timeouts, list filters, results and related audit |
 | Agents | One-command Linux installation (curl/wget), manual registration token and CLI fallback, access/certificate state, exact-ID disable confirmation |
@@ -31,11 +31,11 @@ CPU, memory and disk come from successful `system.metrics` results; system infor
 
 ## Authentication and storage
 
-Authorization Code + S256 PKCE supports Google, GitHub OAuth Apps and custom OIDC providers such as Auth0. One or both social providers can be configured in setup. GitHub verifies its stable numeric user ID through its fixed authenticated user API; Google/custom OIDC verify signed ID tokens. Each provider has a distinct callback path. Signatures/JWKS, issuer, audience, authorized party, expiry, issued-at, nonce, state and exact callback are verified. Local `(issuer, subject)` accounts determine roles; new identities are pending until approved.
+Authorization Code + S256 PKCE supports Google, GitHub OAuth Apps and custom OIDC providers such as Auth0. One or both social providers can be configured after token login in account settings. GitHub verifies its stable numeric user ID through its fixed authenticated user API; Google/custom OIDC verify signed ID tokens. Each provider has a distinct callback path. Signatures/JWKS, issuer, audience, authorized party, expiry, issued-at, nonce, state and exact callback are verified. Provider `(issuer, subject)` identities map to local accounts; explicit binding attaches them to the current account, while unlinked sign-ins are pending until approved.
 
 Sessions contain opaque random credentials whose digests are held in bounded server memory. Cookies use Secure/HttpOnly/Strict/Path=/ and no Domain; the short-lived OIDC correlation cookie uses Lax. Idle expiry is 30 minutes, absolute expiry eight hours; restart clears sessions. Writes require exact Origin plus session-bound CSRF. Account version/generation checks also run inside mutation transactions, so revoked authorization cannot race a write. Role changes revoke sessions; changes involving Admin access require a login within ten minutes.
 
-Schema **103** adds persistent owner/bootstrap state, Web accounts, public IDs and audit subjects. The explicit 102 → 103 migration creates and verifies a durable backup before transactional DDL. Startup never migrates implicitly. Provider credentials are separate private files and must be backed up independently. See [setup and recovery](console.md).
+Schema **104** preserves owner/bootstrap state, Web accounts, public IDs and audit subjects, and adds token digests and multiple provider identities per account. The explicit 102/103 → 104 migration creates and verifies a durable backup before transactional DDL. Startup never migrates implicitly. Provider credentials are separate private files and must be backed up independently. See [setup and recovery](console.md).
 
 ## Development and validation
 

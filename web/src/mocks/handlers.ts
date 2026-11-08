@@ -21,6 +21,26 @@ export function makeHandlers(scenario: Scenario) {
           { kind: 'github', name: 'GitHub' },
           { kind: 'google', name: 'Google' },
         ]
+  let linked: { issuer: string; subject: string; created_at: number }[] = []
+  if (scenario === 'setup') providers = []
+  const providerState = (): Setup =>
+    setup ?? {
+      step: 'provider',
+      csrf_token: csrf,
+      issuer: '',
+      client_id: '',
+      callback_uri: 'https://console.example.test/v1/console/auth/callback',
+      callback_uris: {
+        oidc: 'https://console.example.test/v1/console/auth/callback',
+        google: 'https://console.example.test/v1/console/auth/callback/google',
+        github: 'https://console.example.test/v1/console/auth/callback/github',
+      },
+      providers: providers.map((p) => ({
+        ...p,
+        issuer: p.kind === 'github' ? 'https://github.com' : 'https://accounts.google.com',
+        client_id: 'preview-client',
+      })),
+    }
   const role = scenario === 'user' ? 'User' : 'Admin'
   const problem = (code: string, status: number) =>
     HttpResponse.json({ code }, { status, headers: { 'Cache-Control': 'no-store' } })
@@ -47,6 +67,60 @@ export function makeHandlers(scenario: Scenario) {
       : problem('not_found', 404)
   }
   return [
+    http.post('/v1/console/auth/token', async ({ request }) => {
+      if (!validCSRF(request)) return problem('csrf_invalid', 403)
+      const body = (await request.json()) as { token: string }
+      if (!/^[a-f0-9]{64}$/i.test(body.token)) return problem('token_invalid', 401)
+      active = true
+      session = true
+      return reply(identity('Admin'))
+    }),
+    http.get('/v1/console/account', () =>
+      !session
+        ? problem('session_expired', 401)
+        : reply({
+            csrf_token: csrf,
+            identities: linked,
+            providers: providerState().providers.map(({ kind, name, issuer }) => ({
+              kind,
+              name,
+              issuer,
+            })),
+          }),
+    ),
+    http.get('/v1/console/account/providers', () =>
+      !session || role !== 'Admin' ? problem('forbidden', 403) : reply(providerState()),
+    ),
+    http.post('/v1/console/account/providers', async ({ request }) => {
+      if (!session || role !== 'Admin') return problem('forbidden', 403)
+      if (!validCSRF(request)) return problem('csrf_invalid', 403)
+      const body = (await request.json()) as { providers: ProviderCredentials[] }
+      setup = {
+        ...providerState(),
+        providers: body.providers.map((p) => ({
+          kind: p.kind,
+          client_id: p.client_id,
+          name: p.kind === 'github' ? 'GitHub' : p.kind === 'google' ? 'Google' : 'SSO',
+          issuer:
+            p.kind === 'github'
+              ? 'https://github.com'
+              : p.kind === 'google'
+                ? 'https://accounts.google.com'
+                : p.issuer,
+        })),
+      }
+      providers = setup.providers.map(({ kind, name }) => ({ kind, name }))
+      return reply(setup)
+    }),
+    http.post('/v1/console/account/bind', async ({ request }) => {
+      if (!session) return problem('session_expired', 401)
+      if (!validCSRF(request)) return problem('csrf_invalid', 403)
+      const body = (await request.json()) as { provider: string }
+      const p = providerState().providers.find((p) => p.kind === body.provider)
+      if (!p) return problem('oidc_unavailable', 400)
+      linked = [...linked, { issuer: p.issuer, subject: 'preview-account', created_at: 1700000000 }]
+      return reply({})
+    }),
     http.get('/v1/console/auth/status', () =>
       reply({
         state: active ? 'ACTIVE' : 'SETUP_PENDING',
@@ -55,6 +129,7 @@ export function makeHandlers(scenario: Scenario) {
           ? providers
           : (setup?.providers ?? []).map(({ kind, name }) => ({ kind, name })),
         csrf_token: csrf,
+        token_enabled: true,
       }),
     ),
     http.get('/v1/me', async () => {

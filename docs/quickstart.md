@@ -4,6 +4,8 @@
 
 This guide runs the server, agent, and CLI on one Linux machine. It stores everything in a private temporary directory and installs no system services. Run the blocks in order in the same Bash terminal, as a **non-root user**. You need Go 1.27.3, Python 3, and an available local TCP port 8443.
 
+For the Web Console, use the [Server installer](server-installation.zh-CN.md). Its random administrator token opens management immediately; OAuth linking is optional afterward. The CLI demo below uses a separate Fleet admin.token, which cannot authenticate in the browser.
+
 ## 1. Build
 
 From the repository root:

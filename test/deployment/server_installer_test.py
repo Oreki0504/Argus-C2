@@ -287,6 +287,32 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(plan['files'][0][1].read_bytes(), b'old-program')
         self.assertIn(['systemctl', 'start', plan['unit']], calls)
 
+    def test_schema_update_failure_preserves_new_state_and_stops_service(self):
+        args, plan, bundle, system, calls = self.update_fixture()
+        source = plan['state'] / 'probe.db'
+        source.rename(plan['state'] / 'argus.db')
+        plan['component'] = 'server'
+        def validated(_plan, _bundle, snapshot):
+            upgraded = snapshot.parent / 'upgraded.db'
+            upgraded.write_bytes((snapshot / 'argus.db').read_bytes())
+            with contextlib.closing(sqlite3.connect(upgraded)) as db:
+                db.execute('PRAGMA user_version=104')
+                db.execute('INSERT INTO preserved VALUES("migrated record")')
+                db.commit()
+            plan['migration_db'] = upgraded
+        with patch.object(installer, 'run', side_effect=system), patch.object(installer, 'validate_update', side_effect=validated), \
+                patch.object(installer, 'verify_updated_service', side_effect=installer.InstallError('not ready')), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(installer.InstallError, 'current database were preserved'):
+            installer.update_component(args, plan, bundle)
+        self.assertEqual(plan['files'][0][1].read_bytes(), b'new-program')
+        with contextlib.closing(sqlite3.connect(plan['state'] / 'argus.db')) as db:
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 104)
+            self.assertEqual(db.execute('SELECT count(*) FROM preserved').fetchone()[0], 2)
+        backup = next(installer.path('/var/lib/argus-c2-updates').iterdir())
+        self.assertEqual(json.loads((backup / 'update.json').read_text())['phase'], 'migration_needs_recovery')
+        self.assertEqual(calls[-1], ['systemctl', 'stop', plan['unit']])
+        self.assertEqual(calls.count(['systemctl', 'start', plan['unit']]), 1)
+
     def test_stopped_component_stays_stopped_after_update(self):
         args, plan, bundle, system, calls = self.update_fixture(active=False)
         with patch.object(installer, 'run', side_effect=system), patch.object(installer, 'validate_update'), \
@@ -626,7 +652,7 @@ class InstallerTests(unittest.TestCase):
             self.assertNotIn('private-', str(caught.exception))
 
     def test_setup_code_is_visible_only_in_an_interactive_terminal(self):
-        secret_file = installer.path('/etc/argus-c2/setup/bootstrap.token')
+        secret_file = installer.path('/etc/argus-c2/setup/console.token')
         installer.mkdir(secret_file.parent, 0o700)
         installer.write_new(secret_file, 'test-only-bootstrap-secret\n')
         for input_tty, output_tty in [(True, True), (True, False), (False, True), (False, False)]:
@@ -637,17 +663,17 @@ class InstallerTests(unittest.TestCase):
                 installer.print_setup_instructions()
             self.assertEqual('test-only-bootstrap-secret' in output.getvalue(), input_tty and output_tty)
             self.assertIn(f'sudo cat {secret_file}', output.getvalue())
-            self.assertIn('/setup', output.getvalue())
-            self.assertIn('Auth0/OIDC', output.getvalue())
+            self.assertIn('/login', output.getvalue())
+            self.assertIn('Optional:', output.getvalue())
 
     def test_failure_explains_missing_bootstrap_without_disclosing_secrets(self):
         with contextlib.redirect_stderr(io.StringIO()) as output:
             installer.report_failure(installer.InstallError('test failure'))
-        self.assertIn('no Console bootstrap code was created', output.getvalue())
+        self.assertIn('no Console login token was created', output.getvalue())
         logfile = installer.path('/var/lib/argus-certbot/logs/letsencrypt.log')
         self.assertIn(f'sudo tail -n 80 {logfile}', output.getvalue())
         installer.mkdir(installer.path('/etc/argus-c2/server'))
-        secret_file = installer.path('/etc/argus-c2/setup/bootstrap.token')
+        secret_file = installer.path('/etc/argus-c2/setup/console.token')
         installer.mkdir(secret_file.parent, 0o700)
         installer.write_new(secret_file, 'test-only-bootstrap-secret\n')
         with contextlib.redirect_stderr(io.StringIO()) as output:
@@ -759,13 +785,13 @@ class InstallerTests(unittest.TestCase):
         account = SimpleNamespace(pw_uid=os.geteuid(), pw_gid=os.getegid())
         with patch.object(installer, 'run', side_effect=isolated_run), patch.object(installer.pwd, 'getpwnam', return_value=account), contextlib.redirect_stdout(io.StringIO()) as output:
             installer.install(args, stage, bundle, certdir, '/usr/bin/certbot')
-        self.assertIn('https://127.0.0.1:9443/setup', output.getvalue())
+        self.assertIn('https://127.0.0.1:9443/login', output.getvalue())
         config = json.loads(installer.path('/etc/argus-c2/server.json').read_text())
         self.assertEqual(config['listen'], '0.0.0.0:8443')
         self.assertEqual(config['private_key'], str(installer.path('/run/credentials/argus-c2-server.service/server-key')))
-        for target in ('/etc/argus-c2/server/admin.token', '/etc/argus-c2/server/ca-key.pem', '/etc/argus-c2/console/browser-key.pem', '/etc/argus-c2/setup/bootstrap.token'):
+        for target in ('/etc/argus-c2/server/admin.token', '/etc/argus-c2/server/ca-key.pem', '/etc/argus-c2/console/browser-key.pem', '/etc/argus-c2/setup/console.token'):
             self.assertEqual(stat.S_IMODE(installer.path(target).stat().st_mode), 0o600)
-        self.assertNotIn(installer.path('/etc/argus-c2/setup/bootstrap.token').read_text().strip(), output.getvalue())
+        self.assertNotIn(installer.path('/etc/argus-c2/setup/console.token').read_text().strip(), output.getvalue())
         self.assertIn(['systemctl', 'enable', '--now', 'argus-console-renew.timer'], calls)
         self.assertFalse(installer.path('/var/lib/argus-c2-agent').exists())
         dropin = installer.path('/etc/systemd/system/argus-c2-server.service.d/console.conf').read_text()
@@ -784,6 +810,43 @@ class InstallerTests(unittest.TestCase):
         with patch.object(installer.shutil, 'which', return_value='/usr/bin/tool'), self.assertRaises(installer.InstallError):
             installer.preflight(args)
         self.assertEqual(state.read_bytes(), before)
+
+        # Recreate the exact 103 shape to exercise the old uninitialized-server
+        # upgrade with real Go migration and token issuance, isolated system ops.
+        installer.mkdir(installer.path('/var/tmp'))
+        with contextlib.closing(sqlite3.connect(state)) as db:
+            db.executescript('DROP TABLE console_identities; DROP TABLE console_token; PRAGMA user_version=103;')
+        running = [True]
+        def updating_run(command, **kwargs):
+            command = [str(arg) for arg in command]
+            if command[0] == 'runuser':
+                return actual_run(command[4:], **kwargs)
+            if command[0] == 'systemctl':
+                if command[1] == 'stop':
+                    running[0] = False
+                if command[1] == 'start':
+                    running[0] = True
+                output = b'loaded' if '--property=LoadState' in command else b'argus-server' if '--property=User' in command else b''
+                code = 3 if command[1] == 'is-active' and not running[0] else 0
+                return subprocess.CompletedProcess(command, code, output, b'')
+            return actual_run(command, **kwargs)
+        account.pw_name = 'argus-server'
+        with patch.object(installer, 'run', side_effect=updating_run), patch.object(installer.pwd, 'getpwnam', return_value=account), \
+                patch.object(installer.shutil, 'which', return_value='/usr/bin/tool'), patch.object(installer, 'verify_updated_service'), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            plan = installer.update_plan('server', installer.architecture())
+            installer.update_component(args, plan, bundle)
+        self.assertEqual(installer.database_stamp(state.parent, 'server'), (0x41524753, 104))
+        self.assertIn('https://127.0.0.1:9443/login', output.getvalue())
+        self.assertEqual(installer.path('/etc/argus-c2/server.json').read_text(), json.dumps(config, indent=2) + '\n')
+        replacement = next(installer.path('/etc/argus-c2/setup').glob('console-*.token'))
+        token = replacement.read_text().strip()
+        self.assertEqual(len(token), 64)
+        self.assertNotIn(token, output.getvalue())
+        with contextlib.closing(sqlite3.connect(state)) as db:
+            self.assertEqual(db.execute('SELECT digest FROM console_token').fetchone()[0], hashlib.sha256(token.encode()).hexdigest())
+        backup = next(installer.path('/var/lib/argus-c2-updates').iterdir())
+        self.assertEqual(installer.database_stamp(backup / 'state', 'server'), (0x41524753, 103))
 
 
 if __name__ == '__main__':

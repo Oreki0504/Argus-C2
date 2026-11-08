@@ -64,7 +64,7 @@ def main():
             require(not root.exists() and not state.exists(), 'Update initialized state on an uninstalled host.')
             require(not Path('/var/lib/argus-c2-updates').exists(), 'Rejected update created a misleading backup record.')
         output = run(sys.executable, installer, '--bundle', bundle, '--host', '127.0.0.1', '--tls', 'local-ca')
-        secret_file = root / 'setup/bootstrap.token'
+        secret_file = root / 'setup/console.token'
         secret = secret_file.read_text().strip()
         require(secret and secret not in output, 'Installer must keep credentials out of captured output.')
         require(f'sudo cat {secret_file}' in output, 'Missing bootstrap retrieval instructions.')
@@ -102,22 +102,25 @@ def main():
                 if attempt == 29:
                     raise
                 time.sleep(0.2)
-        require(status['state'] == 'SETUP_PENDING', 'Installed Server has no active bootstrap window.')
-        require(b'<html' in request('/setup').lower(), 'Compiled setup page is unavailable.')
+        require(status['token_enabled'], 'Installed Server has no administrator token.')
+        require(b'<html' in request('/login').lower(), 'Compiled login page is unavailable.')
         csrf = status['csrf_token']
-        request('/v1/console/setup/prove', {'secret': 'wrong-bootstrap-code'}, csrf, expected=403)
-        setup = request('/v1/console/setup/prove', {'secret': secret}, csrf)
-        require(setup['step'] == 'provider', 'Generated bootstrap code did not open provider setup.')
-        require(setup['callback_uri'] == origin + '/v1/console/auth/callback', 'Incorrect callback URI.')
-        require(request('/v1/console/setup')['step'] == 'provider', 'Setup session was not established.')
-        request('/v1/console/admin/users', expected=401)
-        replacement = root / 'setup/bootstrap-reissued.token'
-        run('/usr/local/libexec/argus-c2/server', 'console-bootstrap', 'issue',
+        request('/v1/console/auth/token', {'token': 'wrong-token'}, csrf, expected=401)
+        # Reissue before activation and ensure the previous token is rejected.
+        replacement = root / 'setup/console-reissued.token'
+        run('/usr/local/libexec/argus-c2/server', 'console-token', 'issue',
             '-config', root / 'server-local.json', '-out', replacement)
-        request('/v1/console/setup', expected=401)
-        request('/v1/console/setup/prove', {'secret': secret}, csrf, expected=403)
-        require(request('/v1/console/setup/prove', {'secret': replacement.read_text().strip()}, csrf)['step'] == 'provider',
-                'Reissued bootstrap code failed against the running Server.')
+        request('/v1/console/auth/token', {'token': secret}, csrf, expected=401)
+        secret = replacement.read_text().strip()
+        owner = request('/v1/console/auth/token', {'token': secret}, csrf)
+        require(owner['role'] == 'Admin', 'Token did not open administrator management.')
+        require(request('/v1/me')['principal_id'] == owner['principal_id'], 'Token session missing.')
+        request('/v1/console/admin/users')
+        require(request('/v1/console/account')['providers'] == [], 'Token login unexpectedly requires OAuth.')
+        request('/v1/console/auth/logout', {}, owner['csrf_token'])
+        csrf = request('/v1/console/auth/status')['csrf_token']
+        require(request('/v1/console/auth/token', {'token': secret}, csrf)['principal_id'] == owner['principal_id'],
+                'Token must be reusable without OAuth.')
         require(not Path('/var/lib/argus-c2-agent').exists(), 'Server installer created an Agent identity.')
         identity_files = [root / 'server/ca.pem', root / 'server/ca-key.pem', root / 'server/admin.token',
                           root / 'console/browser-key.pem', root / 'server.json', root / 'server-local.json']
@@ -125,8 +128,10 @@ def main():
         run(sys.executable, installer, '--bundle', bundle, '--update', 'server', '--language', 'en')
         for p, contents in original_identity.items():
             require(p.read_bytes() == contents, 'Server update replaced existing identity or configuration.')
-        require(request('/v1/console/auth/status')['state'] == 'SETUP_PENDING', 'Server update reset Console state.')
-        require(b'<html' in request('/setup').lower(), 'Console disappeared after update.')
+        require(request('/v1/console/auth/status')['state'] == 'ACTIVE', 'Server update reset Console state.')
+        require(b'<html' in request('/login').lower(), 'Console disappeared after update.')
+        csrf = request('/v1/console/auth/status')['csrf_token']
+        require(request('/v1/console/auth/token', {'token': secret}, csrf)['principal_id'] == owner['principal_id'], 'Update changed token or owner.')
 
         # Install and enroll a real Agent on this disposable VM, then update it
         # without reenrollment. The Server and Agent paths must remain independent.
@@ -188,7 +193,7 @@ def main():
                                      '--sha256', hashlib.sha256(bad.read_bytes()).hexdigest()], capture_output=True, timeout=180)
             require(result.returncode != 0, 'Invalid update candidate was accepted.')
             run('systemctl', 'is-active', '--quiet', unit)
-            require(request('/v1/console/auth/status')['state'] == 'SETUP_PENDING', 'Rejected update lost setup state.')
+            require(request('/v1/console/auth/status')['state'] == 'ACTIVE', 'Rejected update lost setup state.')
         print('Real installation: HTTPS, bootstrap/reissue, Server and Agent updates, identity preservation and rejected-candidate recovery passed.')
     finally:
         subprocess.run(['systemctl', 'stop', 'argus-c2-agent.service'], capture_output=True, timeout=60)

@@ -269,7 +269,12 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 			providers = append(providers, map[string]string{"kind": c.Kind, "name": name})
 		}
 	}
-	reply(w, map[string]any{"state": status, "provider_name": providerName, "providers": providers, "csrf_token": v.CSRF})
+	tokenEnabled, err := s.store.ConsoleTokenAvailable(r.Context())
+	if err != nil {
+		storeProblem(w, err)
+		return
+	}
+	reply(w, map[string]any{"state": status, "provider_name": providerName, "providers": providers, "csrf_token": v.CSRF, "token_enabled": tokenEnabled})
 }
 func (s *Server) setupSession(w http.ResponseWriter, r *http.Request, write bool) (session, database.ConsoleState, bool) {
 	state, err := s.store.ConsoleState(r.Context())
@@ -351,6 +356,9 @@ func (s *Server) configureProvider(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.saveProvider(w, r, v, state, false)
+}
+func (s *Server) saveProvider(w http.ResponseWriter, r *http.Request, v session, state database.ConsoleState, account bool) {
 	var input providerInput
 	if !decodeAlternatives(w, r, &input, []string{"providers"}, []string{"issuer", "client_id", "client_secret"}) {
 		return
@@ -403,7 +411,11 @@ func (s *Server) configureProvider(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err == nil {
-		err = s.store.SetConsoleProvider(r.Context(), v.Generation, id)
+		if account {
+			err = s.store.ConfigureConsoleProvider(r.Context(), v.Generation, state.ProviderID, id)
+		} else {
+			err = s.store.SetConsoleProvider(r.Context(), v.Generation, id)
+		}
 	}
 	if err != nil {
 		_ = os.Remove(path)
@@ -445,6 +457,9 @@ func (s *Server) startLogin(w http.ResponseWriter, r *http.Request, setup bool) 
 			return
 		}
 	}
+	s.startFlow(w, r, state, setup, session{})
+}
+func (s *Server) startFlow(w http.ResponseWriter, r *http.Request, state database.ConsoleState, setup bool, binding session) {
 	var choice struct {
 		Provider string `json:"provider"`
 	}
@@ -480,6 +495,12 @@ func (s *Server) startLogin(w http.ResponseWriter, r *http.Request, setup bool) 
 	}
 	delete(s.flows, database.TokenDigest(cookieValue(r, flowCookie)))
 	s.flows[database.TokenDigest(raw)] = flow{StateDigest: database.TokenDigest(stateToken), Nonce: nonce, Verifier: verifier, ProviderID: p.ID, ProviderKind: p.Credentials.Kind, Generation: state.Generation, Setup: setup, Created: s.now(), Expires: expires, AuthorizationURL: authURL}
+	if binding.UserID != "" {
+		f := s.flows[database.TokenDigest(raw)]
+		f.BindingSession = database.TokenDigest(cookieValue(r, sessionCookie))
+		f.BindingUser, f.BindingVersion = binding.UserID, binding.Version
+		s.flows[database.TokenDigest(raw)] = f
+	}
 	s.mu.Unlock()
 	setCookie(w, flowCookie, raw, expires.Sub(s.now()), true)
 	reply(w, map[string]string{"redirect_path": "/v1/console/auth/redirect"})
@@ -521,6 +542,13 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	delete(s.flows, key)
 	s.mu.Unlock()
 	clearCookie(w, flowCookie)
+	if v.BindingUser != "" {
+		fail = func(code string) { http.Redirect(w, r, "/account?reason="+code, http.StatusSeeOther) }
+		if !s.bindingSessionValid(v) {
+			fail("session_expired")
+			return
+		}
+	}
 	if len(q["code"]) != 1 || q.Get("code") == "" || q.Get("error") != "" {
 		fail("oidc_callback_invalid")
 		return
@@ -546,6 +574,23 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	issuer, subject, name, err := s.loginIdentity(r.Context(), p, token, v)
 	if err != nil {
 		fail("oidc_callback_invalid")
+		return
+	}
+	if v.BindingUser != "" {
+		if !s.bindingSessionValid(v) {
+			fail("session_expired")
+			return
+		}
+		err = s.finishBinding(r.Context(), v, issuer, subject)
+		if errors.Is(err, database.ErrConflict) {
+			fail("identity_conflict")
+			return
+		}
+		if err != nil {
+			fail("oidc_callback_invalid")
+			return
+		}
+		http.Redirect(w, r, "/account?bound=1", http.StatusSeeOther)
 		return
 	}
 	u, err := s.store.FinishConsoleLogin(r.Context(), v.Generation, p.ID, issuer, subject, name, v.Setup)

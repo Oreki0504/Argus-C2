@@ -4,7 +4,7 @@
 
 The Console uses an independent browser HTTPS listener in the same server process. It is disabled unless all four Console flags are supplied. CLI and Agent traffic continues to use the Fleet address.
 
-New Linux/systemd deployments can use the [interactive Server installer](server-installation.zh-CN.md) to configure these listeners, initialize state, publish Agent binaries, and request/renew Let's Encrypt domain or public-IP certificates. It still requires the operator to configure a Google/GitHub OAuth app (or custom OIDC) and bind the first administrator in `/setup`.
+New Linux/systemd deployments can use the [interactive Server installer](server-installation.zh-CN.md) to configure these listeners, initialize state, publish Agent binaries, and request/renew Let's Encrypt domain or public-IP certificates. The installer creates a reusable administrator token. Enter it at `/login` to open management immediately; OAuth configuration and account linking are optional afterward.
 
 ## Build and database upgrade
 
@@ -18,14 +18,14 @@ cd ..
 go build -tags ui -o bin/server ./cmd/server
 ```
 
-New `server init` deployments use server schema 103. For an existing schema 102 database, stop the old server and run the new binary with a new backup filename in a private directory:
+New `server init` deployments use server schema 104. For an existing schema 102 or 103 database, stop the old server and run the new binary with a new backup filename in a private directory:
 
 ```sh
 bin/server console-migrate -config /private/argus/server.json \
   -backup /private/argus-backups/pre-console-102.db
 ```
 
-Migration verifies and syncs the original snapshot, then applies additive changes in one transaction. Failures roll back the DDL and leave the backup available. Existing nodes, tokens, tasks, results and audit remain intact. A runtime state lock excludes a running new server; **stop the old binary explicitly**, since it predates that lock. Unsupported versions still fail closed. Do not edit `PRAGMA user_version`. An older binary cannot use schema 103; rollback requires the matching old binary and pre-upgrade snapshot, with the reconciliation precautions in [Operations](operations.md#database-compatibility-and-upgrades).
+Migration verifies and syncs the original snapshot, then applies additive changes in one transaction. Failures roll back the DDL and leave the backup available. Existing nodes, tokens, tasks, results and audit remain intact. A runtime state lock excludes a running new server; **stop the old binary explicitly**, since it predates that lock. Unsupported versions still fail closed. Do not edit `PRAGMA user_version`. An older binary cannot use schema 104; rollback requires the matching old binary and pre-upgrade snapshot, with the reconciliation precautions in [Operations](operations.md#database-compatibility-and-upgrades).
 
 ## HTTPS and LAN access
 
@@ -51,7 +51,7 @@ Installation is explicit on a new Linux/systemd host using root/sudo; the Agent 
 
 ## Google, GitHub and custom OIDC login
 
-First-run setup supports **direct Google and GitHub login**, separately or together. Auth0 and other OIDC providers remain optional under “Other identity provider”. See the [direct-login setup guide](console-login.zh-CN.md) or the [optional Auth0 guide](console-auth0.zh-CN.md). The server owner registers the selected OAuth applications once; later visitors use the configured sign-in buttons.
+Account settings support **optional Google and GitHub binding**, separately or together. Auth0 and other OIDC providers remain optional under “Other identity provider”. See the [direct-login setup guide](console-login.zh-CN.md) or the [optional Auth0 guide](console-auth0.zh-CN.md). The owner can use the installation token without configuring any provider. To enable optional OAuth, register the selected applications once under Account & sign-in, then bind the chosen identities to the current account.
 
 Register the exact callback supplied by the Console, including its HTTPS origin and port:
 
@@ -65,22 +65,23 @@ Each provider uses Authorization Code + S256 PKCE and a server-bound state trans
 
 ## First administrator
 
-Issue a 15-minute, single-use secret locally as the server/state owner:
+The installer issues a reusable, random administrator token in `/etc/argus-c2/setup/console.token` (root-only, mode 0600). Enter it at `/login` or `/setup`. The first valid token login atomically creates the local Admin and activates Console; OAuth is not required. The same token can be used after logout or restart. Only its SHA-256 digest is stored in SQLite, and it is exchanged for the normal bounded browser session rather than used as an API bearer credential.
+
+For an uninitialized manual deployment:
 
 ```sh
-bin/server console-bootstrap issue -config /private/argus/server.json \
-  -out /private/argus/console-bootstrap.txt
+bin/server console-token issue -config /private/argus/server.json -out /private/argus/console.token
 ```
 
-The destination must be new, in a private directory. Only its location is printed; the secret is written with mode 0600. Read it locally and enter it at `https://argus.example.com:9443/setup`. Select one or both social providers, register their callback URLs and enter each application’s Client ID and Secret. “Bind with Google/GitHub” saves the settings and starts authentication immediately. Custom OIDC additionally requires its issuer. GitHub validates application credentials during code exchange; saving settings alone never proves an identity or creates an administrator.
+The output file must be new, in a private directory. Reissuing invalidates previous tokens and setup sessions. A still-valid unconsumed legacy bootstrap code can also enter through token login; expired or already consumed bootstrap codes cannot. The deprecated bootstrap API remains compatible, but the UI no longer requires its provider-first flow.
 
-The secret establishes setup authority only. A verified callback atomically binds the first Admin and permanently closes normal setup. Five invalid proof attempts lock the secret; expiration, lost setup state or server restart before binding requires a new local issue. The existing CLI `admin.token` has no Console authority.
+Account & sign-in lets an authenticated administrator save provider credentials, then any active user can bind a configured identity to their own account. Both operations require a session created within ten minutes. The OAuth flow pins the originating session, user, version, generation and provider snapshot; logout, recovery, revocation and provider edits invalidate pending bindings. A provider identity already owned by another account cannot be reassigned. OAuth binding does not disable the installation token.
 
-Provider credentials are saved as mode-0600 `console-provider-<id>.json` files in the state directory, separate from SQLite. Back them up along with Console TLS and Fleet configuration. The file now contains a provider set; legacy single-OIDC files remain readable without a database migration. Older binaries cannot read a new provider-set file, so adopting the new format is not compatible with a program-only downgrade. Database backup alone does not contain the provider secret. Never put these credentials into frontend environment variables.
+Provider credentials remain mode-0600 `console-provider-<id>.json` files in the state directory. Back them up along with the database and root-only token file. Credentials never return to the browser or enter frontend environment variables.
 
 ## Accounts and sessions
 
-Unknown verified identities appear as pending in Management → Users & access. Admin approves a User or explicitly grants Admin. Pending records expire after seven days when another login is processed; the account table is capped at 1,000 entries. A disabled account cannot sign in. Google and GitHub identities remain separate even when their names or email addresses match. Binding an owner with one provider does not automatically authorize an account from the other provider.
+Unknown verified identities appear as pending in Management → Users & access. Admin approves a User or explicitly grants Admin. Pending records expire after seven days when another login is processed; the account table is capped at 1,000 entries. A disabled account cannot sign in. Google and GitHub identities can be explicitly linked to the same local account. Matching names or emails never merges accounts; unlinked identities remain pending until approved.
 
 Role/access edits use an expected version and explicit subject confirmation. Existing sessions are revoked immediately by a version change; the last active Admin cannot be removed. The UI disallows editing the current account. Admin role/access changes require a session created within ten minutes; sign out and sign in again if prompted. Session revocation also increments the version.
 
@@ -90,16 +91,11 @@ Logout revokes the local Argus session; it does not sign the user out of Google/
 
 ## Local recovery
 
-If the provider or owner identity is lost, use the local server account:
-
 ```sh
-bin/server console-bootstrap recover -config /private/argus/server.json \
-  -out /private/argus/console-recovery.txt -confirm-recovery
+bin/server console-token recover -config /private/argus/server.json -out /private/argus/console-recovery.token -confirm-recovery
 ```
 
-Issuing recovery immediately invalidates all existing Console sessions. Complete `/setup` with the new secret; select and configure the required sign-in methods before binding. A successful verified binding disables former Admin accounts and establishes the recovered Admin in the same transaction. Existing User records remain. Recovery is audited, cannot be invoked over HTTP, and does not change CLI credentials or Agent certificates.
-
-If recovery expires, issue recovery again locally. Keep the private recovery secret out of URLs and command arguments.
+Recovery immediately invalidates all browser sessions, previous login tokens and pending bindings. The next token login disables former Admin accounts and creates a new local Admin. Existing User records, provider configuration and Fleet identity remain. Recovery is local-only and audited; it is not a normal credential rotation. The legacy `console-bootstrap recover` flow remains supported for existing operators.
 
 ## Observations
 

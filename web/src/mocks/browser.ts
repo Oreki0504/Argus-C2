@@ -48,3 +48,10 @@ export async function simulateOIDC(
 ) {
   await request(path, emptySchema, { body: { provider }, csrf })
 }
+
+export async function simulateAccountBinding(
+  provider: import('../api/contracts').ProviderKind,
+  csrf: string,
+) {
+  await request('/v1/console/account/bind', emptySchema, { body: { provider }, csrf })
+}

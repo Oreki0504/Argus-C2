@@ -12,7 +12,7 @@
 cd web
 npm ci --ignore-scripts
 cd ..
-sh deploy/linux/build-server-bundles.sh /tmp/argus-server-release v0.1.0-preview.6
+sh deploy/linux/build-server-bundles.sh /tmp/argus-server-release v0.1.0-preview.7
 ```
 
 生成：
@@ -30,23 +30,23 @@ SHA256SUMS
 
 ## 一条命令启动交互安装
 
-预览版本使用固定 tag 的下载链接。以下是 [v0.1.0-preview.6](https://github.com/Oreki0504/Argus-C2/releases/tag/v0.1.0-preview.6) 发布后的安装入口：在新服务器粘贴命令，即可下载安装脚本、启动交互并自动取得匹配的安装包。下载链接须等待对应 Release 工作流成功完成；仅有 commit 或 tag 不会产生安装包。
+预览版本使用固定 tag 的下载链接。以下是 [v0.1.0-preview.7](https://github.com/Oreki0504/Argus-C2/releases/tag/v0.1.0-preview.7) 发布后的安装入口：在新服务器粘贴命令，即可下载安装脚本、启动交互并自动取得匹配的安装包。下载链接须等待对应 Release 工作流成功完成；仅有 commit 或 tag 不会产生安装包。
 
 curl：
 
 ```sh
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.6/install-server.py -o "$f" && sudo python3 "$f" )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.7/install-server.py -o "$f" && sudo python3 "$f" )
 ```
 
 GNU wget：
 
 ```sh
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; wget --https-only --max-redirect=5 -O "$f" https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.6/install-server.py && sudo python3 "$f" )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; wget --https-only --max-redirect=5 -O "$f" https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.7/install-server.py && sudo python3 "$f" )
 ```
 
 脚本完整下载后才执行，终端标准输入保留给域名/IP 提问。脚本识别架构，从其绑定的 Release 获取 `SHA256SUMS` 和安装包，校验后才运行包内程序。用户不需要填写安装包 URL 或摘要。GitHub 的 HTTPS 资产重定向受支持，不允许降级到 HTTP 或带凭据跳转。
 
-预发布版本不会成为 `latest`。发布首个稳定版本后，可将链接中的 `download/v0.1.0-preview.6` 换成 `latest/download`，取得最新稳定版；测试预览版时应保留固定版本链接。每个 Release 的说明会给出该版本的完整命令。`v0.1.0-preview.1` 在发布检查中失败，保留 tag 供追溯，没有公开安装包。
+预发布版本不会成为 `latest`。发布首个稳定版本后，可将链接中的 `download/v0.1.0-preview.7` 换成 `latest/download`，取得最新稳定版；测试预览版时应保留固定版本链接。每个 Release 的说明会给出该版本的完整命令。`v0.1.0-preview.1` 在发布检查中失败，保留 tag 供追溯，没有公开安装包。
 
 已有本地安装目录时，也可以继续执行：
 
@@ -105,7 +105,7 @@ sudo python3 install-server.py \
 
 以上下载地址是部署示例。自定义单个包的 `--bundle-url` 必须显式传入可信 SHA-256，支持最多五次 HTTPS 重定向；本地包使用 `--bundle /path/archive.tar.gz` 并默认读取同目录 `SHA256SUMS`。完整下载及校验通过后才会执行包内程序，解包不接受目录穿越、链接、重复或意外文件。
 
-自托管整个发布目录时，可以改用 `--release-base https://downloads.example.com/argus/v0.1.0`，自动读取同目录清单并选择架构；或用 `--release v0.1.0-preview.6` 选择 GitHub 上已发布的版本。没有本地包、没有绑定版本的源码安装器会查询 GitHub 最新稳定 Release；没有 Release 时明确报错，不会回退到源码构建或未经校验的二进制。
+自托管整个发布目录时，可以改用 `--release-base https://downloads.example.com/argus/v0.1.0`，自动读取同目录清单并选择架构；或用 `--release v0.1.0-preview.7` 选择 GitHub 上已发布的版本。没有本地包、没有绑定版本的源码安装器会查询 GitHub 最新稳定 Release；没有 Release 时明确报错，不会回退到源码构建或未经校验的二进制。
 
 ## 发布 GitHub 下载入口
 
@@ -121,28 +121,17 @@ sudo python3 install-server.py \
 - 创建 `argus-server` 普通用户，安装加固的 systemd 服务并启动。
 - 默认监听 `0.0.0.0:8443`（Fleet）和 `0.0.0.0:9443`（Console），IPv6 地址使用 `[::]`；端口可用 `--fleet-port` / `--console-port` 调整。
 - 自动发布 `/usr/local/share/argus-c2/agents` 中的两种架构 Agent，并配置实际 Fleet 地址。
-- 生成 15 分钟有效的一次性初始化码，保存至 root 专用的 `/etc/argus-c2/setup/bootstrap.token`（0600）。交互终端会显示该码；重定向输出时只打印读取命令，不把凭据写入日志。
+- 生成可重复登录的随机管理员 Token，保存至 root 专用的 `/etc/argus-c2/setup/console.token`（0600）。交互终端会显示 Token；重定向输出时只打印读取命令。
 
-安装成功后，打开打印出的 `https://HOST:9443/setup`，输入终端显示的一次性初始化码，也可在服务器本机读取：
-
-```sh
-sudo cat /etc/argus-c2/setup/bootstrap.token
-```
-
-然后选择 Google 和／或 GitHub，填写对应 OAuth 应用的 Client ID / Secret，直接登录并绑定首位管理员；Auth0/OIDC 可在“其他登录服务”中选择。**初始化码只证明你有这台服务器的本地管理权限，不是日常登录密码，也不是 CLI 的 `admin.token`；TLS 私钥不能用来登录 Console。**
-
-**自动 HTTPS 不会替你登记 Google/GitHub OAuth 应用**。可以先登记一种，或同时配置两种；具体步骤见[直连登录说明](console-login.zh-CN.md)。应用尚未准备好时，完成登记后可重新签发初始化码；初始化码不替代账号登录。IP 证书能解决 TLS 信任，但平台是否接受 IP 回调仍需确认；Google 的正式 Web 应用应使用域名。
-
-初始化凭据过期后，用新文件重新签发：
+安装成功后，打开打印出的 `https://HOST:9443/login`，输入管理员 Token 即可进入后台，无需先配置 OAuth。在服务器本机读取：
 
 ```sh
-sudo /usr/local/libexec/argus-c2/server console-bootstrap issue \
-  -config /etc/argus-c2/server-local.json \
-  -out /etc/argus-c2/setup/bootstrap-new.token
-sudo cat /etc/argus-c2/setup/bootstrap-new.token
+sudo cat /etc/argus-c2/setup/console.token
 ```
 
-`-out` 必须指定尚不存在的新文件；再次签发时换一个文件名。旧码和此前的初始化会话会失效。无需重装或重启服务。
+Token 可用于后续登录，不会在 15 分钟后过期；退出或重启不会使它失效。不要将它与 CLI 的 `server/admin.token` 混用。需要 Google/GitHub 时，在后台顶栏点击账号进入“账号与登录”，展开可选平台配置并绑定当前账号；见 [Token 登录与 OAuth 绑定](console-login.zh-CN.md)。
+
+旧版未完成初始化的部署，在新版更新结束后会获得新的登录 Token；以更新终端打印的路径为准。手动签发使用 `server console-token issue -config /etc/argus-c2/server-local.json -out NEW_PRIVATE_FILE`，输出文件必须尚不存在。已经激活的部署使用显式 `console-token recover -confirm-recovery` 才能重新建立管理员，该操作撤销旧凭据并在新 Token 登录时禁用原 Admin。
 
 服务使用 `/etc/argus-c2/server.json` 和 systemd `LoadCredential`；`server-local.json` 是 root-only 的运维配置，引用源凭据与同一个状态目录，不应另开第二个 Server 进程。CLI 管理员 Token 位于 `/etc/argus-c2/server/admin.token`，不是 Console 登录凭据。
 
@@ -190,7 +179,7 @@ curl -q --noproxy '*' --max-time 5 -H Metadata:true 'http://169.254.169.254/meta
 
 旧版 `v0.1.0-preview.2` 在 `/var/log` 允许日志组写入的系统上可能报 `Installation parent must be root-owned and not writable by others: /var/log`。这是安装器路径选择的问题，不应通过 `chmod /var/log` 修复。此时流程尚未执行 Server 初始化，因而还没有 Console 初始化码。改用本页新版命令重试即可复用已安装的 Certbot 和 ACME 准备目录；无需删除这些目录或修改系统日志权限。
 
-隔离测试覆盖可组写的系统日志目录、早期失败重试、真实包初始化和终端凭据显示。CI 还会在一次性 VM 上执行完整安装器、启动真实 systemd 服务，并通过受信任的 HTTPS 验证 `/setup`、初始化码及重新签发流程。ACME 请求由模拟命令验证，不会在测试中申请公开证书或消耗 Let’s Encrypt 配额；真实域名/IP 的外网验证仍需在实际部署时验收。
+隔离测试覆盖可组写的系统日志目录、早期失败重试、真实包初始化和终端凭据显示。CI 还会在一次性 VM 上执行完整安装器、启动真实 systemd 服务，并通过受信任的 HTTPS 验证 `/setup`、Token 登录及重新签发流程。ACME 请求由模拟命令验证，不会在测试中申请公开证书或消耗 Let’s Encrypt 配额；真实域名/IP 的外网验证仍需在实际部署时验收。
 
 ## 更新 Server 或 Agent
 
@@ -208,18 +197,18 @@ curl -q --noproxy '*' --max-time 5 -H Metadata:true 'http://169.254.169.254/meta
 
 ```sh
 # Server：更新服务端、内嵌前端、CLI 和供新 Agent 下载的二进制
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.6/install-server.py -o "$f" && sudo python3 "$f" --update server )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.7/install-server.py -o "$f" && sudo python3 "$f" --update server )
 
 # Agent：在每台 Agent 主机单独执行，只替换本机 Agent 程序
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.6/install-server.py -o "$f" && sudo python3 "$f" --update agent )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.7/install-server.py -o "$f" && sudo python3 "$f" --update agent )
 ```
 
 已取得安装包目录时可运行 `sudo python3 install-server.py --update server --bundle /path/argus-server-linux-amd64.tar.gz`。同一脚本支持 `--release TAG`、`--release-base URL` 和原有 SHA-256 校验；默认使用下载脚本绑定的版本。更新时不重新询问域名、邮箱或证书，`--host` 等首次安装参数不适用。
 
 更新顺序：先下载并校验包，再停止对应服务、锁定状态、备份旧程序及配置/身份/数据库，在数据库副本上运行新版本的兼容性检查，随后原子替换各程序并恢复服务。原先停止的服务仍保持停止。Server 更新不会启动或更新同机 Agent，也不会远程批量更新其他主机。
 
-运行失败或启动检查失败时，自动恢复旧程序和此前的服务运行状态。**不会自动回退数据库快照**，以免丢掉新接收的结果和审计；当前更新仅允许相同 schema 的兼容版本，数据库迁移仍按[运维文档](operations.md#database-compatibility-and-upgrades)显式执行。配置、证书、Auth0、管理员、Agent 身份和策略均保留，systemd unit/drop-in 及续期计划不改写。Server 重启会让现有浏览器会话失效，需要重新登录。
+相同 schema 的更新失败时，自动恢复旧程序和此前的运行状态。Server schema 102/103 → 104 会在副本上显式迁移并检查，再应用到已停服、锁定的真实状态；迁移前备份保留。若已开始替换 schema 但启动验收失败，保留新程序及当前数据库并停止服务，打印恢复路径；**不会自动回退数据库快照**，以免丢失可能已接收的结果。其他 schema 变更按[运维文档](operations.md#database-compatibility-and-upgrades)处理。配置、证书、Auth0、管理员、Agent 身份和策略均保留，systemd unit/drop-in 及续期计划不改写。Server 重启会让现有浏览器会话失效，需要重新登录。
 
 每次更新在 `/var/lib/argus-c2-updates/server-*` 或 `agent-*` 留下 root 私有备份，包含 `update.json`、旧程序、`state` 和 `configuration`。它包含凭据，应按私有备份保管，并由管理员在验收后管理保留时间。确保磁盘容纳完整状态快照；脚本不会自动删除旧备份。
 
-自动更新支持项目标准路径和专用 systemd 账户；自定义路径、命令、旧 schema 使用手动流程。断电、强制结束进程或恢复失败时，查看 `update.json` 的阶段和原程序位置，保留现有数据库，停止对应服务后按记录恢复程序及权限，再检查启动。不要用旧数据库覆盖现有状态来强行恢复。服务存活检查不等于远端连通验收；Agent 更新后还应在 Console 确认心跳和结果上报。
+自动更新支持项目标准路径和专用 systemd 账户；自定义路径、命令及不支持的 schema 使用手动流程。断电、强制结束进程或恢复失败时，查看 `update.json` 的阶段和原程序位置，保留现有数据库，停止对应服务后按记录恢复程序及权限，再检查启动。不要用旧数据库覆盖现有状态来强行恢复。服务存活检查不等于远端连通验收；Agent 更新后还应在 Console 确认心跳和结果上报。

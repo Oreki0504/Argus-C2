@@ -6,6 +6,7 @@ import { ArrowLeft, ShieldCheck } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Brand, ErrorState, Loading, Notice } from '../../components/ui'
 import { OIDCForm } from './OIDCForm'
+import { TokenSignIn } from './TokenSignIn'
 
 const reasons = new Set([
   'session_expired',
@@ -69,33 +70,35 @@ export function Login() {
             <Loading label="Checking console" />
           ) : status.isError ? (
             <ErrorState error={status.error} retry={() => void status.refetch()} />
-          ) : status.data.state === 'ACTIVE' ? (
-            <>
-              <OIDCForm
-                csrf={status.data.csrf_token}
-                providers={status.data.providers.length ? status.data.providers : undefined}
-              />
-              <p className="auth-help">{t('Access is assigned by your console administrator.')}</p>
-            </>
           ) : (
             <>
-              <Notice>
-                {status.data.state === 'SETUP_PENDING'
-                  ? t('This console is ready for its first administrator.')
-                  : t(
-                      'This console has not been initialized. Ask the server owner to issue a setup secret locally.',
+              {status.data.state === 'ACTIVE' &&
+                (status.data.providers.length > 0 || status.data.provider_name) && (
+                  <OIDCForm
+                    csrf={status.data.csrf_token}
+                    providers={status.data.providers.length ? status.data.providers : undefined}
+                  />
+                )}
+              {(status.data.token_enabled || status.data.state !== 'ACTIVE') && (
+                <TokenSignIn csrf={status.data.csrf_token} />
+              )}
+              {status.data.state !== 'ACTIVE' && (
+                <>
+                  <p className="auth-help">
+                    {t(
+                      'Use the random token from your installation terminal to enter the console. OAuth can be linked later.',
                     )}
-              </Notice>
-              {status.data.state === 'SETUP_PENDING' && (
-                <Link className="button primary wide" to="/setup">
-                  {t('Set up your console')} <span>→</span>
-                </Link>
+                  </p>
+                  <Link className="text-link" to="/setup">
+                    {t('Token setup help')}
+                  </Link>
+                </>
               )}
             </>
           )}
           <div className="auth-security">
             <ShieldCheck size={16} />
-            {t('Your account is verified by your sign-in provider.')}
+            {t('Your login stays on this Console. Link OAuth later in account settings.')}
           </div>
         </div>
         <p className="auth-bottom">{t('Secure access. Purposeful diagnostics.')}</p>

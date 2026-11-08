@@ -10,7 +10,7 @@ import (
 	"github.com/Oreki0504/Argus-C2/internal/localdb"
 )
 
-// Explicit, additive migration. Older binaries reject version 103; the Agent
+// Explicit, additive migrations. Older binaries reject version 104; the Agent
 // schema and protocol are unchanged. No server startup silently upgrades state.
 const consoleSchema = `
 ALTER TABLE audit_events ADD COLUMN subject_id TEXT NOT NULL DEFAULT '';
@@ -43,9 +43,24 @@ CREATE INDEX console_audit_subject ON audit_events(subject_id,id DESC);
 PRAGMA user_version=103;
 `
 
+const consoleAccountSchema = `
+CREATE TABLE console_identities (
+ issuer TEXT NOT NULL, subject TEXT NOT NULL,
+ user_id TEXT NOT NULL REFERENCES console_users(id) ON DELETE CASCADE,
+ created_at INTEGER NOT NULL, PRIMARY KEY(issuer,subject)
+);
+INSERT INTO console_identities SELECT issuer,subject,id,created_at FROM console_users;
+CREATE INDEX console_identities_user ON console_identities(user_id);
+CREATE TABLE console_token (
+ id INTEGER PRIMARY KEY CHECK(id=1), digest TEXT NOT NULL,
+ user_id TEXT NOT NULL DEFAULT '', generation INTEGER NOT NULL
+);
+PRAGMA user_version=104;
+`
+
 // MigrateConsole requires a stopped server and a new private backup destination.
 // Backup is durable and verified before the transactional DDL begins. A failed
-// migration leaves version 102 intact and the original backup available.
+// migration leaves the original schema intact and its backup available.
 func MigrateConsole(ctx context.Context, dir, backup string) error {
 	lock, err := localdb.LockServer(dir)
 	if err != nil {
@@ -71,11 +86,12 @@ func MigrateConsole(ctx context.Context, dir, backup string) error {
 	if err = db.QueryRowContext(ctx, "PRAGMA application_id").Scan(&component); err != nil {
 		return err
 	}
-	if version != 102 || component != applicationID {
-		return errors.New("migration requires an ARGS schema 102 database")
+	if (version != 102 && version != 103) || component != applicationID {
+		return errors.New("migration requires an ARGS schema 102 or 103 database")
 	}
+	originalVersion := version
 	s := &Store{DB: db}
-	if err = s.backupVersion(ctx, backup, 102); err != nil {
+	if err = s.backupVersion(ctx, backup, version); err != nil {
 		return err
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -86,13 +102,17 @@ func MigrateConsole(ctx context.Context, dir, backup string) error {
 	if err = tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version != 102 {
+	if version != originalVersion {
 		return errors.New("database changed during migration")
 	}
-	if _, err = tx.ExecContext(ctx, consoleSchema); err != nil {
+	migration := consoleAccountSchema
+	if version == 102 {
+		migration = consoleSchema + migration
+	}
+	if _, err = tx.ExecContext(ctx, migration); err != nil {
 		return err
 	}
-	if err = auditSubject(ctx, tx, "local", "console.migrate", "", "", "", "103"); err != nil {
+	if err = auditSubject(ctx, tx, "local", "console.migrate", "", "", "", "104"); err != nil {
 		return err
 	}
 	return tx.Commit()

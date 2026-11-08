@@ -54,7 +54,7 @@ func TestConsoleBrowserHarness(t *testing.T) {
 	https.Config.Handler = s.Handler()
 	https.StartTLS()
 	defer https.Close()
-	secret, err := store.IssueConsoleBootstrap(context.Background(), false)
+	secret, err := store.IssueConsoleToken(context.Background(), false)
 	if err != nil {
 		t.Fatal(err)
 	}

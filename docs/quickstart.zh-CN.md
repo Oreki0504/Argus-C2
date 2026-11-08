@@ -4,6 +4,8 @@
 
 本指南在一台 Linux 机器上完成 Server、Agent 和 CLI 的完整闭环。所有数据放在独立临时目录，不安装系统服务。使用同一个 Bash 终端依次执行，运行用户必须为非 root；需要 Go 1.27.3、Python 3，以及空闲的本机 TCP 8443 端口。
 
+使用 Web 后台请按[Server 一键安装](server-installation.zh-CN.md)部署。安装生成的随机管理员 Token 可直接登录，OAuth 在后台按需绑定；详见[登录说明](console-login.zh-CN.md)。本页下面是独立的 CLI 演示，CLI admin.token 不能登录 Web。
+
 ## 1. 构建
 
 先进入仓库根目录：

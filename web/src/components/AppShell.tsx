@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LogOut } from 'lucide-react'
+import { LogOut, UserRound } from 'lucide-react'
 import { api } from '../api/client'
 import { clearSession } from '../api/query'
 import { useViewer } from '../features/auth/context'
@@ -66,7 +66,14 @@ export function AppShell() {
             <AppearanceControls />
             {identity ? (
               <>
-                <span className="viewer-name">{identity.name}</span>
+                <Link
+                  to="/account"
+                  className="account-link"
+                  aria-label={`${t('Account & sign-in')}: ${identity.name}`}
+                >
+                  <UserRound size={16} aria-hidden="true" />
+                  <span className="viewer-name">{identity.name}</span>
+                </Link>
                 {admin && <span className="role-badge">{t('Administrator')}</span>}
                 <button className="login-link" disabled={busy} onClick={() => void logout()}>
                   <LogOut size={15} />

@@ -33,13 +33,16 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return errors.New("usage: server init|run|backup|storage|prune|certificates|console-migrate|console-bootstrap [flags]")
+		return errors.New("usage: server init|run|backup|storage|prune|certificates|console-migrate|console-bootstrap|console-token [flags]")
 	}
 	if os.Args[1] == "console-migrate" {
 		return consoleMigrateCommand(os.Args[2:], os.Stdout)
 	}
 	if os.Args[1] == "console-bootstrap" {
 		return consoleBootstrapCommand(os.Args[2:], os.Stdout)
+	}
+	if os.Args[1] == "console-token" {
+		return consoleSecretCommand(os.Args[2:], os.Stdout, true)
 	}
 	if os.Args[1] == "prune" {
 		return pruneCommand(os.Args[2:], os.Stdout)

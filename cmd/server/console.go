@@ -58,15 +58,22 @@ func consoleMigrateCommand(args []string, out io.Writer) error {
 	if err = database.MigrateConsole(context.Background(), c.StateDir, *backup); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(out, "Server schema migrated 102 -> 103; verified pre-upgrade backup:", *backup)
+	_, err = fmt.Fprintln(out, "Server schema migrated to 104; verified pre-upgrade backup:", *backup)
 	return err
 }
 func consoleBootstrapCommand(args []string, out io.Writer) error {
+	return consoleSecretCommand(args, out, false)
+}
+func consoleSecretCommand(args []string, out io.Writer, token bool) error {
+	command := "console-bootstrap"
+	if token {
+		command = "console-token"
+	}
 	if len(args) == 0 || args[0] != "issue" && args[0] != "recover" {
-		return errors.New("usage: server console-bootstrap issue|recover -config FILE -out NEW_PRIVATE_FILE [-confirm-recovery]")
+		return fmt.Errorf("usage: server %s issue|recover -config FILE -out NEW_PRIVATE_FILE [-confirm-recovery]", command)
 	}
 	recovery := args[0] == "recover"
-	f := flag.NewFlagSet("console-bootstrap "+args[0], flag.ContinueOnError)
+	f := flag.NewFlagSet(command+" "+args[0], flag.ContinueOnError)
 	file := f.String("config", "/etc/argus-c2/server.json", "server configuration")
 	dest := f.String("out", "", "new private file for the one-time secret")
 	confirm := f.Bool("confirm-recovery", false, "revoke Console sessions now and replace former Admin access after successful binding")
@@ -97,7 +104,12 @@ func consoleBootstrapCommand(args []string, out io.Writer) error {
 		return err
 	}
 	defer fh.Close()
-	secret, err := store.IssueConsoleBootstrap(context.Background(), recovery)
+	var secret string
+	if token {
+		secret, err = store.IssueConsoleToken(context.Background(), recovery)
+	} else {
+		secret, err = store.IssueConsoleBootstrap(context.Background(), recovery)
+	}
 	if err != nil {
 		_ = os.Remove(*dest)
 		return err
@@ -108,7 +120,11 @@ func consoleBootstrapCommand(args []string, out io.Writer) error {
 	if err = fh.Sync(); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(out, "One-time Console setup secret saved to", *dest, "(15-minute lifetime). Open /setup on the HTTPS Console.")
+	if token {
+		_, err = fmt.Fprintln(out, "Console administrator login token saved to", *dest, ". Open /login on the HTTPS Console. Keep this reusable credential private; OAuth binding is optional.")
+	} else {
+		_, err = fmt.Fprintln(out, "One-time Console setup secret saved to", *dest, "(15-minute lifetime). Open /setup on the HTTPS Console.")
+	}
 	return err
 }
 

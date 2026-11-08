@@ -206,6 +206,15 @@ func (s *Store) FinishConsoleLogin(ctx context.Context, generation int64, provid
 		if state.Generation != generation || state.ProviderID != providerID || providerID == "" {
 			return ErrUnauthorized
 		}
+		// Multiple verified provider identities can belong to the same account.
+		originalIssuer, originalSubject := issuer, subject
+		var linkedIssuer, linkedSubject string
+		err = tx.QueryRowContext(ctx, `SELECT u.issuer,u.subject FROM console_identities i JOIN console_users u ON u.id=i.user_id WHERE i.issuer=? AND i.subject=?`, issuer, subject).Scan(&linkedIssuer, &linkedSubject)
+		if err == nil {
+			issuer, subject = linkedIssuer, linkedSubject
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		now := s.now().Unix()
 		if setup {
 			if !state.SetupOpen(now) {
@@ -252,6 +261,9 @@ func (s *Store) FinishConsoleLogin(ctx context.Context, generation int64, provid
 		}
 		out, err = ScanConsoleUser(tx.QueryRowContext(ctx, "SELECT "+consoleUserColumns+" FROM console_users WHERE issuer=? AND subject=?", issuer, subject))
 		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO console_identities(issuer,subject,user_id,created_at) VALUES(?,?,?,?) ON CONFLICT(issuer,subject) DO NOTHING", originalIssuer, originalSubject, out.ID, now); err != nil {
 			return err
 		}
 		action := "console.login"

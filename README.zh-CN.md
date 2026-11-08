@@ -80,7 +80,7 @@ Server 历史清理由操作员手动执行：`server prune` 默认预览、保�
 
 `argus health` 检查 Server 数据库连接；节点 `active` 表示获得授权，`last_seen_at` 表示最近收到心跳的时间；任务 `SUCCEEDED` 表示有合法报告。它们都不能直接解释为节点健康，报告的数据可用性与覆盖范围需要单独判断。详见[状态语义](docs/architecture.md#status-dimensions)。
 
-Server 要求 Schema 103，Agent 保持 Schema 101，组件标识各自独立；Schema 102 可通过 `server console-migrate` 备份后显式升级，启动时不会自动转换，其他不支持的版本仍会被拒绝。遵循[升级与恢复流程](docs/operations.md#database-compatibility-and-upgrades)。Offline Root + Online Intermediate 目前仍是 [PKI 规划](docs/security.md#offline-root-and-online-intermediate-plan)。
+Server 要求 Schema 104，Agent 保持 Schema 101，组件标识各自独立；Schema 102/103 可通过 `server console-migrate` 备份后显式升级，启动时不会自动转换，其他不支持的版本仍会被拒绝。遵循[升级与恢复流程](docs/operations.md#database-compatibility-and-upgrades)。Offline Root + Online Intermediate 目前仍是 [PKI 规划](docs/security.md#offline-root-and-online-intermediate-plan)。
 
 ## 验证状态
 

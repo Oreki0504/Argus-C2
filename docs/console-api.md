@@ -26,7 +26,12 @@ Status endpoints expose minimum state, with bounded sessions/body sizes/rates. `
 
 | Method / path | Authority | Behavior |
 | --- | --- | --- |
-| `GET /v1/console/auth/status` | None; bounded pre-login context | `{state, provider_name, providers:[{kind,name}], csrf_token}`; UNINITIALIZED / SETUP_PENDING / ACTIVE |
+| `GET /v1/console/auth/status` | None; bounded pre-login context | `{state, provider_name, providers:[{kind,name}], csrf_token, token_enabled}`; UNINITIALIZED / SETUP_PENDING / ACTIVE |
+| `POST /v1/console/auth/token` | Pre-login CSRF + `{token}` | Validate the high-entropy local administrator token, activate a first owner when needed, establish session and return `/v1/me` DTO |
+| `GET /v1/console/account` | Active browser session | `{csrf_token, providers:[{kind,name,issuer}], identities:[{issuer,subject,created_at}]}` for this account only |
+| `GET /v1/console/account/providers` | Admin session | Provider setup DTO without secrets |
+| `POST /v1/console/account/providers` | Admin + CSRF + login within ten minutes | Save provider set; expected generation and snapshot reject stale mutations |
+| `POST /v1/console/account/bind` | Active session + CSRF + login within ten minutes; `{provider}` | Start OAuth binding to this exact local account/session, fixed redirect DTO |
 | `POST /v1/console/setup/prove` | Pre-login CSRF + `{secret}` | Establish setup-only session; return setup DTO; invalid/expired/consumed secret fails |
 | `GET /v1/console/setup` | Setup session | Setup DTO; 401 without proof, 403 after ACTIVE |
 | `POST /v1/console/setup/provider` | Setup session + CSRF | `{providers:[{kind,issuer,client_id,client_secret}]}`; one to three distinct kinds (`google`, `github`, `oidc`); native issuers are fixed; no secret echo |
@@ -44,7 +49,7 @@ The redirect route consumes a transaction whose authority is held on the server.
 
 Setup DTO: `{step: "provider" | "bind", csrf_token, callback_uri, issuer, client_id, providers:[{kind,name,issuer,client_id}], callback_uris:{google,github,oidc}}`. All callbacks come from the server's exact configured HTTPS origin. Legacy single-OIDC configuration requests and `{}` login bodies remain accepted; an empty login selection is valid only when exactly one provider is configured. The legacy `callback_uri` remains the custom OIDC callback. New social configurations use their distinct callback paths; callbacks cannot switch the transaction's selected provider.
 
-A blank application Secret reuses the saved value only when provider kind, issuer and Client ID all match. Secrets never appear in the DTO. Saving settings is not identity proof; GitHub application credentials are checked during code exchange, and Google/OIDC discovery cannot validate a client secret. The UI saves the selected providers and starts binding in one action. Expired setup returns to ownership proof; a failed exchange or invalid identity cannot create an account. ACTIVE closes every setup operation.
+A blank application Secret reuses the saved value only when provider kind, issuer and Client ID all match. Secrets never appear in the DTO. Saving settings is not identity proof; GitHub application credentials are checked during code exchange, and Google/OIDC discovery cannot validate a client secret. The UI first permits token login without any provider configuration. Authenticated account settings save providers separately from binding. Binding pins the original session, account version, generation and provider snapshot; logout, account revocation, recovery and provider changes invalidate it. Existing identities cannot be moved between accounts. Successful binding returns to `/account?bound=1`; binding failures return to `/account?reason=<allowlisted-code>`. Legacy `/setup/*` APIs remain available for compatibility, but ACTIVE closes them.
 
 ## Public summary
 
@@ -67,7 +72,7 @@ The live server currently uses only opaque `Server-<public-id-prefix>` names. Sy
 
 ## Errors and validation
 
-Recognized codes: `session_expired`, `forbidden`, `bootstrap_invalid`, `setup_closed`, `oidc_unavailable`, `oidc_callback_invalid`, `account_pending`, `csrf_invalid`, `rate_limited`, `service_unavailable`. HTTP 401/403 clears or hides protected data; 503 offers explicit retry. Unknown/HTML bodies yield generic status messages, without raw diagnostics.
+Recognized codes: `token_invalid`, `identity_conflict`, `session_expired`, `forbidden`, `bootstrap_invalid`, `setup_closed`, `oidc_unavailable`, `oidc_callback_invalid`, `account_pending`, `csrf_invalid`, `rate_limited`, `service_unavailable`. HTTP 401/403 clears or hides protected data; 503 offers explicit retry. Unknown/HTML bodies yield generic status messages, without raw diagnostics.
 
 Go tests cover bootstrap concurrency, signed OIDC claims/replay, session/CSRF/Origin/revocation and public projection leakage. CI also validates actual Go management/summary responses against the TypeScript schemas. This does not replace provider-specific deployment testing.
 

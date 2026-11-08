@@ -4,10 +4,42 @@ export type Language = 'en' | 'zh-CN'
 
 const chinese: Record<string, string> = {
   ...managementChinese,
+  'Enter your administrator token': '输入管理员 Token',
+  'Use the random token from your installation terminal to enter the console. OAuth can be linked later.':
+    '使用安装终端生成的随机 Token 直接进入后台，OAuth 可以稍后绑定。',
+  'Administrator token': '管理员 Token',
+  'Paste your installation token': '粘贴安装时生成的 Token',
+  'Enter console': '进入后台',
+  'Signing in…': '正在登录…',
+  'Token setup help': 'Token 使用帮助',
+  'Your login stays on this Console. Link OAuth later in account settings.':
+    '登录当前控制台后，可在账号设置中绑定 OAuth。',
+  'The login token is invalid or has been replaced. Read the current token on your server.':
+    '登录 Token 无效或已被替换，请在服务器上读取当前 Token。',
+  'This identity is already linked to another account. It cannot be transferred here.':
+    '该第三方身份已绑定其他账号，不能在这里转移。',
+  'Account & sign-in': '账号与登录',
+  'Link Google or GitHub to this account. Your permissions and administrator token stay unchanged.':
+    '将 Google 或 GitHub 绑定到当前账号，权限和管理员 Token 保持不变。',
+  'Account linked successfully.': '账号绑定成功。',
+  Linked: '已绑定',
+  'Not linked': '未绑定',
+  'No OAuth providers configured. You can keep using your administrator token.':
+    '尚未配置 OAuth，你可以继续使用管理员 Token。',
+  'Configure sign-in providers (optional)': '配置第三方登录（可选）',
+  'OAuth is optional. Configure providers here, then bind your account above.':
+    'OAuth 为可选功能。在此配置平台后，即可在上方绑定当前账号。',
+  'Save sign-in methods': '保存登录方式',
+  'Loading account': '正在加载账号',
+  'Loading providers': '正在加载登录方式',
+  'No current login token? Run this command on your server, then read the new token file and refresh this page.':
+    '没有可用的登录 Token？在服务器执行以下命令，读取新 Token 文件后刷新本页。',
+  'Use a new output filename each time. Previously issued tokens and setup sessions will be invalidated.':
+    '每次指定一个未使用的输出文件名。旧 Token 和初始化会话将失效。',
   'Choose how you want to sign in.': '选择登录方式。',
   'Your account is verified by your sign-in provider.': '由所选平台验证你的账号身份。',
   'Continue with {provider}': '使用 {provider} 登录',
-  'Bind with {provider}': '使用 {provider} 绑定管理员',
+  'Bind with {provider}': '绑定 {provider} 账号',
   'Enable {provider}': '启用 {provider}',
   'Enable one or both. Sign in below to bind your first administrator.':
     '可以启用一种或两种方式。配置后点击下方按钮，登录并绑定首位管理员。',
