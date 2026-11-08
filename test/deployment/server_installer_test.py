@@ -199,6 +199,14 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(installer.UpdatePreflightError, 'Cannot determine'):
                 installer.update_plan('server', 'amd64')
 
+    def test_retained_maintenance_helper_is_not_an_installed_server(self):
+        helper = installer.path('/usr/local/libexec/argus-c2/install-server.py')
+        installer.mkdir(helper.parent)
+        installer.write_new(helper, b'maintenance helper')
+        with self.update_preflight_host():
+            with self.assertRaisesRegex(installer.UpdatePreflightError, 'Server is not installed'):
+                installer.update_plan('server', 'amd64')
+
     def update_fixture(self, component='agent', active=True):
         state = installer.path('/var/lib/argus-c2-' + component)
         installer.mkdir(state, 0o700)

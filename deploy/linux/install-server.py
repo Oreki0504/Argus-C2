@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a new ARGUS Server from a verified release; never overwrite a deployment.
+"""Install, update or uninstall ARGUS components; never overwrite existing identity.
 
 Only the Python standard library is required. Public certificate issuance uses
 Certbot >= 5.3 (standalone HTTP-01); the installer can provision an isolated venv
@@ -777,7 +777,7 @@ def update_account(component, unit_loaded):
     if component == 'server':
         markers += ['/etc/argus-c2/server', '/etc/argus-c2/server-local.json', '/etc/argus-c2/console',
                     '/etc/argus-c2/setup', '/etc/argus-c2/console-install.json',
-                    '/usr/local/libexec/argus-c2/install-server.py', '/usr/local/share/argus-c2/agents',
+                    '/usr/local/share/argus-c2/agents',
                     '/etc/systemd/system/argus-console-renew.service', '/etc/systemd/system/argus-console-renew.timer']
     else:
         markers += ['/etc/argus-c2/policy.json', '/etc/argus-c2/ca.pem']
@@ -1269,6 +1269,12 @@ def uninstall_component(args, interactive):
                 archive.add(target, arcname=str(target.relative_to(ROOT)), recursive=True)
     with (backup / 'programs.tar').open('rb') as saved:
         os.fsync(saved.fileno())
+    for directory in (backup, backups):
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
     try:
         for unit in loaded:
             run(['systemctl', 'disable', '--now', unit])
