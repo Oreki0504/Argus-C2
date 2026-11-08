@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import socket
 import sqlite3
 import ssl
 import stat
@@ -198,6 +199,21 @@ class InstallerTests(unittest.TestCase):
         with self.update_preflight_host(load_state=''):
             with self.assertRaisesRegex(installer.UpdatePreflightError, 'Cannot determine'):
                 installer.update_plan('server', 'amd64')
+
+    def test_port_check_accepts_time_wait_but_rejects_live_listener(self):
+        with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(('127.0.0.1', 0))
+            port = listener.getsockname()[1]
+            listener.listen(1)
+            args = SimpleNamespace(fleet_port=port, console_port=port, tls='local-ca', address=None)
+            with self.assertRaisesRegex(installer.InstallError, 'unavailable'):
+                installer.check_ports(args)
+            with socket.create_connection(('127.0.0.1', port)) as client:
+                peer, _ = listener.accept()
+                peer.close()  # The listener side enters TIME_WAIT after EOF/FIN.
+                self.assertEqual(client.recv(1), b'')
+        installer.check_ports(args)
 
     def test_retained_maintenance_helper_is_not_an_installed_server(self):
         helper = installer.path('/usr/local/libexec/argus-c2/install-server.py')

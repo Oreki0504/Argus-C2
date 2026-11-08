@@ -408,7 +408,11 @@ def check_ports(args):
     for port in ports:
         with socket.socket(family, socket.SOCK_STREAM) as sock:
             try:
+                # Match Go's listener: closed connections in TIME_WAIT do not
+                # prevent immediate reinstall. listen still rejects a live peer.
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind(('::' if family == socket.AF_INET6 else '0.0.0.0', port))
+                sock.listen(1)
             except OSError as exc:
                 raise InstallError(f'Port {port} is unavailable; existing services were left running.') from exc
 
