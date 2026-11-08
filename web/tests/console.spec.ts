@@ -180,6 +180,18 @@ test('token opens management first, then optional OAuth binds to the account', a
   await page.getByText('Configure sign-in providers (optional)', { exact: true }).click()
   await page.getByRole('checkbox', { name: 'Enable Google', exact: true }).check()
   for (const provider of ['GitHub', 'Google']) {
+    await page.getByText(`How to create a ${provider} OAuth app`, { exact: true }).click()
+    const guide = page.locator('.provider-guide').filter({ hasText: `How to create a ${provider}` })
+    const callback = await page.locator(`#${provider.toLowerCase()}-callback`).inputValue()
+    await expect(guide.locator('code').last()).toHaveText(callback)
+    await expect(guide.getByRole('link', { name: 'Official setup guide' })).toHaveAttribute(
+      'href',
+      /^https:\/\/(docs.github.com|developers.google.com)\//,
+    )
+    await expect(guide).toContainText('Save sign-in methods')
+    await page.getByText(`How to create a ${provider} OAuth app`, { exact: true }).click()
+  }
+  for (const provider of ['GitHub', 'Google']) {
     await page.getByLabel(`${provider} Client ID`, { exact: true }).fill('argus-preview')
     await page.getByLabel(`${provider} Client Secret`, { exact: true }).fill('preview-secret')
   }
@@ -217,6 +229,15 @@ test('token login is reusable without OAuth and mobile account settings fit', as
   await page.getByRole('checkbox', { name: 'Enable Google', exact: true }).check()
   await page.getByLabel('Google Client ID', { exact: true }).fill('google-preview')
   await page.getByLabel('Google Client Secret', { exact: true }).fill('only-this-app-secret')
+  await page.getByRole('button', { name: '切换为中文' }).click()
+  await page.getByRole('button', { name: '切换深色模式' }).click()
+  await page.getByText('如何创建 Google OAuth 应用', { exact: true }).click()
+  const guide = page.locator('.provider-guide')
+  await expect(guide).toContainText('Test users')
+  await expect(guide).toContainText('Authorized redirect URIs')
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
+  await page.screenshot({ path: '/tmp/argus-oauth-guide-mobile.png', fullPage: true })
+  await page.getByRole('button', { name: 'Switch to English' }).click()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )

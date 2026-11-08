@@ -1017,6 +1017,32 @@
     text-decoration: underline;
     text-underline-offset: 3px;
   }
+  .provider-guide {
+    margin: 0 0 10px;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .provider-guide summary {
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .provider-guide ol {
+    margin: 10px 0;
+    padding-left: 20px;
+  }
+  .provider-guide li + li {
+    margin-top: 8px;
+  }
+  .provider-guide code {
+    display: block;
+    padding: 6px 8px;
+    margin-top: 4px;
+    background: var(--subtle);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow-wrap: anywhere;
+    font-size: 11px;
+  }
   .callback-control {
     display: flex;
     align-items: center;

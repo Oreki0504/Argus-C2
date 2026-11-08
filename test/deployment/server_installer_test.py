@@ -536,7 +536,7 @@ class InstallerTests(unittest.TestCase):
         installer.mkdir(sentinel)
         (sentinel / 'identity').write_text('preserve')
         with patch.object(installer.shutil, 'which', return_value='/usr/bin/tool'):
-            with self.assertRaisesRegex(installer.InstallError, 'Existing installation'):
+            with self.assertRaisesRegex(installer.ExistingInstallationError, 'Existing Server deployment'):
                 installer.preflight(args)
         self.assertEqual((sentinel / 'identity').read_text(), 'preserve')
         outside = self.root / 'outside'

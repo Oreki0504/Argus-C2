@@ -170,3 +170,94 @@ class UninstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(installer.InstallError, 'not a standard'):
                 self.execute('server', '--purge', '--yes')
             self.assertEqual(calls, [])
+
+    def restore_fixture(self, component='server'):
+        self.fixture()
+        installer.mkdir(installer.path('/var/tmp'))
+        installer.write_new(installer.path('/etc/systemd/system/argus-c2-server.service.d/console.conf'), b'console settings')
+        for arch in ('amd64', 'arm64'):
+            installer.write_new(installer.path('/usr/local/share/argus-c2/agents/agent-linux-' + arch), b'agent binary')
+        with self.system():
+            self.execute(component, '--yes')
+        account = SimpleNamespace(pw_name='argus-' + component, pw_uid=os.geteuid(), pw_gid=os.getegid())
+        return account, installer.restore_archive(component)
+
+    def test_restore_reuses_identity_and_preserves_other_component(self):
+        account, backup = self.restore_fixture()
+        state = installer.path('/var/lib/argus-c2-server/preserved')
+        before = state.read_bytes()
+        shared = installer.path('/etc/sysusers.d/argus-c2.conf')
+        shared.write_text('u argus-agent - "updated agent definition"\n')
+        def validate(plan, *_args, **kwargs):
+            self.assertFalse(kwargs['allow_migration'])
+            plan['console_origin'] = 'https://argus.example.test:9443'
+        with self.system(account=account) as calls, patch.object(installer, 'validate_update', side_effect=validate), \
+                patch.object(installer, 'verify_updated_service'), contextlib.redirect_stdout(io.StringIO()) as out:
+            installer.restore_component('server')
+        self.assertEqual(state.read_bytes(), before)
+        self.assertEqual(installer.path('/usr/local/libexec/argus-c2/server').read_bytes(), b'server')
+        self.assertIn('updated agent definition', shared.read_text())
+        self.assertEqual(shared.read_text().count('u argus-server'), 1)
+        self.assertTrue(installer.path('/usr/local/libexec/argus-c2/agent').exists())
+        self.assertIn(['systemctl', 'enable', '--now', 'argus-console-renew.timer'], calls)
+        self.assertFalse(any('argus-c2-agent.service' in c for c in calls))
+        self.assertIn('https://argus.example.test:9443/login', out.getvalue())
+        self.assertTrue((backup / 'programs.tar').exists())
+
+    def test_restore_agent_checks_schema_without_migrating(self):
+        account, _ = self.restore_fixture('agent')
+        with self.system(account=account) as calls, patch.object(installer, 'validate_update') as validate, \
+                patch.object(installer, 'verify_updated_service'), contextlib.redirect_stdout(io.StringIO()):
+            installer.restore_component('agent')
+        self.assertFalse(validate.call_args.kwargs['allow_migration'])
+        self.assertIn(['systemctl', 'enable', '--now', 'argus-c2-agent.service'], calls)
+        self.assertFalse(any('argus-c2-server.service' in c for c in calls))
+
+    def test_restore_refuses_purge_archive_and_archive_path_escape(self):
+        account, backup = self.restore_fixture()
+        metadata = json.loads((backup / 'uninstall.json').read_text())
+        metadata['purge'] = True
+        (backup / 'uninstall.json').write_text(json.dumps(metadata))
+        with self.assertRaisesRegex(installer.InstallError, 'purged'):
+            installer.restore_archive('server')
+        metadata['purge'] = False
+        (backup / 'uninstall.json').write_text(json.dumps(metadata))
+        with tarfile.open(backup / 'programs.tar', 'a') as archive:
+            member = tarfile.TarInfo('../../outside')
+            member.size = 3
+            archive.addfile(member, io.BytesIO(b'bad'))
+        with self.system(account=account), self.assertRaisesRegex(installer.RestoreError, 'Unexpected'):
+            installer.restore_component('server')
+        self.assertFalse(installer.path('/usr/local/libexec/argus-c2/server').exists())
+
+    def test_restore_validation_failure_does_not_restore_programs_or_reset_data(self):
+        account, _ = self.restore_fixture()
+        with self.system(account=account), patch.object(installer, 'validate_update', side_effect=installer.InstallError('schema mismatch')), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(installer.RestoreError, 'schema mismatch'):
+            installer.restore_component('server')
+        self.assertFalse(installer.path('/usr/local/libexec/argus-c2/server').exists())
+        self.assertEqual(installer.path('/var/lib/argus-c2-server/preserved').read_bytes(), b'server')
+
+    def test_default_install_offers_restore_before_configuration_and_can_cancel(self):
+        self.restore_fixture()
+        args = installer.parser().parse_args([])
+        with patch('builtins.input', return_value='y'), patch.object(installer, 'restore_component') as restore, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(installer.existing_installation_action(args, True))
+            restore.assert_called_once_with('server')
+        with patch('builtins.input', return_value='n'), patch.object(installer, 'restore_component') as restore, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(installer.existing_installation_action(args, True))
+            restore.assert_not_called()
+        with self.assertRaisesRegex(installer.ExistingInstallationError, '--restore server'):
+            installer.existing_installation_action(args, False)
+
+    def test_existing_deployment_error_does_not_report_acme_failure(self):
+        self.fixture()
+        with contextlib.redirect_stderr(io.StringIO()) as out:
+            try:
+                installer.existing_installation_action(installer.parser().parse_args([]), False)
+            except installer.ExistingInstallationError as error:
+                installer.report_failure(error)
+        self.assertIn('--restore server', out.getvalue())
+        self.assertNotIn('letsencrypt.log', out.getvalue())

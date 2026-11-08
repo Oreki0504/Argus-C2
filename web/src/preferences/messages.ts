@@ -30,6 +30,30 @@ const chinese: Record<string, string> = {
   'OAuth is optional. Configure providers here, then bind your account above.':
     'OAuth 为可选功能。在此配置平台后，即可在上方绑定当前账号。',
   'Save sign-in methods': '保存登录方式',
+  'How to create a {provider} OAuth app': '如何创建 {provider} OAuth 应用',
+  'Open GitHub Settings → Developer settings → OAuth Apps → New OAuth App.':
+    '打开 GitHub 的 Settings → Developer settings → OAuth Apps → New OAuth App（OAuth 应用，不是 GitHub App）。',
+  'Set Application name to ARGUS and Homepage URL to:':
+    'Application name 填 ARGUS，Homepage URL 填写当前控制台地址：',
+  'Paste this exact address into Authorization callback URL, then click Register application:':
+    '将下面地址完整粘贴到 Authorization callback URL，然后点击 Register application：',
+  'Copy Client ID. Click Generate a new client secret, then paste both values into the fields below. Device Flow is not required.':
+    '复制 Client ID，点击 Generate a new client secret 生成密钥，将两者填入下方对应输入框。不需要启用 Device Flow。',
+  'In Google Cloud, select or create a project. Open Google Auth Platform and complete Branding with an app name, support email and developer contact.':
+    '在 Google Cloud 选择或新建项目。打开 Google Auth Platform，在 Branding 中填写应用名称、支持邮箱和开发者联系邮箱。',
+  'Under Audience, choose External for personal Google accounts. If the app is in Testing, add the Google account you will use under Test users.':
+    '个人 Google 账号在 Audience 中选择 External（外部）。若应用处于 Testing（测试）状态，在 Test users 中加入准备登录的 Google 账号。',
+  'Open Clients → Create client. Choose Web application, name it ARGUS, and add this address under Authorized redirect URIs:':
+    '进入 Clients → Create client，类型选择 Web application，名称填 ARGUS。在 Authorized redirect URIs 中添加以下地址：',
+  'Create the client and copy its Client ID and Client Secret into the fields below. Authorized JavaScript origins are not required for this server login flow.':
+    '创建后复制 Client ID 和 Client Secret，填入下方对应输入框。当前登录由服务端处理，不需要填写 Authorized JavaScript origins。',
+  'Click Save sign-in methods here, then Bind with Google or GitHub in the account card above. Complete authorization until the card shows Linked.':
+    '在此点击“保存登录方式”，再到上方账号卡片点击“绑定 Google / GitHub 账号”，完成跳转授权，直到卡片显示“已绑定”。',
+  'Keep the HTTPS scheme, hostname, port and callback path exactly as shown. If you see redirect_uri_mismatch, compare the full address in both places.':
+    'HTTPS 协议、域名、端口和回调路径必须与这里完全一致。遇到 redirect_uri_mismatch 时，请核对两处的完整地址。',
+  'Google requires an accepted HTTPS domain for a deployed app; a public IP address is not a valid redirect host. Use a domain for your Console before configuring Google.':
+    'Google 的线上回调需要使用符合要求的 HTTPS 域名，不能直接填写公网 IP；请先为 Console 配置域名，再配置 Google。',
+  'Official setup guide': '官方创建说明',
   'Loading account': '正在加载账号',
   'Loading providers': '正在加载登录方式',
   'No current login token? Run this command on your server, then read the new token file and refresh this page.':

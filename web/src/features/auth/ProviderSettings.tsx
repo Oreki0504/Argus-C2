@@ -5,6 +5,7 @@ import type { ProviderKind, Setup as SetupContract } from '../../api/contracts'
 import { ErrorState } from '../../components/ui'
 import { usePreferences } from '../../preferences/context'
 import { ProviderIcon } from '../auth/ProviderIcon'
+import { ProviderGuide } from './ProviderGuide'
 
 const names = { google: 'Google', github: 'GitHub', oidc: 'SSO' }
 const applications = {
@@ -101,6 +102,9 @@ export function ProviderSettings({
           return (
             <fieldset key={kind} className="provider-fieldset" disabled={busy}>
               <legend>{names[kind]}</legend>
+              {kind !== 'oidc' && (
+                <ProviderGuide kind={kind} callback={setup.callback_uris[kind]} />
+              )}
               {kind !== 'oidc' && (
                 <a
                   className="provider-app-link"

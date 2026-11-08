@@ -33,6 +33,7 @@ sudo cat /etc/argus-c2/setup/console-new.token
 点击顶栏账号图标或名称，进入 **账号与登录**：
 
 1. 尚未配置平台时，可以继续使用 Token。管理员需要 OAuth 时，展开 **配置第三方登录（可选）**。
+   每个平台的输入框旁提供 **如何创建 Google / GitHub OAuth 应用** 折叠教程，按当前界面语言显示。里面的主页与回调地址来自本机 Console 配置，可以直接照填；无需使用文档示例域名。
 2. 配置 Google、GitHub 或两者，保存登录方式。Auth0 / 自定义 OIDC 也可选。
 3. 在上方平台卡片点击 **绑定 Google / GitHub 账号**，跳转平台授权后返回，显示“已绑定”。
 4. 退出后可使用已绑定平台登录。Token 和 OAuth 对应同一本地管理员账号，共用权限，不会另建一位管理员。
@@ -51,17 +52,25 @@ sudo cat /etc/argus-c2/setup/console-new.token
 | Homepage URL | `https://argus.example.com:9443` |
 | Authorization callback URL | `https://argus.example.com:9443/v1/console/auth/callback/github` |
 
-以页面提供的回调地址为准，保留协议、端口和路径。Client ID / Secret 只填入当前 Console 的后台。请求范围为 `read:user`，不需要仓库权限。
+以页面提供的回调地址为准，保留协议、端口和路径。点击 **Register application** 后复制 **Client ID**，再点击 **Generate a new client secret** 生成密钥。两项分别填到当前 Console 的对应输入框；不需要启用 Device Flow。请求范围为 `read:user`，不需要仓库权限。保存登录方式后，还需点击上方账号卡片的“绑定 GitHub 账号”完成本人授权。
 
 ### Google 应用
 
-打开 [Google Auth Platform → Clients](https://console.cloud.google.com/auth/clients)，完成应用受众配置，创建 **Web application**。将页面提供的回调 URL 加入 **Authorized redirect URIs**：
+打开 [Google Auth Platform → Clients](https://console.cloud.google.com/auth/clients)：
+
+1. 选择或新建 Google Cloud 项目，在 **Branding** 填写应用名称、支持邮箱与开发者联系邮箱。
+2. 个人 Google 账号在 **Audience** 选择 **External**；Testing 状态下，将用于登录的账号加入 **Test users**。
+3. 进入 **Clients → Create client**，类型选择 **Web application**，名称填写 ARGUS。
+4. 将 Console 页面提供的回调 URL 加入 **Authorized redirect URIs**，例如：
 
 ```text
 https://argus.example.com:9443/v1/console/auth/callback/google
 ```
 
-使用 Google 接受的 HTTPS 域名；Testing 状态按平台要求加入测试用户。ARGUS 使用 Authorization Code + PKCE 和 `openid profile`。
+5. 创建后将 **Client ID** 和 **Client Secret** 分别填到 ARGUS 对应输入框。当前为服务端登录流程，不必填写 Authorized JavaScript origins。
+6. 保存登录方式，再点击上方“绑定 Google 账号”完成授权，确认显示“已绑定”。
+
+使用 Google 接受的 HTTPS 域名；部署时不能直接使用公网 IP 作为回调主机。遇到 `redirect_uri_mismatch`，核对协议、域名、端口和路径是否与页面完整一致，特别不要漏掉默认 Console 端口 `:9443`。ARGUS 使用 Authorization Code + PKCE 和 `openid profile`。参阅 [Google 官方配置说明](https://developers.google.com/identity/protocols/oauth2/web-server#creatingcred)。
 
 ## 本地恢复
 

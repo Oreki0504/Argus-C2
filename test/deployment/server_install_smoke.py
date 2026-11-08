@@ -213,11 +213,18 @@ def main():
         run('systemctl', 'is-active', '--quiet', 'argus-c2-agent.service')
         for p, contents in state_files.items():
             require(p.read_bytes() == contents, 'Keep-data uninstall altered identity.')
-        saved = max(Path('/var/lib/argus-c2-uninstall').glob('server-*'), key=lambda p: p.stat().st_mtime_ns)
-        run('tar', '-xpf', saved / 'programs.tar', '-C', '/')
-        run('systemctl', 'daemon-reload')
-        run('systemctl', 'enable', '--now', unit)
+        output = run(sys.executable, installer, '--restore', 'server', '--language', 'en')
+        require('No certificate was requested' in output, 'Restore did not confirm certificate reuse.')
         run('systemctl', 'is-active', '--quiet', unit)
+        for p, contents in state_files.items():
+            require(p.read_bytes() == contents, 'Restore altered identity.')
+        csrf = request('/v1/console/auth/status')['csrf_token']
+        require(request('/v1/console/auth/token', {'token': secret}, csrf)['principal_id'] == owner['principal_id'],
+                'Restore reset the owner or login token.')
+        run(sys.executable, installer, '--uninstall', 'agent', '--yes', '--language', 'en')
+        run(sys.executable, installer, '--restore', 'agent', '--language', 'en')
+        for p, contents in agent_identity.items():
+            require(p.read_bytes() == contents, 'Agent restore changed enrollment.')
         # Purge and reinstall: no leftover service account may block a new install.
         run(sys.executable, installer, '--uninstall', 'agent', '--purge', '--yes', '--language', 'en')
         require(not agent_state.exists() and not agent_binary.exists(), 'Agent purge retained active installation files.')
