@@ -9,6 +9,7 @@ import http.cookiejar
 import json
 import os
 from pathlib import Path
+import platform
 import pwd
 import shutil
 import ssl
@@ -187,13 +188,18 @@ def main():
         run('systemctl', 'is-active', '--quiet', 'argus-c2-agent.service')
         # No operator-created tasks: a new Console deployment must populate
         # the dashboard from the real Agent's local read-only collectors.
+        host_release = platform.freedesktop_os_release()
+        require(host_release['ID'] == 'ubuntu', 'Native installation fixture requires an Ubuntu runner.')
+        expected_os = f"Ubuntu {host_release['VERSION_ID']}"
         deadline = time.monotonic() + 120
         while True:
             nodes = request('/v1/console/summary')['nodes']
             if nodes and nodes[0]['resources']['cpu_percent'] is not None and nodes[0]['traffic']['inbound_bps'] is not None:
                 require(nodes[0]['resources']['memory_percent'] is not None, 'Missing memory observation.')
                 require(nodes[0]['resources']['disk_percent'] is not None, 'Missing disk observation.')
-                require(nodes[0]['system']['os'] == 'linux', 'Missing system information.')
+                require(nodes[0]['system']['os'] == expected_os,
+                        f"Expected {expected_os}, got {nodes[0]['system']['os']!r} in Console system information.")
+                require(nodes[0]['system']['architecture'] == 'amd64', 'Missing Agent architecture.')
                 require(nodes[0]['traffic']['inbound_capacity_bps'] is None, 'Invented link capacity.')
                 break
             require(time.monotonic() < deadline, 'Automatic metrics and two network samples did not reach Console.')
