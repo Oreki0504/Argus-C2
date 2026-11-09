@@ -1,8 +1,8 @@
-# Argus-C2
+# Argus
 
 [简体中文](README.zh-CN.md)
 
-Argus-C2 is a self-hosted Linux fleet diagnostics project. Administrators explicitly enroll nodes, request predefined read-only diagnostics through a CLI, and inspect heartbeat observations and task results. Each agent connects outbound with its own client certificate and runs as a non-root user.
+Argus is a self-hosted Linux fleet diagnostics project. Administrators explicitly enroll nodes, request predefined read-only diagnostics through a CLI, and inspect heartbeat observations and task results. Each agent connects outbound with its own client certificate and runs as a non-root user.
 
 **Status: under development, before an MVP release.** Enrollment, mTLS, task dispatch, local policy enforcement, persistent results, client certificate renewal, and node disabling are implemented and locally tested. Deployment and sustained operation on five independent VPS instances remain unvalidated. The documentation describes the current implementation and its validation limits.
 
