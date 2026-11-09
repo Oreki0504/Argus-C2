@@ -113,6 +113,8 @@ sudo python3 install-server.py \
 
 该流程需要仓库写权限。普通分支 commit/push 和前端 CI 不会自动发布版本，也不会擅自升级现有下载入口；推送版本 tag 表示明确发起发布。下载链接必须等这一发布流程成功完成后才能交给用户执行。
 
+默认不覆盖已有 Release。维护者明确要求重发同一个预览版本时，可在 annotated tag 的末尾添加 `Republish-Release: true` trailer，并使用针对旧 tag 对象的 `--force-with-lease` 推送。此模式只允许替换已有 prerelease：全部验证通过后，先临时转为草稿，再替换四份产物及说明，最后重新公开。下载地址保持不变，旧本地文件需要重新下载；正式版本不允许使用此流程覆盖。
+
 ## 安装完成后的配置
 
 安装器会：
@@ -220,7 +222,7 @@ curl -q --noproxy '*' --max-time 5 -H Metadata:true 'http://169.254.169.254/meta
 ( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.15/install-server.py -o "$f" && sudo python3 "$f" --update agent )
 ```
 
-已取得安装包目录时可运行 `sudo python3 install-server.py --update server --bundle /path/argus-server-linux-amd64.tar.gz`。同一脚本支持 `--release TAG`、`--release-base URL` 和原有 SHA-256 校验；默认使用下载脚本绑定的版本。更新时不重新询问域名、邮箱或证书，`--host` 等首次安装参数不适用。
+已取得安装包目录时可运行 `sudo python3 install-server.py --update server --bundle /path/argus-server-linux-amd64.tar.gz`。同一脚本支持 `--release TAG`、`--release-base URL` 和原有 SHA-256 校验；默认使用下载脚本绑定的版本。更新默认英文，即使在交互终端也不会询问语言；需要中文可显式传入 `--language zh-CN`。更新时不重新询问域名、邮箱或证书，`--host` 等首次安装参数不适用。
 
 更新顺序：先下载并校验包，再停止对应服务、锁定状态、备份旧程序及配置/身份/数据库，在数据库副本上运行新版本的兼容性检查，随后原子替换各程序并恢复服务。原先停止的服务仍保持停止。Server 更新不会启动或更新同机 Agent，也不会远程批量更新其他主机。
 

@@ -58,7 +58,7 @@ jobs:
           ARGUS_SERVER_TEST_BUNDLE: ${{ runner.temp }}/argus-release/argus-server-linux-amd64.tar.gz
       - name: Verify native Server installation and bootstrap on disposable VM
         run: sudo env GITHUB_ACTIONS=true python3 test/deployment/server_install_smoke.py --disposable-ci --bundle "$RUNNER_TEMP/argus-release/argus-server-linux-amd64.tar.gz"
-      - name: Publish verified assets without replacing an existing release
+      - name: Publish verified assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -80,6 +80,8 @@ jobs:
           ```
 
           The updater preserves node ID, certificates, configuration, policy and database state, creates a private backup, and restores the previous program if the update fails. It requires a standard Linux/systemd installation. Run it on each Agent host; upgrading Server does not upgrade deployed Agents.
+
+          Server and Agent updates now default to English without asking for a language, including in interactive terminals. An explicit `--language zh-CN` still selects Chinese. First-time interactive installation retains its language choice. This preview was republished with the installer fix; download the script again from the same URL to obtain it.
 
           System information is collected automatically about once an hour when Console monitoring is enabled and local policy permits it. An administrator can dispatch `system.info` to refresh it immediately after updating. Overview refreshes every 30 seconds. An existing Server with distribution-aware summaries can display the new value without a Server upgrade.
 
@@ -107,10 +109,23 @@ jobs:
           PY
           flags=()
           if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); else flags+=(--latest); fi
-          gh release create "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
-            --title "ARGUS $RELEASE_TAG" --notes-file "$RUNNER_TEMP/argus-release-notes.md" \
-            install-server.py SHA256SUMS argus-server-linux-amd64.tar.gz argus-server-linux-arm64.tar.gz
+          republish=$(git -C "$GITHUB_WORKSPACE" tag -l "$RELEASE_TAG" --format='%(contents:trailers:key=Republish-Release,valueonly)')
+          if [[ "$republish" == true ]]; then
+            # Only an explicitly annotated preview tag may replace an existing
+            # prerelease. All build and installation checks above must pass first.
+            [[ "$RELEASE_TAG" == *-* ]] || { echo 'Only previews may be republished.' >&2; exit 1; }
+            [[ $(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease') == true ]] || { echo 'The existing release must be a prerelease.' >&2; exit 1; }
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=true
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+              install-server.py SHA256SUMS argus-server-linux-amd64.tar.gz argus-server-linux-arm64.tar.gz
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "ARGUS $RELEASE_TAG" --notes-file "$RUNNER_TEMP/argus-release-notes.md"
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+              --title "ARGUS $RELEASE_TAG" --notes-file "$RUNNER_TEMP/argus-release-notes.md" \
+              install-server.py SHA256SUMS argus-server-linux-amd64.tar.gz argus-server-linux-arm64.tar.gz
+          fi
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false "${flags[@]}"
 
 

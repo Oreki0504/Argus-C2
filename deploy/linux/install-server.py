@@ -81,7 +81,7 @@ def choose_language(args, interactive):
     global LANGUAGE
     if args.language:
         LANGUAGE = args.language
-    elif interactive:
+    elif interactive and not args.update:
         print('请选择语言 / Choose a language:\n1. 中文\n2. English')
         choice = input('选择 / Select [1/2, default 1]: ').strip() or '1'
         if choice not in ('1', '2'):

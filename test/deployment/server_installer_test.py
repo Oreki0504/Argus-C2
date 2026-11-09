@@ -125,6 +125,29 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.text('hello', '你好'), '你好')
             read.assert_not_called()
 
+    def test_update_on_a_terminal_never_prompts_for_language(self):
+        installer.mkdir(installer.path('/run'))
+        for component in ('server', 'agent'):
+            for language in (None, 'en', 'zh-CN'):
+                flags = ['--update', component]
+                if language:
+                    flags += ['--language', language]
+                with self.subTest(component=component, language=language), \
+                        patch.dict(os.environ), patch.object(installer.os, 'umask'), \
+                        patch.object(installer.os, 'geteuid', return_value=0), \
+                        patch.object(installer.sys.stdin, 'isatty', return_value=True), \
+                        patch.object(installer, 'LANGUAGE', 'zh-CN'), \
+                        patch.object(installer, 'architecture', return_value='amd64'), \
+                        patch.object(installer, 'update_plan', side_effect=installer.UpdatePreflightError('test preflight')) as preflight, \
+                        patch('builtins.input', side_effect=AssertionError('Update must not prompt')) as read, \
+                        contextlib.redirect_stdout(io.StringIO()) as output:
+                    with self.assertRaisesRegex(installer.UpdatePreflightError, 'test preflight'):
+                        installer.main(flags)
+                    self.assertEqual(installer.LANGUAGE, language or 'en')
+                    self.assertEqual(output.getvalue(), '')
+                    read.assert_not_called()
+                    preflight.assert_called_once_with(component, 'amd64')
+
     @contextlib.contextmanager
     def update_preflight_host(self, *, component='server', installed=False, load_state='not-found'):
         installer.mkdir(installer.path('/run/systemd/system'))

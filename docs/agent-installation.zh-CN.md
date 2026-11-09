@@ -68,6 +68,8 @@ sudo journalctl -u argus-c2-agent.service -n 50 --no-pager
 
 使用新版发布脚本的 `--update agent`，在 Agent 主机本地执行，完整命令见 [Server／Agent 更新](server-installation.zh-CN.md#更新-server-或-agent)。它下载并校验当前架构包、停止 Agent、备份身份与待发送结果、检查数据库副本后替换程序，再恢复原服务状态；失败时恢复旧程序。注册证书、节点 ID、策略和现有数据库保留，不需要新的注册 Token。
 
+更新默认英文，不再要求选择语言；如需中文，显式添加 `--language zh-CN`。
+
 `v0.1.0-preview.15` 的 Agent 开始上报具体发行版及版本，例如 `Debian 13`、`Ubuntu 24.04`。已有主机需要逐台执行上述更新；新 `system.info` 结果上报后，Overview 和详情页显示发行版、版本与架构。可以等待每小时的自动采集，或在管理页手动下发 `system.info`。更新 Server 只会更新供新主机安装的 Agent 文件，不会替换远端已经运行的 Agent。
 
 ## 卸载
