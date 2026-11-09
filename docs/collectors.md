@@ -19,16 +19,19 @@ Failed and unknown results have a `{}` payload and do not retain partial collect
 
 ## system.info
 
-Parameters are `{}`. Reads fixed `/proc` data and the hostname, returning:
+Parameters are `{}`. Reads fixed `/proc` data, Linux `os-release`, and the hostname, returning:
 
 | Field | Meaning |
 | --- | --- |
 | `available` | Whether hostname, kernel, and boot time were obtained |
-| `os` / `architecture` | Go platform names, such as `linux` / `amd64` |
+| `os` | Recognized Linux distribution and numeric release, such as `Debian 13` or `Ubuntu 24.04`; falls back to `linux` if unavailable or unrecognized |
+| `architecture` | Go architecture name, such as `amd64` or `arm64` |
 | `hostname` / `kernel` | Hostname and kernel version |
 | `boot_time` | Boot time as Unix seconds |
 
-`os` is a platform name, not a Linux distribution or release. When unavailable, hostname and kernel are empty and boot time is 0; these zero values do not describe the host's actual state. Implementation: [system/linux.go](../internal/collectors/system/linux.go).
+Distribution information comes from `ID` and `VERSION_ID` in `/etc/os-release`, falling back to `/usr/lib/os-release` if the first file cannot be read. Symlinks are resolved and reads are limited to 16 KiB; the file is never executed. Rolling distributions without a numeric release report just their name. Console Overview and node details use this value. Existing nodes need an updated Agent and a new `system.info` result (automatically scheduled hourly when Console is enabled, or dispatched by an administrator).
+
+When unavailable, hostname and kernel are empty and boot time is 0; these zero values do not describe the host's actual state. Implementation: [system/linux.go](../internal/collectors/system/linux.go), [system/os_release_linux.go](../internal/collectors/system/os_release_linux.go).
 
 ## system.metrics
 

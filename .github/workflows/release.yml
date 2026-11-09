@@ -67,53 +67,41 @@ jobs:
           python3 - <<'PY'
           import os, pathlib
           tag = os.environ['RELEASE_TAG']
-          url = f'https://github.com/Oreki0504/Argus-C2/releases/download/{tag}/install-server.py'
+          url = f'https://github.com/{os.environ["GITHUB_REPOSITORY"]}/releases/download/{tag}/install-server.py'
           command = f'''( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' '{url}' -o "$f" && sudo python3 "$f" )'''
-          notes = f'''Install ARGUS Server on a new Linux/systemd host (x86_64 or ARM64):
+          agent_update = command.replace('sudo python3 "$f" )', 'sudo python3 "$f" --update agent )')
+          server_update = command.replace('sudo python3 "$f" )', 'sudo python3 "$f" --update server )')
+          notes = f'''Linux Agents now report the installed distribution and numeric release from `os-release`. Overview and node details show values such as `Debian 13 · amd64` and `Ubuntu 24.04 · arm64` after a new `system.info` result. Previously, Agents reported only `linux`.
+
+          Update each existing Agent host to enable this change:
+
+          ```sh
+          {agent_update}
+          ```
+
+          The updater preserves node ID, certificates, configuration, policy and database state, creates a private backup, and restores the previous program if the update fails. It requires a standard Linux/systemd installation. Run it on each Agent host; upgrading Server does not upgrade deployed Agents.
+
+          System information is collected automatically about once an hour when Console monitoring is enabled and local policy permits it. An administrator can dispatch `system.info` to refresh it immediately after updating. Overview refreshes every 30 seconds. An existing Server with distribution-aware summaries can display the new value without a Server upgrade.
+
+          Distribution detection reads bounded local `/etc/os-release` or `/usr/lib/os-release` files, supports their symlinks, and uses recognized IDs and numeric versions without executing shell content. Recognized rolling distributions can report their name without a version. Missing or unrecognized data retains the `linux` fallback. Public summaries continue to expose only the existing restricted OS vocabulary.
+
+          Agent schema 101, Server schema 104 and protocol 1 are unchanged. Tests cover distribution parsing, fallback and file precedence, symlinks, size limits, and public OS/architecture projection. The release pipeline validates Go tests, frontend checks, both architecture bundles and native Server installation before publication.
+
+          Update Server to refresh its hosted Agent installation binaries for future installations:
+
+          ```sh
+          {server_update}
+          ```
+
+          To install Server on a new Linux/systemd host:
 
           ```sh
           {command}
           ```
 
-          Console UI now uses a monochrome Geist aesthetic with a four-card Bento summary row (including fleet-wide network totals and live throughput rates), compact strip/card view switching, multi-metric sorting, severity-based utilization meters, equal-height offline cards, interactive SVG history charts without native range sliders, and segmented pill navigation across Management, Traffic, Account & sign-in, and Setup.
+          Assets include the version-pinned installer, SHA256SUMS, and Linux amd64/arm64 Server bundles containing both Agent architectures. Target hosts do not need Go or Node. Existing Agent hosts use `--update agent`; the Console-generated Add Agent command remains for new installations.
 
-          Fix GitHub OAuth linking/sign-in rejected with `oauth_issuer_mismatch`: validate the authorization-response issuer against GitHub's published `https://github.com/login/oauth`, separately from ARGUS's stable `https://github.com` account namespace. Existing accounts, app credentials and callback URLs are preserved. No OAuth app recreation or database migration is needed; update Server and start a fresh binding attempt.
-
-          Regression fixtures now include GitHub's actual issuer. Tests reproduce the old failure, verify linking and sign-in, preserve older identities, and reject duplicate, empty or incorrect issuer values before code exchange. State, callback binding and PKCE checks remain enforced.
-
-          Admin can now rename or delete Agents in Management. Public names update in Overview. Deletion revokes the identity and removes task/metric history while retaining audit; it does not uninstall the remote host.
-
-          Account & sign-in can permanently disable the original administrator Token after successful OAuth login or binding within ten minutes. Token-only sessions are revoked, OAuth sessions remain, and removing the last linked provider is blocked. Server-local recovery remains available.
-
-          GitHub callback errors now distinguish missing cookies, expired/replaced flows, state/path/issuer mismatches, configuration changes and account-state failures. These diagnostics preserve all authentication checks; this release fixes the reproduced GitHub issuer mismatch described above.
-
-          These changes require only a Server update. Server schema 104, Agent schema 101 and protocol 1 are unchanged.
-
-          New installations now serve Console HTTPS on port 443 as the dedicated non-root service user; existing updates/restores retain their configured ports and OAuth callbacks. Fleet remains on 8443.
-
-          Console now collects system information hourly and resource metrics each minute through idle Agent polls, respecting local policy and existing queued work. Updated Agents automatically select default-route network interfaces when the local list is empty. Two recent samples provide average network rates; bandwidth capacity/percentages and traffic totals remain unavailable. Monitoring history uses ordinary task retention.
-
-          Account settings now put OAuth app configuration before personal identity linking. GitHub requests explicitly negotiate JSON and include a User-Agent; failures distinguish credentials, callback, code, profile and upstream problems, with secret-free stage diagnostics.
-
-          Agent install output includes a downloadable uninstall/purge command. `--uninstall agent --purge` removes current programs, service, configuration, identity, database and the dedicated account; delete or disable the registered Agent in Console when retiring it. Historical backups remain.
-
-          The installer first asks for Chinese or English, downloads and verifies the matching bundle, and configures HTTPS. On success, it prints `/login` and the private administrator token path. An interactive terminal displays the token; redirected output does not. Read it locally with `sudo cat /etc/argus-c2/setup/console.token`.
-
-          Enter this random token to open administrator management immediately. It remains usable after logout or restart until explicitly disabled. Google, GitHub and custom OIDC are optional in Account & sign-in: configure providers later and explicitly bind identities to the same local account. Token login never requires an OAuth application. OAuth itself still requires the operator's app credentials once, in the optional settings page.
-
-          To update a standard installation, append `--update server` or `--update agent` to the Python invocation above. Server schema 102/103 is backed up, migrated to 104 on a copy, checked, and applied while stopped. Existing users, provider identities and Fleet data are preserved. An uninitialized Console receives a fresh token; use the path printed by the updater. Activated accounts are never automatically replaced. Schema 104 cannot run older binaries. If schema replacement has started and service checks fail, the updater keeps the new programs and current data and stops the service for recovery rather than rewinding possibly accepted work.
-
-          Uninstall is included in this same script: append `--uninstall server` or `--uninstall agent`. It shows the removal plan and asks for confirmation, then stops/disables only that component and removes programs/services while keeping configuration, database, certificates and identity. Add `--dry-run` to inspect without changes. Add `--purge` to delete the current component data and dedicated account for a fresh install; historical backups, the maintenance helper and Certbot installation remain. Purge requires typing `purge server` or `purge agent`; `--yes` is the explicit noninteractive confirmation. No bundle download or ACME operation is performed for uninstall.
-
-          Keep-data uninstall can now be resumed with `--restore server` or `--restore agent`. A normal interactive Server install detects retained data and offers restoration before asking for domain, email or certificate terms. Restore validates the archived programs against a copy of the retained database, restores only programs/service definitions, and reuses the existing certificates, identity and login. No certificate is requested and no schema is migrated. It restores the archived version; update separately afterward for new features.
-
-          Account & sign-in now includes collapsible English/Chinese Google and GitHub OAuth application tutorials with the current Console callback URL, provider-console links, client type/credentials instructions, Google test-user setup and common redirect mismatch guidance.
-
-          Update failures now print the failing stage and command exit code. Bounded command diagnostics are saved to the private backup's `failure.json`; never publish this file without reviewing it for credentials. The pipeline verifies native schema 103 migration, keep-data uninstall/restore, component isolation and purge/reinstall.
-
-          Certificate failures now distinguish connection, DNS, challenge-response and local port errors without exposing tokens. The installer prints the exact `/var/lib/argus-certbot/logs/letsencrypt.log` path and a command to inspect it. Early installation failures preserve the Certbot environment and ACME state for a retry.
-
-          Public certificate issuance requires inbound TCP 80; private LAN IPs use a separately trusted local CA. Existing Server installations are preserved. See `docs/server-installation.zh-CN.md` at this tag for deployment and renewal details.
+          See `docs/server-installation.zh-CN.md` and `docs/agent-installation.zh-CN.md` at this tag for installation, update and recovery details.
           '''
           pathlib.Path(os.environ['RUNNER_TEMP'], 'argus-release-notes.md').write_text(notes)
           PY

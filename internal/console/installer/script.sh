@@ -87,6 +87,6 @@ systemctl is-active --quiet argus-c2-agent.service || fail 'Agent was enrolled b
 printf '%s\n' 'ARGUS Agent installed, enrolled and started as argus-agent.' 'Refresh the Agents page to check the first heartbeat.'
 printf '%s\n' 'Console monitoring collects system information and metrics automatically; allow about one minute for the first measurements.' 'Uninstall or remove current Agent data and identity on THIS Agent host (confirmation required):'
 cat <<'ARGUS_UNINSTALL'
-( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.12/install-server.py -o "$f" && sudo python3 "$f" --uninstall agent --purge )
+( f=$(mktemp) || exit 1; trap 'rm -f -- "$f"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' https://github.com/Oreki0504/Argus-C2/releases/download/v0.1.0-preview.14/install-server.py -o "$f" && sudo python3 "$f" --uninstall agent --purge )
 ARGUS_UNINSTALL
 printf '%s\n' 'Omit --purge to keep Agent data for restoration; add --dry-run to preview removal.' 'Purge keeps historical backups. Delete or disable the Agent in Console Management when retiring it.'

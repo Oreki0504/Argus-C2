@@ -145,6 +145,7 @@ func information(ctx context.Context) (protocol.SystemInformation, error) {
 	if err := ctx.Err(); err != nil {
 		return i, err
 	}
+	i.OS = linuxDistribution("/etc/os-release", "/usr/lib/os-release")
 	stat := readFixed("/proc/stat", 256*1024)
 	host, err := os.Hostname()
 	kernel := strings.TrimSpace(readFixed("/proc/sys/kernel/osrelease", 4096))
